@@ -1,0 +1,209 @@
+diff --git a/api/poh.py b/api/poh.py
+new file mode 100644
+index 0000000..e1f5a7b
+--- /dev/null
++++ b/api/poh.py
+@@
++from fastapi import APIRouter, HTTPException
++from pydantic import BaseModel
++from weall_runtime import poh
++
++router = APIRouter()
++
++class VerificationRequest(BaseModel):
++    user_id: str
++    level: int  # desired PoH level
++
++class EvidenceSubmission(BaseModel):
++    user_id: str
++    evidence_cid: str
++
++# POST /verification/request
++@router.post("/verification/request")
++async def request_verification(req: VerificationRequest):
++    try:
++        result = poh.initiate_verification(req.user_id, req.level)
++        return {"ok": True, "status": result}
++    except Exception as e:
++        raise HTTPException(status_code=400, detail=str(e))
++
++# GET /verification/status
++@router.get("/verification/status")
++async def verification_status(user_id: str):
++    try:
++        status = poh.get_verification_status(user_id)
++        return {"ok": True, "status": status}
++    except Exception as e:
++        raise HTTPException(status_code=400, detail=str(e))
++
++# POST /verification/submit-evidence
++@router.post("/verification/submit-evidence")
++async def submit_evidence(data: EvidenceSubmission):
++    try:
++        result = poh.submit_evidence(data.user_id, data.evidence_cid)
++        return {"ok": True, "result": result}
++    except Exception as e:
++        raise HTTPException(status_code=400, detail=str(e))
+diff --git a/weall_runtime/poh.py b/weall_runtime/poh.py
+new file mode 100644
+index 0000000..c4f0a6e
+--- /dev/null
++++ b/weall_runtime/poh.py
+@@
++from weall_runtime.wallet import mint_nft
++from app_state.ledger import ledger
++from weall_runtime.poh_sync import broadcast_verification_state
++
++verification_states = {}  # user_id -> {"level": int, "status": "pending/approved/rejected"}
++
++def initiate_verification(user_id: str, level: int):
++    verification_states[user_id] = {"level": level, "status": "pending"}
++    broadcast_verification_state(user_id)
++    return verification_states[user_id]
++
++def get_verification_status(user_id: str):
++    return verification_states.get(user_id, {"level": 0, "status": "unregistered"})
++
++def submit_evidence(user_id: str, evidence_cid: str):
++    if user_id not in verification_states:
++        raise ValueError("user not registered for verification")
++    verification_states[user_id]["evidence"] = evidence_cid
++    result = process_verification_result(user_id, approved=True)
++    return result
++
++def process_verification_result(user_id: str, approved: bool):
++    if approved:
++        verification_states[user_id]["status"] = "approved"
++        ledger.add_to_pool("operators", user_id)
++        nft_metadata = f"PoH NFT for {user_id}"
++        mint_nft(user_id, f"poh-{user_id}", nft_metadata)
++        ledger.record_mint_event(user_id, f"poh-{user_id}")
++    else:
++        verification_states[user_id]["status"] = "rejected"
++        ledger.slash(user_id, 10, "juror_penalty")
++    broadcast_verification_state(user_id)
++    return verification_states[user_id]
+diff --git a/weall_runtime/poh_sync.py b/weall_runtime/poh_sync.py
+new file mode 100644
+index 0000000..a7b2c1f
+--- /dev/null
++++ b/weall_runtime/poh_sync.py
+@@
++from weall_runtime.poh import verification_states
++
++def broadcast_verification_state(user_id: str):
++    state = verification_states.get(user_id)
++    print(f"[SYNC] Broadcasting {user_id} state: {state}")
+diff --git a/weall_runtime/wallet.py b/weall_runtime/wallet.py
+new file mode 100644
+index 0000000..b3c6f9a
+--- /dev/null
++++ b/weall_runtime/wallet.py
+@@
++from executor import WeAllExecutor
++
++executor = WeAllExecutor(dsl_file="weall_dsl_v0.5.yaml")
++
++def mint_nft(account: str, nft_id: str, metadata: str):
++    return executor.mint_nft(account, nft_id, metadata)
+diff --git a/ipfs/client.py b/ipfs/client.py
+new file mode 100644
+index 0000000..f5b3c2d
+--- /dev/null
++++ b/ipfs/client.py
+@@
++import ipfshttpclient
++from cryptography.hazmat.primitives import serialization, hashes
++from cryptography.hazmat.primitives.asymmetric import padding
++
++client = ipfshttpclient.connect()
++
++def store(content: bytes, encrypt_with_pub_key=None) -> str:
++    if encrypt_with_pub_key:
++        content = encrypt_with_pub_key.encrypt(
++            content,
++            padding.OAEP(mgf=padding.MGF1(algorithm=hashes.SHA256()),
++                         algorithm=hashes.SHA256(),
++                         label=None)
++        )
++    res = client.add_bytes(content)
++    return res
+diff --git a/app_state/ledger.py b/app_state/ledger.py
+index 1234567..abcdef0 100644
+--- a/app_state/ledger.py
++++ b/app_state/ledger.py
+@@
++ledger_entries = []
++
++class Ledger:
++    def record_mint_event(self, user_id: str, nft_id: str):
++        ledger_entries.append({"type": "mint", "user": user_id, "nft_id": nft_id})
++
++    def record_slash(self, user_id: str, amount: int, reason: str):
++        ledger_entries.append({"type": "slash", "user": user_id, "amount": amount, "reason": reason})
+diff --git a/weall_runtime/sync.py b/weall_runtime/sync.py
+new file mode 100644
+index 0000000..c1f9e2a
+--- /dev/null
++++ b/weall_runtime/sync.py
+@@
++from weall_runtime.poh import verification_states
++
++def sync_verification_state(user_id: str):
++    state = verification_states.get(user_id)
++    print(f"[SYNC] Node synced state for {user_id}: {state}")
+diff --git a/api/verification.py b/api/verification.py
+new file mode 100644
+index 0000000..d9a7b5c
+--- /dev/null
++++ b/api/verification.py
+@@
++from fastapi import APIRouter
++from pydantic import BaseModel
++from weall_runtime import poh
++
++router = APIRouter()
++
++class WebRTCSession(BaseModel):
++    user_id: str
++    session_id: str
++    jurors: list
++
++@router.post("/webrtc/start")
++async def start_webrtc(session: WebRTCSession):
++    print(f"Starting WebRTC session {session.session_id} for {session.user_id}")
++    return {"ok": True, "session_id": session.session_id}
++
++@router.post("/webrtc/complete")
++async def complete_webrtc(session: WebRTCSession):
++    evidence_cid = f"webrtc-recording-{session.session_id}"
++    poh.submit_evidence(session.user_id, evidence_cid)
++    return {"ok": True, "status": poh.get_verification_status(session.user_id)}
+diff --git a/tests/test_poh.py b/tests/test_poh.py
+new file mode 100644
+index 0000000..e4a9c1b
+--- /dev/null
++++ b/tests/test_poh.py
+@@
++import pytest
++from weall_runtime import poh
++from app_state import ledger
++
++def test_verification_flow():
++    user_id = "alice"
++    poh.initiate_verification(user_id, level=3)
++    status = poh.get_verification_status(user_id)
++    assert status["status"] == "pending"
++
++    poh.submit_evidence(user_id, "dummy-cid")
++    status = poh.get_verification_status(user_id)
++    assert status["status"] == "approved"
++    assert user_id in ledger.ledger_entries[-1]["user"]
++
++def test_slashing():
++    user_id = "bob"
++    poh.initiate_verification(user_id, level=3)
++    poh.process_verification_result(user_id, approved=False)
++    status = poh.get_verification_status(user_id)
++    assert status["status"] == "rejected"
++    assert ledger.ledger_entries[-1]["type"] == "slash"

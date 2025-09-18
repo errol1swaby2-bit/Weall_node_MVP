@@ -1,0 +1,28 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <title>WeAll Sign Up</title>
+    <link rel="stylesheet" href="style.css">
+</head>
+<body>
+    <header>
+        <h1>Welcome to WeAll</h1>
+    </header>
+    <main>
+        <form id="signup-form">
+            <label>User ID: <input type="text" id="user-id"></label>
+            <label>PoH Level:
+                <select id="poh-level">
+                    <option value="1">1 – Guest</option>
+                    <option value="2">2 – Async Verified</option>
+                    <option value="3">3 – Live Verified</option>
+                </select>
+            </label>
+            <button type="button" onclick="signUp()">Sign Up</button>
+        </form>
+        <div id="signup-result"></div>
+    </main>
+    <script src="main.js"></script>
+</body>
+</html>

@@ -12,9 +12,10 @@ from api import (
     messaging,
     disputes,
     pinning,
+    verification,   # ✅ make sure this line is here
 )
 
-# Create the FastAPI app first
+# Create the FastAPI app
 app = FastAPI(
     title="WeAll Node API",
     description="Backend node API for WeAll network (governance, PoH, ledger, content, disputes, etc.)",
@@ -32,6 +33,7 @@ app.include_router(content.router, prefix="/content", tags=["Content"])
 app.include_router(messaging.router, prefix="/messaging", tags=["Messaging"])
 app.include_router(disputes.router, prefix="/disputes", tags=["Disputes"])
 app.include_router(pinning.router, prefix="/pinning", tags=["Pinning / Storage"])
+app.include_router(verification.router, prefix="/verification", tags=["Verification"])  # ✅ new unified API
 
 # Root endpoint
 @app.get("/")

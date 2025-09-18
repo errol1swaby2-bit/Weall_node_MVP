@@ -1,0 +1,161 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>WeAll App</title>
+<script src="https://cdn.tailwindcss.com"></script>
+<style>
+  .loader { border-top-color: transparent; border-bottom-color: transparent; }
+  .tab-active { border-b-2 border-blue-500 font-bold text-blue-500; }
+  .card:hover { transform: translateY(-2px); box-shadow: 0 6px 18px rgba(0,0,0,0.1); transition: all 0.2s; }
+</style>
+</head>
+<body class="bg-gray-100 font-sans h-screen">
+
+<div id="app" class="flex flex-col h-screen"></div>
+
+<script>
+const state = { user: null, pohLevel: null, nftMinted: false, posts: [] };
+const API_BASE = "http://127.0.0.1:8000/"; // adjust for backend
+
+function apiCall(path, method="GET", body=null){
+  const opts = { method, headers: {"Content-Type":"application/json"} };
+  if(body) opts.body = JSON.stringify(body);
+  return fetch(API_BASE + path, opts).then(r => r.json());
+}
+
+function clearApp(){ document.getElementById('app').innerHTML = ''; }
+
+// ---------------------------
+// Landing / Login / Signup
+// ---------------------------
+function showLanding(){
+  clearApp();
+  document.getElementById('app').innerHTML = `
+    <div class="flex flex-col items-center justify-center flex-1 space-y-4">
+      <h1 class="text-4xl font-bold text-blue-600">WeAll</h1>
+      <button id="loginBtn" class="bg-blue-500 text-white px-8 py-3 rounded hover:bg-blue-600">Login</button>
+      <button id="signupBtn" class="bg-green-500 text-white px-8 py-3 rounded hover:bg-green-600">Sign Up</button>
+    </div>`;
+  document.getElementById('loginBtn').onclick = showLogin;
+  document.getElementById('signupBtn').onclick = showSignup;
+}
+
+function showLogin(){
+  clearApp();
+  document.getElementById('app').innerHTML = `
+    <div class="bg-white p-8 rounded shadow-md w-80 mx-auto mt-24 space-y-4">
+      <h2 class="text-2xl font-bold text-center">Login</h2>
+      <input id="loginUser" placeholder="User ID" class="border p-2 w-full rounded"/>
+      <button id="loginSubmit" class="bg-blue-500 text-white w-full py-2 rounded hover:bg-blue-600">Login</button>
+      <p class="text-gray-500 text-center cursor-pointer" id="backLanding">Back</p>
+    </div>`;
+  document.getElementById('loginSubmit').onclick = async () => {
+    const user = document.getElementById('loginUser').value.trim();
+    if(!user) return;
+    const res = await apiCall('list_user_posts/' + user);
+    if(res.posts !== undefined){ state.user=user; showPoHSelection(); }
+    else alert("User not found");
+  };
+  document.getElementById('backLanding').onclick = showLanding;
+}
+
+function showSignup(){
+  clearApp();
+  document.getElementById('app').innerHTML = `
+    <div class="bg-white p-8 rounded shadow-md w-80 mx-auto mt-24 space-y-4">
+      <h2 class="text-2xl font-bold text-center">Sign Up</h2>
+      <input id="signupUser" placeholder="User ID" class="border p-2 w-full rounded"/>
+      <button id="signupSubmit" class="bg-green-500 text-white w-full py-2 rounded hover:bg-green-600">Sign Up</button>
+      <p class="text-gray-500 text-center cursor-pointer" id="backLanding2">Back</p>
+    </div>`;
+  document.getElementById('signupSubmit').onclick = async () => {
+    const user = document.getElementById('signupUser').value.trim();
+    if(!user) return;
+    const res = await apiCall('register','POST',{user_id:user,poh_level:1});
+    if(res.ok){ state.user=user; showPoHSelection(); }
+    else alert(res.error || "Signup failed");
+  };
+  document.getElementById('backLanding2').onclick = showLanding;
+}
+
+// ---------------------------
+// PoH NFT Minting
+// ---------------------------
+function showPoHSelection(){
+  clearApp();
+  document.getElementById('app').innerHTML = `
+    <div class="bg-white p-8 rounded shadow-md w-80 mx-auto mt-24 text-center space-y-4">
+      <h2 class="text-xl font-bold">Select PoH NFT Level</h2>
+      <div class="flex flex-col space-y-2">
+        <button class="p-2 bg-gray-200 rounded hover:bg-gray-300" onclick="mintNFT(1)">Guest</button>
+        <button class="p-2 bg-gray-200 rounded hover:bg-gray-300" onclick="mintNFT(2)">Async Verified</button>
+        <button class="p-2 bg-gray-200 rounded hover:bg-gray-300" onclick="mintNFT(3)">Live Verified</button>
+      </div>
+      <p class="text-gray-500 cursor-pointer" onclick="showLanding()">Back</p>
+    </div>`;
+}
+
+async function mintNFT(level){
+  state.pohLevel = level;
+  clearApp();
+  document.getElementById('app').innerHTML = `
+    <div class="flex flex-col items-center justify-center h-screen space-y-4">
+      <p class="text-gray-700">Minting your PoH NFT...</p>
+      <div class="loader border-t-4 border-b-4 border-blue-500 w-12 h-12 rounded-full animate-spin"></div>
+    </div>`;
+  const res = await apiCall('register','POST',{user_id:state.user,poh_level:level});
+  if(res.ok){ state.nftMinted=true; showHome(); }
+  else{ alert(res.error||"Minting failed"); showPoHSelection(); }
+}
+
+// ---------------------------
+// Home Page with Tabs
+// ---------------------------
+function showHome(){
+  clearApp();
+  document.getElementById('app').innerHTML = `
+    <div class="flex flex-col h-screen">
+      <div class="bg-white shadow flex justify-between items-center px-4 py-3">
+        <h1 class="text-xl font-bold text-blue-600">WeAll</h1>
+        <span class="text-gray-700 text-sm">${state.user} | PoH: ${state.pohLevel}</span>
+      </div>
+      <div id="contentArea" class="flex-1 overflow-y-auto p-4"></div>
+      <div class="bg-white shadow flex justify-around p-3 fixed bottom-0 w-full">
+        <button onclick="showFeed()" id="tabFeed" class="tabBtn">Feed</button>
+        <button onclick="showGovernance()" id="tabGovernance" class="tabBtn">Governance</button>
+        <button onclick="showProfile()" id="tabProfile" class="tabBtn">Profile</button>
+      </div>
+    </div>`;
+  showFeed();
+}
+
+// ---------------------------
+// Feed
+// ---------------------------
+async function showFeed(){
+  setActiveTab('tabFeed');
+  const area = document.getElementById('contentArea');
+  area.innerHTML = `<h2 class="text-xl font-bold mb-4">Feed</h2><div id="feedPosts" class="space-y-4"></div>`;
+  const feed = document.getElementById('feedPosts');
+  const posts = await apiCall('show_posts');
+  Object.values(posts).forEach(post=>{
+    feed.innerHTML += `
+      <div class="card bg-white p-4 rounded-xl shadow space-y-2">
+        <div class="flex items-center space-x-3">
+          <div class="w-10 h-10 rounded-full bg-blue-500 text-white flex items-center justify-center font-bold">${post.user[0].toUpperCase()}</div>
+          <div><p class="font-bold text-gray-800">${post.user}</p><p class="text-gray-500 text-sm">Just now</p></div>
+        </div>
+        <p class="text-gray-700">${post.content}</p>
+        <div class="flex space-x-2 text-sm text-blue-500">${post.tags?post.tags.map(t=>`<span>${t}</span>`).join(' '):''}</div>
+      </div>`;
+  });
+}
+
+// ---------------------------
+// Governance
+// ---------------------------
+async function showGovernance(){
+  setActiveTab('tabGovernance');
+  const area = document.getElementById('contentArea');

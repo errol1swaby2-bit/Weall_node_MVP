@@ -1,0 +1,131 @@
+/* -------------------- Global -------------------- */
+body {
+    margin: 0;
+    font-family: "Segoe UI", Tahoma, Geneva, Verdana, sans-serif;
+    background-color: #f5f5f5;
+    color: #333;
+}
+
+header {
+    background-color: #ff004f; /* Bold accent like TikTok */
+    color: white;
+    padding: 1rem;
+    text-align: center;
+    box-shadow: 0 2px 5px rgba(0,0,0,0.1);
+}
+
+h1 {
+    margin: 0;
+    font-size: 1.8rem;
+}
+
+/* -------------------- Feed -------------------- */
+main#feed {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    padding: 1rem;
+}
+
+.post-card {
+    width: 100%;
+    max-width: 500px;
+    background: white;
+    margin-bottom: 1rem;
+    border-radius: 12px;
+    padding: 1rem;
+    box-shadow: 0 4px 12px rgba(0,0,0,0.08);
+    transition: transform 0.2s, box-shadow 0.2s;
+}
+
+.post-card:hover {
+    transform: translateY(-5px);
+    box-shadow: 0 8px 20px rgba(0,0,0,0.15);
+}
+
+.post-card h3 {
+    margin-top: 0;
+    margin-bottom: 0.5rem;
+}
+
+.post-card p {
+    margin: 0.5rem 0;
+}
+
+.post-card small {
+    color: #666;
+}
+
+/* -------------------- Governance -------------------- */
+#proposal-list {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    margin-top: 1rem;
+}
+
+.proposal-card {
+    width: 100%;
+    max-width: 500px;
+    background: #fff;
+    border-radius: 12px;
+    padding: 1rem;
+    margin-bottom: 1rem;
+    box-shadow: 0 4px 12px rgba(0,0,0,0.08);
+}
+
+.proposal-card:hover {
+    transform: translateY(-3px);
+    box-shadow: 0 6px 16px rgba(0,0,0,0.12);
+}
+
+/* -------------------- Profile -------------------- */
+form#profile-form {
+    display: flex;
+    flex-direction: column;
+    align-items: flex-start;
+    margin: 1rem;
+}
+
+form#profile-form label {
+    margin-bottom: 0.5rem;
+}
+
+form#profile-form input {
+    padding: 0.5rem;
+    border-radius: 8px;
+    border: 1px solid #ccc;
+    margin-left: 0.5rem;
+}
+
+form#profile-form button {
+    margin-top: 0.5rem;
+    padding: 0.5rem 1rem;
+    border: none;
+    background-color: #ff004f;
+    color: white;
+    border-radius: 8px;
+    cursor: pointer;
+}
+
+form#profile-form button:hover {
+    background-color: #e60047;
+}
+
+#profile-data {
+    margin: 1rem;
+    background: white;
+    padding: 1rem;
+    border-radius: 12px;
+    box-shadow: 0 4px 12px rgba(0,0,0,0.08);
+}
+
+/* -------------------- Buttons -------------------- */
+button {
+    cursor: pointer;
+    transition: background-color 0.2s;
+}
+
+button:hover {
+    opacity: 0.9;
+}
