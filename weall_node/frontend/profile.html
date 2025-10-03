@@ -1,0 +1,82 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <title>Profile - WeAll</title>
+  <link rel="stylesheet" href="style.css">
+</head>
+<body>
+  <h1>Your Profile</h1>
+  <pre id="status"></pre>
+
+  <h2>Verification Options</h2>
+
+  <!-- Tier 2 Upload -->
+  <h3>Tier 2: Async Video Verification</h3>
+  <form id="tier2Form">
+    <input type="file" id="tier2File" accept="video/*" required>
+    <button type="submit">Upload & Submit Evidence</button>
+  </form>
+  <pre id="tier2Output"></pre>
+
+  <!-- CID History -->
+  <h4>Recent Uploads</h4>
+  <ul id="cidHistory"></ul>
+
+  <!-- Tier 3 Session -->
+  <h3>Tier 3: Live Conference Verification</h3>
+  <button onclick="createTier3()">Create Session</button>
+  <pre id="tier3Output"></pre>
+
+  <div id="tier3Actions" style="display:none;">
+    <h4>Juror Attestations (MVP Simulation)</h4>
+    <button onclick="attestTier3(true)">Approve</button>
+    <button onclick="attestTier3(false)">Reject</button>
+    <button onclick="finalizeTier3()">Finalize Session</button>
+  </div>
+
+  <script src="main.js"></script>
+  <script>
+    checkStatus();
+
+    // Tier2 handler
+    document.getElementById("tier2Form").onsubmit = async (e) => {
+      e.preventDefault();
+      const file = document.getElementById("tier2File").files[0];
+      if (!file) return;
+
+      const cid = await uploadFile(file);  // always returns CID
+      addCidToHistory(cid);
+
+      const res = await submitEvidence(cid);
+      document.getElementById("tier2Output").innerText = JSON.stringify(res, null, 2);
+    };
+
+    // Add CID to history list (persist in localStorage)
+    function addCidToHistory(cid) {
+      if (!cid) return;
+      let history = JSON.parse(localStorage.getItem("cidHistory") || "[]");
+      history.unshift(cid); // add newest first
+      history = history.slice(0, 10); // keep last 10
+      localStorage.setItem("cidHistory", JSON.stringify(history));
+      renderCidHistory();
+    }
+
+    function renderCidHistory() {
+      let history = JSON.parse(localStorage.getItem("cidHistory") || "[]");
+      const ul = document.getElementById("cidHistory");
+      ul.innerHTML = "";
+      history.forEach((cid) => {
+        const li = document.createElement("li");
+        li.innerHTML = `<code>${cid}</code> 
+          <button onclick="submitEvidence('${cid}').then(r=>alert(JSON.stringify(r)))">
+            Retry Submit
+          </button>`;
+        ul.appendChild(li);
+      });
+    }
+
+    // Render history on load
+    renderCidHistory();
+  </script>
+</body>
+</html>

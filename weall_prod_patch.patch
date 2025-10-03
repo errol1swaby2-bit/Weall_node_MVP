@@ -1,0 +1,266 @@
+*** Begin Patch
+*** Add File: weall-node/weall_api.py
++#!/usr/bin/env python3
++"""
++Production-ready-ish WeAll API (Termux-friendly).
++Includes:
++- API key authentication (X-API-KEY or Authorization: Bearer)
++- CORS + basic security headers
++- Upload size guard & cleanup
++- In-memory rate limiting
++- Background replication worker (pin only, no key sharing)
++"""
++import os, json, time, logging, base64, subprocess, threading
++from typing import Optional
++
++from fastapi import FastAPI, UploadFile, File, Form, Request, HTTPException
++from fastapi.responses import StreamingResponse, JSONResponse
++from fastapi.middleware.cors import CORSMiddleware
++
++from executor import WeAllExecutor
++
++# -------- Config --------
++MAX_UPLOAD_SIZE = int(os.environ.get("WEALL_MAX_UPLOAD_SIZE_BYTES", str(50 * 1024 * 1024)))
++ALLOWED_ORIGINS = os.environ.get("WEALL_ALLOWED_ORIGINS", "*")
++REPLICATION_K = int(os.environ.get("WEALL_REPLICATION_K", "3"))
++API_KEY = os.environ.get("WEALL_API_KEY", "dev-local-api-key")
++UPLOADS_DIR = os.path.join(os.path.dirname(__file__), "uploads")
++os.makedirs(UPLOADS_DIR, exist_ok=True)
++
++# -------- Logging --------
++logging.basicConfig(level=logging.INFO, format="%(asctime)s [%(levelname)s] %(message)s")
++log = logging.getLogger("weall")
++
++# -------- Init --------
++POH_REQUIREMENTS = getattr(__import__("executor"), "POH_REQUIREMENTS", {})
++executor = WeAllExecutor(poh_requirements=POH_REQUIREMENTS)
++executor.state.setdefault("nodes", {})
++executor.state.setdefault("posts", {})
++executor.state.setdefault("replications", [])
++
++app = FastAPI(title="WeAll Node API (prod-ready)")
++
++# -------- CORS --------
++origins = ["*"] if ALLOWED_ORIGINS == "*" else [o.strip() for o in ALLOWED_ORIGINS.split(",")]
++app.add_middleware(
++    CORSMiddleware,
++    allow_origins=origins,
++    allow_credentials=True,
++    allow_methods=["*"],
++    allow_headers=["*"],
++)
++
++# -------- Rate limiting --------
++RATE_LIMIT_WINDOW = 60
++RATE_LIMIT_MAX = int(os.environ.get("WEALL_RATE_LIMIT_MAX", "60"))
++_rate_state = {}
++
++def rate_limited(key: str):
++    now = int(time.time())
++    ws, cnt = _rate_state.get(key, (now, 0))
++    if now - ws >= RATE_LIMIT_WINDOW:
++        ws, cnt = now, 0
++    cnt += 1
++    _rate_state[key] = (ws, cnt)
++    return cnt > RATE_LIMIT_MAX
++
++# -------- Auth --------
++def get_api_key_from_request(request: Request) -> Optional[str]:
++    auth = request.headers.get("authorization")
++    if auth and auth.lower().startswith("bearer "):
++        return auth.split(None, 1)[1].strip()
++    api = request.headers.get("x-api-key")
++    if api:
++        return api.strip()
++    return None
++
++def require_api_key(request: Request):
++    key = get_api_key_from_request(request)
++    client_ip = request.client.host if request.client else "unknown"
++    rate_key = key or client_ip
++    if rate_limited(rate_key):
++        raise HTTPException(status_code=429, detail="rate_limit_exceeded")
++    if key != API_KEY:
++        raise HTTPException(status_code=401, detail="invalid_api_key")
++    return key
++
++# -------- Replication worker --------
++def _replication_worker():
++    while True:
++        try:
++            jobs = list(executor.state.get("replications", []))
++            for job in jobs:
++                if job.get("status") != "requested":
++                    continue
++                cid, post_id, peers = job.get("cid"), job.get("post_id"), job.get("peers", [])
++                for peer in peers:
++                    try:
++                        node = executor.state.get("nodes", {}).get(peer, {})
++                        url = node.get("api_url")
++                        if not url:
++                            executor.record_replication_status(peer, post_id, "no_api_url")
++                            continue
++                        try:
++                            import requests
++                            r = requests.post(f"{url.rstrip('/')}/replicate_pin",
++                                              json={"cid": cid, "post_id": post_id}, timeout=10)
++                            if r.status_code == 200:
++                                executor.record_replication_status(peer, post_id, "pushed")
++                            else:
++                                executor.record_replication_status(peer, post_id, f"peer_err_{r.status_code}")
++                        except Exception as re:
++                            executor.record_replication_status(peer, post_id, f"push_err:{str(re)[:200]}")
++                    except Exception as e:
++                        executor.record_replication_status(peer, post_id, f"failed:{str(e)[:200]}")
++                job["status"] = "pushed"
++        except Exception as e:
++            log.exception("replication worker error: %s", e)
++        time.sleep(5)
++
++threading.Thread(target=_replication_worker, daemon=True).start()
++
++# -------- Utils --------
++def _remove_file_silent(path): 
++    try: os.remove(path)
++    except: pass
++
++def _ensure_upload_within_limits(fileobj):
++    try:
++        if hasattr(fileobj, "file") and hasattr(fileobj.file, "seek"):
++            cur = fileobj.file.tell()
++            fileobj.file.seek(0, os.SEEK_END)
++            size = fileobj.file.tell()
++            fileobj.file.seek(cur)
++            if size > MAX_UPLOAD_SIZE:
++                raise HTTPException(status_code=413, detail="file_too_large")
++    except HTTPException: raise
++    except: pass
++
++# -------- API Endpoints --------
++@app.post("/register_pubkey")
++async def register_pubkey(request: Request):
++    require_api_key(request)
++    body = await request.json()
++    user_id, pubkey_pem = body.get("user_id"), body.get("pubkey_pem")
++    api_url = body.get("api_url")
++    if not user_id or not pubkey_pem:
++        raise HTTPException(status_code=400, detail="missing_user_or_pubkey")
++    node = executor.state["nodes"].setdefault(user_id, {})
++    node["pubkey"] = pubkey_pem
++    if api_url: node["api_url"] = api_url
++    node["pubkey_registered_at"] = time.time()
++    return {"status": "ok", "user_id": user_id}
++
++@app.post("/get_recipients_pubkeys")
++async def get_recipients_pubkeys(request: Request):
++    require_api_key(request)
++    body = await request.json()
++    user_id, groups, visibility = body.get("user_id"), body.get("groups") or [], body.get("visibility", "private")
++    recipients = []
++    uploader = executor.state.get("nodes", {}).get(user_id)
++    if uploader and uploader.get("pubkey"):
++        recipients.append({"id": user_id, "pubkey_pem": uploader["pubkey"]})
++    if visibility == "group":
++        for g in groups:
++            for m in executor.get_group_peers(g) or []:
++                if m != user_id:
++                    minfo = executor.state.get("nodes", {}).get(m, {})
++                    if minfo.get("pubkey"):
++                        recipients.append({"id": m, "pubkey_pem": minfo["pubkey"]})
++    return JSONResponse({"recipients": recipients})
++
++@app.post("/post_encrypted_e2e")
++async def post_encrypted_e2e(request: Request,
++    user_id: str = Form(...), content: str = Form(""), iv_b64: str = Form(...),
++    wrapped_keys: str = Form(...), visibility: str = Form("private"),
++    groups: Optional[str] = Form(None), file: UploadFile = File(...)):
++    require_api_key(request)
++    _ensure_upload_within_limits(file)
++    saved_path = None
++    try:
++        ts = int(time.time())
++        safe_name = f"{ts}_{file.filename}"
++        saved_path = os.path.join(UPLOADS_DIR, safe_name)
++        with open(saved_path, "wb") as fh: fh.write(await file.read())
++        cid = subprocess.check_output(["ipfs", "add", "-Q", saved_path]).decode().strip()
++        subprocess.check_output(["ipfs", "pin", "add", cid])
++        group_list = groups.split(",") if groups else None
++        post_id = executor.create_post(user_id=user_id,
++            content=(content + f"\n\n[CID:{cid}]"), tags=None, groups=group_list)
++        post = executor.state["posts"][post_id]
++        post.update({"cid": cid, "visibility": visibility,
++                     "groups": group_list or [], "iv_b64": iv_b64})
++        try:
++            wlist = json.loads(wrapped_keys)
++            post["wrapped_keys"] = {w["recipient_id"]: w["wrapped_key_b64"] for w in wlist}
++        except: post["wrapped_keys"] = {}
++        replication_peers = set()
++        if group_list:
++            for g in group_list:
++                replication_peers.update(executor.pick_replication_peers(g, k=REPLICATION_K))
++        job = {"post_id": post_id, "cid": cid, "peers": list(replication_peers),
++               "status": "requested", "created_at": time.time()}
++        executor.state["replications"].append(job)
++        for p in replication_peers: executor.record_replication_status(p, post_id, "requested")
++        _remove_file_silent(saved_path)
++        return {"status": "ok", "post_id": post_id, "cid": cid}
++    except Exception as e:
++        if saved_path: _remove_file_silent(saved_path)
++        raise HTTPException(status_code=500, detail=str(e))
++
++@app.get("/ipfs_raw/{cid}")
++async def ipfs_raw(cid: str, request: Request):
++    try:
++        proc = subprocess.Popen(["ipfs", "cat", cid], stdout=subprocess.PIPE)
++        return StreamingResponse(proc.stdout, media_type="application/octet-stream")
++    except Exception as e:
++        raise HTTPException(status_code=500, detail=str(e))
++
+*** End Patch
+*** Update File: executor.py
+@@
+     def add_allowed_user(self, post_id: int, user_id: str):
+         """Uploader grants explicit access to 'user_id' for a private post."""
+         post = self.state["posts"].get(post_id)
+-        if not post:
+-            return False
+-        post.setdefault("allowed_users", []).append(user_id)
+-        return True
++        if not post:
++            return False
++        post.setdefault("allowed_users", []).append(user_id)
++        return True
+*** End Patch
+*** Update File: frontend/main.js
+@@
+-async function encryptAndUpload(fileBlob, userId, content, visibility = "public", groups = []) {
+-  // generate AES-GCM key
+-  const key = await crypto.subtle.generateKey({ name: "AES-GCM", length: 256 }, true, ["encrypt", "decrypt"]);
+-  const rawKey = await crypto.subtle.exportKey("raw", key); // ArrayBuffer
+-  const iv = crypto.getRandomValues(new Uint8Array(12));
+-
+-  const encrypted = await crypto.subtle.encrypt({ name: "AES-GCM", iv }, key, await fileBlob.arrayBuffer());
+-
+-  const form = new FormData();
+-  form.append("user_id", userId);
+-  form.append("content", content);
+-  form.append("key_b64", buf2b64(rawKey));
+-  form.append("iv_b64", buf2b64(iv));
+-  form.append("visibility", visibility);
+-  form.append("groups", groups.join(","));
+-  // attach encrypted blob (octet-stream)
+-  form.append("file", new Blob([new Uint8Array(encrypted)], { type: "application/octet-stream" }), "recording.enc");
+-
+-  const res = await fetch("/post_with_encrypted_file", { method: "POST", body: form });
+-  return await res.json();
+-}
++// placeholder to call the real E2E encryption flow
++async function encryptAndUpload(fileBlob, userId, content, visibility = "private", groups = []) {
++  return await encryptWrapAndUpload({ userId, fileBlob, content, visibility, groups });
++}
+*** End Patch
+*** Update File: frontend/index.html
+@@
+-<button onclick="createPost(document.getElementById('uid').value, document.getElementById('post').value).then(alert)">Post</button>
++<button onclick="submitEncryptedPost()">Post</button>
+*** End Patch

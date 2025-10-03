@@ -1,0 +1,58 @@
+--- a/weall_node/weall_api.py
++++ b/weall_node/weall_api.py
+@@ -18,17 +18,16 @@
+ from fastapi.middleware.cors import CORSMiddleware
+ from executor import WeAllExecutor
+ 
+-# from settings import Settings as S
+-from api.content import router as content_router
+-from api.governance import router as governance_router
+-from api.ledger import router as ledger_router
+-from api.messaging import router as messaging_router
+-from api.poh import router as poh_router
+-from api.reputation import router as reputation_router
+-from api.sync import router as sync_router
+-from api.treasury import router as treasury_router
+-from api.verification import router as verification_router
++from weall_node.api.content import router as content_router
++from weall_node.api.governance import router as governance_router
++from weall_node.api.ledger import router as ledger_router
++from weall_node.api.messaging import router as messaging_router
++from weall_node.api.poh import router as poh_router
++from weall_node.api.reputation import router as reputation_router
++from weall_node.api.sync import router as sync_router
++from weall_node.api.treasury import router as treasury_router
++from weall_node.api.verification import router as verification_router
+--- a/weall_node/api/content.py
++++ b/weall_node/api/content.py
+@@ -2,9 +2,10 @@
+ from fastapi import APIRouter, HTTPException, UploadFile, File, Form, Request
+ from fastapi.responses import JSONResponse
+-import os, time
+-from ..weall_runtime.storage import get_client
+-from settings import Settings as S
++import os, time
++from weall_node.weall_runtime.storage import get_client
++from weall_node import settings as S
+--- a/weall_node/api/governance.py
++++ b/weall_node/api/governance.py
+@@ -1,7 +1,7 @@
+-from app_state import governance
++from weall_node.app_state import governance
+--- a/weall_node/api/treasury.py
++++ b/weall_node/api/treasury.py
+@@ -1,6 +1,7 @@
+-from api.ledger import ledger_state
++from weall_node.api.ledger import ledger_state
+--- a/weall_node/api/verification.py
++++ b/weall_node/api/verification.py
+@@ -1,7 +1,8 @@
+-from app_state import poh, ledger
+-from weall_runtime.wallet import mint_nft
++from weall_node.app_state import poh, ledger
++from weall_node.weall_runtime.wallet import mint_nft
+--- a/weall_node/api/messaging.py
++++ b/weall_node/api/messaging.py
+@@ -1,6 +1,7 @@
+-from fastapi import APIRouter
++from fastapi import APIRouter

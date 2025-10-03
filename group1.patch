@@ -1,0 +1,208 @@
+diff --git a/weall-node/weall_api.py b/weall-node/weall_api.py
+new file mode 100644
+index 0000000..1111111
+--- /dev/null
++++ b/weall-node/weall_api.py
+@@
++#!/usr/bin/env python3
++"""
++WeAll Node API (FastAPI) — production-prep
++- API key auth via X-API-KEY or Authorization: Bearer
++- CORS + security headers
++- In-process rate limiting
++- Request logging
++- Prometheus metrics at /metrics
++- Health endpoints: /healthz, /ready
++- IPFS client lifecycle and pinning integrations (with storage wrapper)
++- Peer health & orphan-rate gauges (stubs)
++"""
++import os, time, threading, contextlib, logging
++from typing import Callable
++from fastapi import FastAPI, Request
++from fastapi.responses import JSONResponse, PlainTextResponse
++from fastapi.middleware.cors import CORSMiddleware
++from fastapi.exceptions import RequestValidationError
++from prometheus_client import Counter, Histogram, Gauge, generate_latest, CONTENT_TYPE_LATEST
++
++from settings import Settings as S
++from api.content import router as content_router
++from api.governance import router as governance_router
++from api.ledger import router as ledger_router
++from api.messaging import router as messaging_router
++from api.poh import router as poh_router
++from api.posts import router as posts_router
++from api.reputation import router as rep_router
++from api.disputes import router as disputes_router
++from api.pinning import router as pin_router
++from weall_runtime.storage import set_client, IPFSClient
++
++app = FastAPI(title="WeAll Node API", version="0.3.0")
++
++# CORS
++app.add_middleware(
++    CORSMiddleware,
++    allow_origins=[o.strip() for o in S.ALLOWED_ORIGINS.split(',') if o.strip()],
++    allow_credentials=True,
++    allow_methods=["*"],
++    allow_headers=["*"]
++)
++
++logger = logging.getLogger(S.SERVICE_NAME)
++logging.basicConfig(level=logging.INFO, format='%(asctime)s %(levelname)s %(name)s %(message)s')
++
++# Error handlers
++@app.exception_handler(RequestValidationError)
++async def _validation_handler(request: Request, exc: RequestValidationError):
++    return JSONResponse({"detail": exc.errors()}, status_code=422)
++
++@app.exception_handler(Exception)
++async def _unhandled(request: Request, exc: Exception):
++    logger.exception("Unhandled error")
++    return JSONResponse({"detail": "Internal Server Error"}, status_code=500)
++
++# Middlewares
++@app.middleware("http")
++async def access_log(request: Request, call_next: Callable):
++    start = time.time()
++    response = await call_next(request)
++    dur_ms = int((time.time() - start) * 1000)
++    logger.info("%s %s %s %dms", request.method, request.url.path, response.status_code, dur_ms)
++    return response
++
++@app.middleware("http")
++async def security_and_auth(request: Request, call_next: Callable):
++    open_paths = {"/", "/docs", "/openapi.json", "/healthz", "/ready", "/metrics"}
++    if request.url.path not in open_paths:
++        key = request.headers.get("X-API-KEY") or (request.headers.get("Authorization") or "").replace("Bearer ", "")
++        if key != S.API_KEY:
++            return JSONResponse({"detail": "Unauthorized"}, status_code=401)
++
++    response = await call_next(request)
++    response.headers["X-Frame-Options"] = "DENY"
++    response.headers["X-Content-Type-Options"] = "nosniff"
++    response.headers["Referrer-Policy"] = "no-referrer"
++    response.headers["Content-Security-Policy"] = "default-src 'self' 'unsafe-inline' data:"
++    return response
++
++# Rate limiting
++_BUCKET = {"win": S.RATE_WINDOW, "lim": S.RATE_LIMIT, "ips": {}}
++@app.middleware("http")
++async def rate_limit(request: Request, call_next: Callable):
++    now = int(time.time())
++    ip = request.client.host if request.client else "unknown"
++    B = _BUCKET
++    ent = B["ips"].setdefault(ip, {"ts": now, "n": 0})
++    if now - ent["ts"] >= B["win"]:
++        ent["ts"] = now
++        ent["n"] = 0
++    ent["n"] += 1
++    if ent["n"] > B["lim"]:
++        return JSONResponse({"detail": "Rate limit"}, status_code=429)
++    return await call_next(request)
++
++# Prometheus
++REQ_COUNT = Counter("weall_http_requests_total", "HTTP requests", ["method","path","code"])
++REQ_LATENCY = Histogram("weall_http_request_duration_seconds", "Request latency", ["path"])
++PEER_COUNT = Gauge("weall_peer_count", "Current p2p peer count")
++ORPHAN_RATE = Gauge("weall_orphan_rate", "Estimated orphan rate (0..1)")
++
++@app.get("/metrics")
++async def metrics():
++    return PlainTextResponse(generate_latest().decode(), media_type=CONTENT_TYPE_LATEST)
++
++@app.get("/healthz", response_class=PlainTextResponse)
++async def healthz():
++    return "ok"
++
++@app.get("/ready")
++async def ready():
++    return {"service": S.SERVICE_NAME, "ready": True}
++
++@app.get("/")
++async def root():
++    return {"status": "ok"}
++
++# Routers
++app.include_router(content_router)
++app.include_router(governance_router)
++app.include_router(ledger_router)
++app.include_router(messaging_router)
++app.include_router(poh_router)
++app.include_router(posts_router)
++app.include_router(rep_router)
++app.include_router(disputes_router)
++app.include_router(pin_router)
++
++_RUNNING = True
++def _replicate_worker():
++    while _RUNNING:
++        time.sleep(5)
++
++@app.on_event("startup")
++async def _startup():
++    try:
++        client = IPFSClient(S.IPFS_ADDR)
++        set_client(client)
++    except Exception:
++        set_client(None)
++    threading.Thread(target=_replicate_worker, daemon=True).start()
++
++@app.on_event("shutdown")
++async def _shutdown():
++    global _RUNNING
++    _RUNNING = False
++    with contextlib.suppress(Exception):
++        set_client(None)
+diff --git a/weall-node/settings.py b/weall-node/settings.py
+new file mode 100644
+index 0000000..2222222
+--- /dev/null
++++ b/weall-node/settings.py
+@@
++"""Centralized settings for WeAll Node (env-driven)."""
++import os
++
++class Settings:
++    API_KEY = os.environ.get("WEALL_API_KEY", "dev-local-api")
++    ALLOWED_ORIGINS = os.environ.get("WEALL_ALLOWED_ORIGINS", "*")
++    MAX_UPLOAD_SIZE = int(os.environ.get("WEALL_MAX_UPLOAD_SIZE_BYTES", str(50*1024*1024)))
++    REPLICATION_K = int(os.environ.get("WEALL_REPLICATION_K", "3"))
++    RATE_WINDOW = int(os.environ.get("WEALL_RATE_WINDOW", "10"))
++    RATE_LIMIT = int(os.environ.get("WEALL_RATE_LIMIT", "100"))
++    IPFS_ADDR = os.environ.get("WEALL_IPFS_ADDR", "/ip4/127.0.0.1/tcp/5001/http")
++    SERVICE_NAME = os.environ.get("WEALL_SERVICE_NAME", "weall-node-api")
+diff --git a/weall-node/weall_runtime/storage.py b/weall-node/weall_runtime/storage.py
+new file mode 100644
+index 0000000..3333333
+--- /dev/null
++++ b/weall-node/weall_runtime/storage.py
+@@
++"""IPFS storage client wrapper."""
++from typing import Optional
++
++class IPFSClient:
++    def __init__(self, addr: str):
++        import ipfshttpclient
++        self._c = ipfshttpclient.connect(addr)
++
++    def add_bytes(self, data: bytes) -> str:
++        res = self._c.add_bytes(data)
++        return res
++
++    def pin_add(self, cid: str) -> None:
++        self._c.pin.add(cid)
++
++    def close(self):
++        try:
++            self._c.close()
++        except Exception:
++            pass
++
++_client: Optional[IPFSClient] = None
++
++def set_client(c: Optional[IPFSClient]):
++    global _client
++    _client = c
++
++def get_client() -> Optional[IPFSClient]:
++    return _client

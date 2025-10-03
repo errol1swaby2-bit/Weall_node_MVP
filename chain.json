@@ -1,0 +1,16 @@
+[
+  {
+    "ts": 1759336803,
+    "txs": [
+      {
+        "ts": 1759336803,
+        "type": "create_account",
+        "payload": {
+          "account": "alice"
+        }
+      }
+    ],
+    "prev": "genesis",
+    "hash": "2e644bc96154501e09c5afb04e4f788dcfa2564b35267c7df32c8374217a7503"
+  }
+]
