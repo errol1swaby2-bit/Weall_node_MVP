@@ -1,173 +1,216 @@
-# weall_api.py
-from fastapi import FastAPI
-from pydantic import BaseModel
-from typing import List, Optional
-from executor import WeAllExecutor, POH_REQUIREMENTS
+#!/usr/bin/env python3
+"""
+Production-ready-ish WeAll API (Termux-friendly).
+Includes:
+- API key authentication (X-API-KEY or Authorization: Bearer)
+- CORS + basic security headers
+- Upload size guard & cleanup
+- In-memory rate limiting
+- Background replication worker (pin only, no key sharing)
+"""
+import os, json, time, logging, base64, subprocess, threading
+from typing import Optional
 
-app = FastAPI(title="WeAll Node API")
+from fastapi import FastAPI, UploadFile, File, Form, Request, HTTPException
+from fastapi.responses import StreamingResponse, JSONResponse
+from fastapi.middleware.cors import CORSMiddleware
+
+from executor import WeAllExecutor
+
+# -------- Config --------
+MAX_UPLOAD_SIZE = int(os.environ.get("WEALL_MAX_UPLOAD_SIZE_BYTES", str(50 * 1024 * 1024)))
+ALLOWED_ORIGINS = os.environ.get("WEALL_ALLOWED_ORIGINS", "*")
+REPLICATION_K = int(os.environ.get("WEALL_REPLICATION_K", "3"))
+API_KEY = os.environ.get("WEALL_API_KEY", "dev-local-api-key")
+UPLOADS_DIR = os.path.join(os.path.dirname(__file__), "uploads")
+os.makedirs(UPLOADS_DIR, exist_ok=True)
+
+# -------- Logging --------
+logging.basicConfig(level=logging.INFO, format="%(asctime)s [%(levelname)s] %(message)s")
+log = logging.getLogger("weall")
+
+# -------- Init --------
+POH_REQUIREMENTS = getattr(__import__("executor"), "POH_REQUIREMENTS", {})
 executor = WeAllExecutor(poh_requirements=POH_REQUIREMENTS)
+executor.state.setdefault("nodes", {})
+executor.state.setdefault("posts", {})
+executor.state.setdefault("replications", [])
 
-# -----------------------------
-# Request models
-# -----------------------------
-class UserModel(BaseModel):
-    user_id: str
-    poh_level: Optional[int] = 1
+app = FastAPI(title="WeAll Node API (prod-ready)")
 
-class PostModel(BaseModel):
-    user_id: str
-    content: str
-    tags: Optional[List[str]] = None
-    groups: Optional[List[str]] = None
+# -------- CORS --------
+origins = ["*"] if ALLOWED_ORIGINS == "*" else [o.strip() for o in ALLOWED_ORIGINS.split(",")]
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=origins,
+    allow_credentials=True,
+    allow_methods=["*"],
+    allow_headers=["*"],
+)
 
-class CommentModel(BaseModel):
-    user_id: str
-    post_id: int
-    content: str
-    tags: Optional[List[str]] = None
+# -------- Rate limiting --------
+RATE_LIMIT_WINDOW = 60
+RATE_LIMIT_MAX = int(os.environ.get("WEALL_RATE_LIMIT_MAX", "60"))
+_rate_state = {}
 
-class ProposalModel(BaseModel):
-    user_id: str
-    title: str
-    description: str
-    pallet_reference: str
+def rate_limited(key: str):
+    now = int(time.time())
+    ws, cnt = _rate_state.get(key, (now, 0))
+    if now - ws >= RATE_LIMIT_WINDOW:
+        ws, cnt = now, 0
+    cnt += 1
+    _rate_state[key] = (ws, cnt)
+    return cnt > RATE_LIMIT_MAX
 
-class VoteModel(BaseModel):
-    user_id: str
-    target_id: int
-    vote_option: str
+# -------- Auth --------
+def get_api_key_from_request(request: Request) -> Optional[str]:
+    auth = request.headers.get("authorization")
+    if auth and auth.lower().startswith("bearer "):
+        return auth.split(None, 1)[1].strip()
+    api = request.headers.get("x-api-key")
+    if api:
+        return api.strip()
+    return None
 
-class DisputeModel(BaseModel):
-    reporter_id: str
-    target_post_id: int
-    description: str
+def require_api_key(request: Request):
+    key = get_api_key_from_request(request)
+    client_ip = request.client.host if request.client else "unknown"
+    rate_key = key or client_ip
+    if rate_limited(rate_key):
+        raise HTTPException(status_code=429, detail="rate_limit_exceeded")
+    if key != API_KEY:
+        raise HTTPException(status_code=401, detail="invalid_api_key")
+    return key
 
-class JurorVoteModel(BaseModel):
-    juror_id: str
-    dispute_id: int
-    vote_option: str
+# -------- Replication worker --------
+def _replication_worker():
+    while True:
+        try:
+            jobs = list(executor.state.get("replications", []))
+            for job in jobs:
+                if job.get("status") != "requested":
+                    continue
+                cid, post_id, peers = job.get("cid"), job.get("post_id"), job.get("peers", [])
+                for peer in peers:
+                    try:
+                        node = executor.state.get("nodes", {}).get(peer, {})
+                        url = node.get("api_url")
+                        if not url:
+                            executor.record_replication_status(peer, post_id, "no_api_url")
+                            continue
+                        try:
+                            import requests
+                            r = requests.post(f"{url.rstrip('/')}/replicate_pin",
+                                              json={"cid": cid, "post_id": post_id}, timeout=10)
+                            if r.status_code == 200:
+                                executor.record_replication_status(peer, post_id, "pushed")
+                            else:
+                                executor.record_replication_status(peer, post_id, f"peer_err_{r.status_code}")
+                        except Exception as re:
+                            executor.record_replication_status(peer, post_id, f"push_err:{str(re)[:200]}")
+                    except Exception as e:
+                        executor.record_replication_status(peer, post_id, f"failed:{str(e)[:200]}")
+                job["status"] = "pushed"
+        except Exception as e:
+            log.exception("replication worker error: %s", e)
+        time.sleep(5)
 
-class MessageModel(BaseModel):
-    from_user: str
-    to_user: str
-    message_text: str
+threading.Thread(target=_replication_worker, daemon=True).start()
 
-# -----------------------------
-# User endpoints
-# -----------------------------
-@app.post("/register")
-def register_user(user: UserModel):
-    return executor.register_user(user.user_id, user.poh_level)
+# -------- Utils --------
+def _remove_file_silent(path): 
+    try: os.remove(path)
+    except: pass
 
-@app.post("/add_friend")
-def add_friend(user_id: str, friend_id: str):
-    return executor.add_friend(user_id, friend_id)
+def _ensure_upload_within_limits(fileobj):
+    try:
+        if hasattr(fileobj, "file") and hasattr(fileobj.file, "seek"):
+            cur = fileobj.file.tell()
+            fileobj.file.seek(0, os.SEEK_END)
+            size = fileobj.file.tell()
+            fileobj.file.seek(cur)
+            if size > MAX_UPLOAD_SIZE:
+                raise HTTPException(status_code=413, detail="file_too_large")
+    except HTTPException: raise
+    except: pass
 
-@app.post("/create_group")
-def create_group(user_id: str, group_name: str, members: Optional[List[str]] = None):
-    return executor.create_group(user_id, group_name, members)
+# -------- API Endpoints --------
+@app.post("/register_pubkey")
+async def register_pubkey(request: Request):
+    require_api_key(request)
+    body = await request.json()
+    user_id, pubkey_pem = body.get("user_id"), body.get("pubkey_pem")
+    api_url = body.get("api_url")
+    if not user_id or not pubkey_pem:
+        raise HTTPException(status_code=400, detail="missing_user_or_pubkey")
+    node = executor.state["nodes"].setdefault(user_id, {})
+    node["pubkey"] = pubkey_pem
+    if api_url: node["api_url"] = api_url
+    node["pubkey_registered_at"] = time.time()
+    return {"status": "ok", "user_id": user_id}
 
-# -----------------------------
-# Posts / Comments
-# -----------------------------
-@app.post("/post")
-def create_post(post: PostModel):
-    return executor.create_post(post.user_id, post.content, post.tags, post.groups)
+@app.post("/get_recipients_pubkeys")
+async def get_recipients_pubkeys(request: Request):
+    require_api_key(request)
+    body = await request.json()
+    user_id, groups, visibility = body.get("user_id"), body.get("groups") or [], body.get("visibility", "private")
+    recipients = []
+    uploader = executor.state.get("nodes", {}).get(user_id)
+    if uploader and uploader.get("pubkey"):
+        recipients.append({"id": user_id, "pubkey_pem": uploader["pubkey"]})
+    if visibility == "group":
+        for g in groups:
+            for m in executor.get_group_peers(g) or []:
+                if m != user_id:
+                    minfo = executor.state.get("nodes", {}).get(m, {})
+                    if minfo.get("pubkey"):
+                        recipients.append({"id": m, "pubkey_pem": minfo["pubkey"]})
+    return JSONResponse({"recipients": recipients})
 
-@app.post("/comment")
-def create_comment(comment: CommentModel):
-    return executor.create_comment(comment.user_id, comment.post_id, comment.content, comment.tags)
+@app.post("/post_encrypted_e2e")
+async def post_encrypted_e2e(request: Request,
+    user_id: str = Form(...), content: str = Form(""), iv_b64: str = Form(...),
+    wrapped_keys: str = Form(...), visibility: str = Form("private"),
+    groups: Optional[str] = Form(None), file: UploadFile = File(...)):
+    require_api_key(request)
+    _ensure_upload_within_limits(file)
+    saved_path = None
+    try:
+        ts = int(time.time())
+        safe_name = f"{ts}_{file.filename}"
+        saved_path = os.path.join(UPLOADS_DIR, safe_name)
+        with open(saved_path, "wb") as fh: fh.write(await file.read())
+        cid = subprocess.check_output(["ipfs", "add", "-Q", saved_path]).decode().strip()
+        subprocess.check_output(["ipfs", "pin", "add", cid])
+        group_list = groups.split(",") if groups else None
+        post_id = executor.create_post(user_id=user_id,
+            content=(content + f"\n\n[CID:{cid}]"), tags=None, groups=group_list)
+        post = executor.state["posts"][post_id]
+        post.update({"cid": cid, "visibility": visibility,
+                     "groups": group_list or [], "iv_b64": iv_b64})
+        try:
+            wlist = json.loads(wrapped_keys)
+            post["wrapped_keys"] = {w["recipient_id"]: w["wrapped_key_b64"] for w in wlist}
+        except: post["wrapped_keys"] = {}
+        replication_peers = set()
+        if group_list:
+            for g in group_list:
+                replication_peers.update(executor.pick_replication_peers(g, k=REPLICATION_K))
+        job = {"post_id": post_id, "cid": cid, "peers": list(replication_peers),
+               "status": "requested", "created_at": time.time()}
+        executor.state["replications"].append(job)
+        for p in replication_peers: executor.record_replication_status(p, post_id, "requested")
+        _remove_file_silent(saved_path)
+        return {"status": "ok", "post_id": post_id, "cid": cid}
+    except Exception as e:
+        if saved_path: _remove_file_silent(saved_path)
+        raise HTTPException(status_code=500, detail=str(e))
 
-@app.post("/edit_post")
-def edit_post(user_id: str, post_id: int, new_content: str):
-    return executor.edit_post(user_id, post_id, new_content)
+@app.get("/ipfs_raw/{cid}")
+async def ipfs_raw(cid: str, request: Request):
+    try:
+        proc = subprocess.Popen(["ipfs", "cat", cid], stdout=subprocess.PIPE)
+        return StreamingResponse(proc.stdout, media_type="application/octet-stream")
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
 
-@app.post("/delete_post")
-def delete_post(user_id: str, post_id: int):
-    return executor.delete_post(user_id, post_id)
-
-@app.post("/edit_comment")
-def edit_comment(user_id: str, comment_id: int, new_content: str):
-    return executor.edit_comment(user_id, comment_id, new_content)
-
-@app.post("/delete_comment")
-def delete_comment(user_id: str, comment_id: int):
-    return executor.delete_comment(user_id, comment_id)
-
-@app.post("/like_post")
-def like_post(user_id: str, post_id: int):
-    return executor.like_post(user_id, post_id)
-
-# -----------------------------
-# Governance / Proposals
-# -----------------------------
-@app.post("/propose")
-def propose(proposal: ProposalModel):
-    return executor.propose(proposal.user_id, proposal.title, proposal.description, proposal.pallet_reference)
-
-@app.post("/vote")
-def vote(vote: VoteModel):
-    return executor.vote(vote.user_id, vote.target_id, vote.vote_option)
-
-# -----------------------------
-# Disputes / Juror voting
-# -----------------------------
-@app.post("/create_dispute")
-def create_dispute(dispute: DisputeModel):
-    return executor.create_dispute(dispute.reporter_id, dispute.target_post_id, dispute.description)
-
-@app.post("/juror_vote")
-def juror_vote(vote: JurorVoteModel):
-    return executor.juror_vote(vote.juror_id, vote.dispute_id, vote.vote_option)
-
-@app.post("/report_post")
-def report_post(reporter_id: str, post_id: int, description: str):
-    return executor.report_post(reporter_id, post_id, description)
-
-@app.post("/report_comment")
-def report_comment(reporter_id: str, comment_id: int, description: str):
-    return executor.report_comment(reporter_id, comment_id, description)
-
-# -----------------------------
-# Treasury
-# -----------------------------
-@app.post("/allocate_treasury")
-def allocate_treasury(pool_name: str, amount: int):
-    return executor.allocate_treasury(pool_name, amount)
-
-@app.post("/reclaim_treasury")
-def reclaim_treasury(pool_name: str, amount: int):
-    return executor.reclaim_treasury(pool_name, amount)
-
-# -----------------------------
-# Messaging
-# -----------------------------
-@app.post("/send_message")
-def send_message(msg: MessageModel):
-    return executor.send_message(msg.from_user, msg.to_user, msg.message_text)
-
-@app.get("/read_messages/{user_id}")
-def read_messages(user_id: str):
-    return executor.read_messages(user_id)
-
-# -----------------------------
-# Display posts / users
-# -----------------------------
-@app.get("/list_user_posts/{user_id}")
-def list_user_posts(user_id: str):
-    posts = [pid for pid, p in executor.state["posts"].items() if p["user"] == user_id]
-    return {"posts": posts}
-
-@app.get("/list_tag_posts/{tag}")
-def list_tag_posts(tag: str):
-    posts = [pid for pid, p in executor.state["posts"].items() if tag in p.get("tags", [])]
-    return {"posts": posts}
-
-@app.get("/show_post/{post_id}")
-def show_post(post_id: int):
-    post = executor.state["posts"].get(post_id)
-    return post or {"error": "post_not_found"}
-
-@app.get("/show_posts")
-def show_posts():
-    return executor.state["posts"]
