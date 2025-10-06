@@ -1,14 +1,24 @@
-from fastapi import FastAPI, HTTPException
+#!/usr/bin/env python3
+"""
+WeAll FastAPI entrypoint (v0.5)
+- Provides REST endpoints for user and content interaction.
+- Delegates logic to the core WeAllExecutor runtime.
+- Safe for local and production environments.
+"""
+
+from fastapi import FastAPI, HTTPException, Query
 from fastapi.middleware.cors import CORSMiddleware
-from executor import WeAllExecutor
-from typing import List
+from typing import List, Optional
 
-app = FastAPI(title="WeAll API")
+# ✅ Fixed import path
+from weall_node.executor import WeAllExecutor
 
-# Enable CORS so frontend (localhost) can call API
+app = FastAPI(title="WeAll API", version="0.5.0")
+
+# Enable CORS for frontend access
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],  # You can restrict to frontend domain later
+    allow_origins=["*"],  # TODO: restrict to production frontend domain
     allow_methods=["*"],
     allow_headers=["*"],
 )
@@ -16,14 +26,22 @@ app.add_middleware(
 # Initialize executor
 executor = WeAllExecutor(dsl_file="weall_dsl_v0.5.yaml")
 
+
+# -------------------- Health Check --------------------
+@app.get("/healthz")
+def health_check():
+    """Simple readiness probe for uptime monitoring."""
+    return {"status": "ok", "ipfs_connected": bool(executor.ipfs)}
+
+
 # -------------------- Users --------------------
 @app.get("/users/{user_id}")
 def get_user(user_id: str):
+    """Return basic user profile, balance, and post list."""
     user = executor.state["users"].get(user_id)
     if not user:
-        return {"error": "User not found"}
+        raise HTTPException(status_code=404, detail="User not found")
 
-    # Gather user posts
     posts = [pid for pid, p in executor.state["posts"].items() if p["user"] == user_id]
     balance = executor.ledger.balance(user_id)
 
@@ -34,58 +52,70 @@ def get_user(user_id: str):
         "posts": posts,
     }
 
+
 # -------------------- Posts / Feed --------------------
+def _safe_ipfs_cat(cid: str) -> str:
+    """Safely fetch content from IPFS or return placeholder text."""
+    if not executor.ipfs:
+        return "[IPFS unavailable]"
+    try:
+        return executor.ipfs.cat(cid).decode()
+    except Exception:
+        return "[IPFS error]"
+
+
 @app.get("/posts")
 def get_posts():
+    """Return all posts with latest first."""
     posts_list = []
     for pid, post in executor.state["posts"].items():
-        # For simplicity, retrieve content from IPFS if available
-        try:
-            content = executor.ipfs.cat(post["content_hash"]).decode() if executor.ipfs else "[IPFS unavailable]"
-        except Exception:
-            content = "[IPFS error]"
         posts_list.append({
             "id": pid,
             "user": post["user"],
-            "content": content,
+            "content": _safe_ipfs_cat(post["content_hash"]),
             "tags": post["tags"]
         })
-    # Return newest posts first
     posts_list.sort(key=lambda x: x["id"], reverse=True)
     return posts_list
+
 
 # -------------------- Governance / Proposals --------------------
 @app.get("/proposals")
 def get_proposals():
+    """List posts tagged under the Governance pallet."""
     proposals_list = []
     for pid, post in executor.state["posts"].items():
-        # Treat posts in "Governance" pallet as proposals
         if "Governance" in post.get("tags", []):
-            try:
-                content = executor.ipfs.cat(post["content_hash"]).decode() if executor.ipfs else "[IPFS unavailable]"
-            except Exception:
-                content = "[IPFS error]"
             proposals_list.append({
                 "id": pid,
                 "user": post["user"],
                 "title": f"Proposal {pid}",
-                "description": content
+                "description": _safe_ipfs_cat(post["content_hash"]),
             })
     return proposals_list
 
+
 # -------------------- Create Post --------------------
 @app.post("/posts")
-def create_post(user_id: str, content: str, tags: List[str] = []):
+def create_post(
+    user_id: str,
+    content: str,
+    tags: Optional[List[str]] = Query(default=None)
+):
+    """Create a new post and store it in IPFS."""
     if user_id not in executor.state["users"]:
         raise HTTPException(status_code=404, detail="User not found")
+    tags = tags or []
     result = executor.create_post(user_id, content, tags)
     if not result["ok"]:
         raise HTTPException(status_code=400, detail=result.get("error", "Unknown error"))
     return result
 
+
 # -------------------- Create User --------------------
 @app.post("/users")
 def create_user(user_id: str, poh_level: int = 1):
+    """Register a new user with a PoH level."""
     result = executor.register_user(user_id, poh_level)
     if not result["ok"]:
         raise HTTPException(status_code=400, detail=result.get("error", "Unknown error"))

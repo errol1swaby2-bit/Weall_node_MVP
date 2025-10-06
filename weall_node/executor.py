@@ -1,3 +1,4 @@
+#!/usr/bin/env python3
 import time
 from collections import defaultdict
 from typing import List, Dict, Optional
@@ -15,6 +16,10 @@ from .weall_runtime import (
 
 # Chain state
 from weall_node.app_state.chain import chain_instance
+
+# Cryptography imports for RSA keys and encryption
+from cryptography.hazmat.primitives.asymmetric import rsa, padding
+from cryptography.hazmat.primitives import serialization, hashes
 
 
 POH_REQUIREMENTS = {
@@ -55,11 +60,11 @@ class WeAllExecutor:
         if hasattr(self.poh, "attach_executor"):
             self.poh.attach_executor(self)
 
-        # ✅ Fix: Pass executor object, not advance_epoch fn
+        # Scheduler
         self.scheduler = None
         if auto_scheduler:
             self.scheduler = BlockTimeScheduler(
-                self,  # <-- pass whole executor
+                self,
                 interval_seconds=GLOBAL_PARAMS.get("block_time", 600)
             )
             self.scheduler.start()
@@ -141,22 +146,82 @@ class WeAllExecutor:
     # Users
     # ---------------------------------------------------------------
     def register_user(self, user_id: str, poh_level: int = 1, profile: Optional[Dict] = None):
+        """
+        Register a new user and generate a unique RSA keypair (PEM formatted).
+        Keys are stored in runtime state for message encryption/decryption.
+        """
         if user_id in self.state["users"]:
             return {"ok": False, "error": "user_already_exists"}
-        priv, pub = crypto_utils.generate_keypair()
+
+        # --- Generate RSA PEM keypair ---
+        private_key = rsa.generate_private_key(
+            public_exponent=65537,
+            key_size=2048,
+        )
+        private_pem = private_key.private_bytes(
+            encoding=serialization.Encoding.PEM,
+            format=serialization.PrivateFormat.PKCS8,
+            encryption_algorithm=serialization.NoEncryption(),
+        ).decode("utf-8")
+
+        public_pem = private_key.public_key().public_bytes(
+            encoding=serialization.Encoding.PEM,
+            format=serialization.PublicFormat.SubjectPublicKeyInfo,
+        ).decode("utf-8")
+
+        # --- Store user state ---
         self.state["users"][user_id] = {
             "poh_level": poh_level,
             "reputation": 0,
             "friends": [],
             "groups": [],
-            "private_key": priv,
-            "public_key": pub,
+            "private_key": private_pem,
+            "public_key": public_pem,
             "is_validator": False,
             "is_operator": False,
         }
-        self.state["profiles"][user_id] = profile or {"bio": "", "avatar_cid": None, "created": _now()}
+
+        self.state["profiles"][user_id] = profile or {
+            "bio": "",
+            "avatar_cid": None,
+            "created": _now(),
+        }
+
         self.ledger.wecoin.create_account(user_id)
-        return {"ok": True}
+        return {
+            "ok": True,
+            "user_id": user_id,
+            "public_key": public_pem[:80] + "...",
+        }
+
+    def rotate_keys(self, user_id: str):
+        """
+        Rotate a user's RSA keypair and update their stored state.
+        Old messages remain decryptable only if previously backed up.
+        """
+        user = self.state["users"].get(user_id)
+        if not user:
+            return {"ok": False, "error": "user_not_found"}
+
+        private_key = rsa.generate_private_key(
+            public_exponent=65537,
+            key_size=2048,
+        )
+        private_pem = private_key.private_bytes(
+            encoding=serialization.Encoding.PEM,
+            format=serialization.PrivateFormat.PKCS8,
+            encryption_algorithm=serialization.NoEncryption(),
+        ).decode("utf-8")
+
+        public_pem = private_key.public_key().public_bytes(
+            encoding=serialization.Encoding.PEM,
+            format=serialization.PublicFormat.SubjectPublicKeyInfo,
+        ).decode("utf-8")
+
+        user["private_key"] = private_pem
+        user["public_key"] = public_pem
+
+        return {"ok": True, "user_id": user_id, "new_public_key": public_pem[:80] + "..."}
 
     # ---------------------------------------------------------------
     # Validators
@@ -261,3 +326,44 @@ class WeAllExecutor:
     def _current_operators(self) -> List[str]:
         pool = self.ledger.wecoin.pools.get("operators", {}).get("members", [])
         return sorted([uid for uid in pool if self.state["users"].get(uid, {}).get("is_operator")])
+
+# ---------------------------------------------------------------
+# Messaging Encryption Helpers (RSA Implementation)
+# ---------------------------------------------------------------
+def encrypt_message(pubkey_pem: str, plaintext: str) -> bytes:
+    """Encrypt plaintext with an RSA public key (PEM format)."""
+    try:
+        pubkey = serialization.load_pem_public_key(pubkey_pem.encode("utf-8"))
+        ciphertext = pubkey.encrypt(
+            plaintext.encode("utf-8"),
+            padding.OAEP(
+                mgf=padding.MGF1(algorithm=hashes.SHA256()),
+                algorithm=hashes.SHA256(),
+                label=None
+            ),
+        )
+        return ciphertext
+    except Exception as e:
+        print(f"[encrypt_message] Encryption failed: {e}")
+        return b"[encryption-error]"
+
+
+def decrypt_message(privkey_pem: str, ciphertext: bytes) -> str:
+    """Decrypt ciphertext with an RSA private key (PEM format)."""
+    try:
+        privkey = serialization.load_pem_private_key(
+            privkey_pem.encode("utf-8"),
+            password=None,
+        )
+        plaintext = privkey.decrypt(
+            ciphertext,
+            padding.OAEP(
+                mgf=padding.MGF1(algorithm=hashes.SHA256()),
+                algorithm=hashes.SHA256(),
+                label=None
+            ),
+        )
+        return plaintext.decode("utf-8")
+    except Exception as e:
+        print(f"[decrypt_message] Decryption failed: {e}")
+        return "[decryption-error]"
