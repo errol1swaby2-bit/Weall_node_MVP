@@ -1,0 +1,36 @@
+# ================================================================
+#  WeAll Protocol — Production Configuration
+# ================================================================
+#  This configuration controls persistence, logging, and governance
+#  behavior for production nodes.
+# ================================================================
+
+persistence:
+  driver: "json"          # "json" (default) or "sqlite"
+  sqlite_path: "weall.db" # Path used when driver == "sqlite"
+
+ipfs:
+  require_ipfs: false     # Set true for live IPFS daemon mode
+
+governance:
+  tier3_quorum_fraction: 0.6  # 60% quorum required to close proposals
+  tier3_yes_fraction: 0.5     # >50% YES among quorum to pass
+
+chain:
+  block_max_txs: 1000     # Maximum transactions per block before sealing
+
+security:
+  require_signed_votes: true   # Verify Ed25519 signatures on votes
+  require_signed_tx: false     # Verify Ed25519 signatures on txs (optional)
+
+logging:
+  level: "INFO"           # DEBUG, INFO, WARNING, ERROR
+  json: true              # Emit logs as JSON lines for observability
+
+runtime:
+  editable_roots:
+    - weall_node
+    - frontend
+    - pallets
+    - runtime
+  backup_dir: ".weall_backups"

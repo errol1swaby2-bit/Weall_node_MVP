@@ -1,0 +1,66 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<title>WeAll • Verification Session</title>
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<style>
+body{margin:0;font-family:Arial,Helvetica,sans-serif;background:#000;color:#fff}
+#stage{display:flex;flex-direction:column;align-items:center;justify-content:center;height:100vh}
+video{width:320px;height:240px;background:#111;border:1px solid #333;border-radius:8px;margin:10px}
+.controls{margin-top:15px}
+button{background:#1f2937;color:#fff;border:1px solid #374151;padding:8px 14px;border-radius:6px;cursor:pointer}
+button:hover{background:#374151}
+#status{margin-top:10px;font-size:14px;opacity:.8}
+</style>
+</head>
+<body>
+<div id="stage">
+  <h2>Founder Verification Conference</h2>
+  <video id="localVideo" autoplay playsinline muted></video>
+  <video id="remoteVideo" autoplay playsinline></video>
+
+  <div class="controls">
+    <button id="startBtn">Start Call</button>
+    <button id="endBtn" disabled>End Call</button>
+  </div>
+  <div id="status">Waiting for connection…</div>
+</div>
+
+<script>
+const API_BASE=location.origin;
+let pc,localStream,ws;
+const uid=localStorage.getItem('weall_user_id')||'anon';
+
+async function initMedia(){
+  localStream=await navigator.mediaDevices.getUserMedia({video:true,audio:true});
+  document.getElementById('localVideo').srcObject=localStream;
+}
+async function startCall(){
+  pc=new RTCPeerConnection();
+  localStream.getTracks().forEach(t=>pc.addTrack(t,localStream));
+  pc.ontrack=e=>{document.getElementById('remoteVideo').srcObject=e.streams[0];};
+  pc.onconnectionstatechange=()=>{document.getElementById('status').textContent="State: "+pc.connectionState};
+
+  ws=new WebSocket(`wss://${location.host}/verify/${uid}`);
+  ws.onmessage=async(ev)=>{
+    const msg=JSON.parse(ev.data);
+    if(msg.sdp){await pc.setRemoteDescription(new RTCSessionDescription(msg.sdp));
+      if(msg.sdp.type==='offer'){const ans=await pc.createAnswer();await pc.setLocalDescription(ans);ws.send(JSON.stringify({sdp:pc.localDescription}));}}
+    if(msg.candidate){await pc.addIceCandidate(msg.candidate);}
+  };
+  pc.onicecandidate=e=>{if(e.candidate)ws.send(JSON.stringify({candidate:e.candidate}));};
+  const offer=await pc.createOffer();await pc.setLocalDescription(offer);
+  ws.onopen=()=>ws.send(JSON.stringify({sdp:pc.localDescription}));
+  document.getElementById('endBtn').disabled=false;
+}
+function endCall(){
+  ws?.close();pc?.close();
+  document.getElementById('status').textContent="Session ended.";
+}
+document.getElementById('startBtn').onclick=async()=>{await initMedia();startCall();};
+document.getElementById('endBtn').onclick=endCall;
+</script>
+<script src="footer.js"></script>
+</body>
+</html>

@@ -1,82 +1,66 @@
 <!DOCTYPE html>
-<html>
+<html lang="en">
 <head>
-  <title>Profile - WeAll</title>
-  <link rel="stylesheet" href="style.css">
+<meta charset="UTF-8">
+<title>WeAll • Profile</title>
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<style>
+body{margin:0;font-family:Arial,Helvetica,sans-serif;background:#000;color:#fff;padding:20px}
+.panel{background:#111;border:1px solid #333;border-radius:8px;padding:15px;margin-bottom:15px}
+input,button{font-size:15px;border-radius:6px;padding:6px 10px}
+button{background:#1f2937;color:#fff;border:1px solid #374151;cursor:pointer}
+button:hover{background:#374151}
+pre{background:#0b0b0b;border:1px solid #222;border-radius:8px;padding:10px;overflow:auto}
+</style>
 </head>
 <body>
-  <h1>Your Profile</h1>
-  <pre id="status"></pre>
 
-  <h2>Verification Options</h2>
+<h1>Your Profile</h1>
 
-  <!-- Tier 2 Upload -->
-  <h3>Tier 2: Async Video Verification</h3>
-  <form id="tier2Form">
-    <input type="file" id="tier2File" accept="video/*" required>
-    <button type="submit">Upload & Submit Evidence</button>
-  </form>
+<div class="panel">
+  <input id="user-id" placeholder="User ID">
+  <button onclick="loadProfile()">Load Profile</button>
+</div>
+
+<div class="panel">
+  <h3>Account Info</h3>
+  <div id="profile-data">—</div>
+</div>
+
+<div class="panel">
+  <h3>Tier 2 Verification (Video Upload)</h3>
+  <input type="file" id="tier2File" accept="video/*">
+  <button onclick="uploadTier2()">Upload & Submit</button>
   <pre id="tier2Output"></pre>
+</div>
 
-  <!-- CID History -->
-  <h4>Recent Uploads</h4>
-  <ul id="cidHistory"></ul>
+<div class="panel">
+  <h3>Tier 3 Verification (Founder / Juror Flow)</h3>
+  <button onclick="startTier3Request()">Request Tier 3</button>
+  <button onclick="initiateFounderVideo()">Founder Video</button>
+  <button onclick="founderApprove()">Founder Approve</button>
+  <button onclick="initiatePanel()">Start Juror Panel</button>
+  <button onclick="checkTier3Status()">Check Status</button>
+  <button onclick="getTier3NFT()">Get NFT</button>
+</div>
 
-  <!-- Tier 3 Session -->
-  <h3>Tier 3: Live Conference Verification</h3>
-  <button onclick="createTier3()">Create Session</button>
-  <pre id="tier3Output"></pre>
+<div class="panel small">
+  <p><b>Founder:</b> bitcoinwasjustthebeginning@gmail.com</p>
+</div>
 
-  <div id="tier3Actions" style="display:none;">
-    <h4>Juror Attestations (MVP Simulation)</h4>
-    <button onclick="attestTier3(true)">Approve</button>
-    <button onclick="attestTier3(false)">Reject</button>
-    <button onclick="finalizeTier3()">Finalize Session</button>
-  </div>
-
-  <script src="main.js"></script>
-  <script>
-    checkStatus();
-
-    // Tier2 handler
-    document.getElementById("tier2Form").onsubmit = async (e) => {
-      e.preventDefault();
-      const file = document.getElementById("tier2File").files[0];
-      if (!file) return;
-
-      const cid = await uploadFile(file);  // always returns CID
-      addCidToHistory(cid);
-
-      const res = await submitEvidence(cid);
-      document.getElementById("tier2Output").innerText = JSON.stringify(res, null, 2);
-    };
-
-    // Add CID to history list (persist in localStorage)
-    function addCidToHistory(cid) {
-      if (!cid) return;
-      let history = JSON.parse(localStorage.getItem("cidHistory") || "[]");
-      history.unshift(cid); // add newest first
-      history = history.slice(0, 10); // keep last 10
-      localStorage.setItem("cidHistory", JSON.stringify(history));
-      renderCidHistory();
-    }
-
-    function renderCidHistory() {
-      let history = JSON.parse(localStorage.getItem("cidHistory") || "[]");
-      const ul = document.getElementById("cidHistory");
-      ul.innerHTML = "";
-      history.forEach((cid) => {
-        const li = document.createElement("li");
-        li.innerHTML = `<code>${cid}</code> 
-          <button onclick="submitEvidence('${cid}').then(r=>alert(JSON.stringify(r)))">
-            Retry Submit
-          </button>`;
-        ul.appendChild(li);
-      });
-    }
-
-    // Render history on load
-    renderCidHistory();
-  </script>
+<script src="main.js"></script>
+<script src="footer.js"></script>
+<script>
+async function uploadTier2(){
+  const f=document.getElementById('tier2File').files[0];
+  if(!f)return alert('No file selected.');
+  const buf=await f.arrayBuffer();
+  const base64=btoa(String.fromCharCode(...new Uint8Array(buf)));
+  const body={user:"demo",evidence:base64};
+  const res=await fetch('/poh/tier2',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(body)});
+  const data=await res.json();
+  document.getElementById('tier2Output').textContent=JSON.stringify(data,null,2);
+}
+</script>
 </body>
 </html>

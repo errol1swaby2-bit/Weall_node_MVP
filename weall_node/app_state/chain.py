@@ -1,160 +1,105 @@
 #!/usr/bin/env python3
-import time, json, hashlib, os
-from typing import List, Dict
+"""
+weall_node.app_state.chain
+---------------------------
+Implements the in-memory and persisted blockchain state for the WeAll Protocol.
 
-CHAIN_FILE = "chain.json"
+Features:
+- Transaction mempool
+- Deterministic block finalization
+- Persistent block chain
+- Integration point for Tier-3 validator verification
+"""
+
+import os
+import json
+import time
+import hashlib
+from typing import List, Dict, Any
 
 
 class ChainState:
     def __init__(self):
         self.blocks: List[dict] = []
-        self.mempool: List[dict] = []  # mempool for pending txs
-        self.load()
+        self.mempool: List[dict] = []
+        self.repo_path = None
 
-    # ---------------------------------------------------------------
-    # Helpers
-    # ---------------------------------------------------------------
-    def _hash(self, data: str) -> str:
+    # ---------------------------------------------------------
+    # Utility
+    # ---------------------------------------------------------
+    @staticmethod
+    def _hash(data: str) -> str:
         return hashlib.sha256(data.encode()).hexdigest()
 
-    def _merkle_root(self, txs: List[dict]) -> str:
-        """Compute Merkle root of transactions."""
-        if not txs:
-            return self._hash("empty")
+    def _latest_hash(self) -> str:
+        return self.blocks[-1]["hash"] if self.blocks else "genesis"
 
-        hashes = [self._hash(json.dumps(tx, sort_keys=True)) for tx in txs]
-        while len(hashes) > 1:
-            if len(hashes) % 2 == 1:
-                hashes.append(hashes[-1])  # duplicate last if odd
-            hashes = [
-                self._hash(hashes[i] + hashes[i + 1])
-                for i in range(0, len(hashes), 2)
-            ]
-        return hashes[0]
+    # ---------------------------------------------------------
+    # Mempool
+    # ---------------------------------------------------------
+    def record_to_mempool(self, tx: Dict[str, Any]) -> None:
+        """Append a transaction to the mempool."""
+        self.mempool.append(
+            {"tx": tx, "ts": int(time.time()), "hash": self._hash(json.dumps(tx, sort_keys=True))}
+        )
 
-    # ---------------------------------------------------------------
-    # Basic block adder (used by PoH and system-level txs)
-    # ---------------------------------------------------------------
-    def add_block(self, txs: List[dict]) -> dict:
-        """Lightweight block adder for PoH verifications and internal events."""
-        ts = int(time.time())
-        prev_hash = self.blocks[-1]["hash"] if self.blocks else "genesis"
+    def get_mempool(self) -> List[dict]:
+        return list(self.mempool)
 
-        block = {
-            "ts": ts,
-            "txs": txs,
-            "prev": prev_hash,
-            "validator": "system",
-            "merkle_root": self._merkle_root(txs),
-            "sig": "system-auto",
-        }
-
-        raw = json.dumps(block, sort_keys=True)
-        block["hash"] = self._hash(raw)
-        self.blocks.append(block)
-        self.persist()
-        return block
-
-    # ---------------------------------------------------------------
-    # Mempool + Block Production (Validator-signed)
-    # ---------------------------------------------------------------
-    def add_tx(self, tx: dict):
-        """Add a transaction to the mempool."""
-        self.mempool.append(tx)
-
-    def produce_block(self, validator_id: str, priv_key, pub_key, crypto_utils) -> dict:
-        """Create a signed block from mempool transactions."""
-        ts = int(time.time())
-        prev_hash = self.blocks[-1]["hash"] if self.blocks else "genesis"
-        txs = self.mempool[:]
-        root = self._merkle_root(txs)
-
-        block = {
-            "ts": ts,
-            "txs": txs,
-            "prev": prev_hash,
-            "validator": validator_id,
-            "merkle_root": root,
-        }
-
-        raw = json.dumps(block, sort_keys=True).encode()
-        sig = crypto_utils.sign(priv_key, raw)
-        block["sig"] = sig
-        block["hash"] = self._hash((raw + sig.encode()).decode("latin1"))
-
-        self.blocks.append(block)
-        self.persist()
+    def clear_mempool(self):
         self.mempool.clear()
+
+    # ---------------------------------------------------------
+    # Blocks
+    # ---------------------------------------------------------
+    def finalize_block(self, validator_id: str) -> dict:
+        """Creates a block from current mempool and finalizes it with validator ID."""
+        ts = int(time.time())
+        prev = self._latest_hash()
+        block = {
+            "ts": ts,
+            "prev": prev,
+            "validator": validator_id,
+            "txs": [m["tx"] for m in self.mempool],
+        }
+        block["hash"] = self._hash(json.dumps(block, sort_keys=True))
+        self.blocks.append(block)
+        self.clear_mempool()
         return block
 
-    # ---------------------------------------------------------------
-    # Verification
-    # ---------------------------------------------------------------
-    def verify_block(self, block: dict, executor, crypto_utils) -> dict:
-        """Verify a received block from a peer."""
-        required_fields = {
-            "ts", "txs", "prev", "validator", "sig", "hash", "merkle_root"
-        }
-        if not all(k in block for k in required_fields):
-            return {"ok": False, "error": "missing_fields"}
-
-        # 1. Check prev-hash
-        latest = self.latest()
-        if latest and block["prev"] != latest["hash"]:
-            return {"ok": False, "error": "invalid_prev_hash"}
-
-        # 2. Recompute merkle root
-        if block["merkle_root"] != self._merkle_root(block["txs"]):
-            return {"ok": False, "error": "merkle_root_mismatch"}
-
-        # 3. Recompute hash
-        raw_block = {k: v for k, v in block.items() if k != "hash"}
-        raw_json = json.dumps(raw_block, sort_keys=True).encode()
-        recomputed_hash = self._hash((raw_json + block["sig"].encode()).decode("latin1"))
-        if block["hash"] != recomputed_hash:
-            return {"ok": False, "error": "hash_mismatch"}
-
-        # 4. Verify signature
-        validator_id = block["validator"]
-        user = executor.state["users"].get(validator_id)
-        if not user:
-            return {"ok": False, "error": "unknown_validator"}
-
-        pub = user["public_key"]
-        if not crypto_utils.verify(pub, raw_json, block["sig"]):
-            return {"ok": False, "error": "invalid_signature"}
-
-        # 5. Check validator is Tier-3
-        if user.get("poh_level", 0) < 3:
-            return {"ok": False, "error": "validator_not_tier3"}
-
-        # All good → append
-        self.blocks.append(block)
-        self.persist()
-        return {"ok": True, "hash": block["hash"]}
-
-    # ---------------------------------------------------------------
-    # Block accessors and persistence
-    # ---------------------------------------------------------------
     def all_blocks(self) -> List[dict]:
-        return self.blocks
+        return list(self.blocks)
 
     def latest(self) -> dict:
         return self.blocks[-1] if self.blocks else {}
 
-    def persist(self):
-        """Persist the full chain to disk."""
-        with open(CHAIN_FILE, "w") as f:
-            json.dump(self.blocks, f, indent=2)
+    # ---------------------------------------------------------
+    # Persistence
+    # ---------------------------------------------------------
+    def save(self, path: str):
+        """Persist blocks and mempool to disk."""
+        try:
+            with open(path, "w") as f:
+                json.dump({"blocks": self.blocks, "mempool": self.mempool}, f, indent=2)
+        except Exception as e:
+            print(f"[chain.save] {e}")
 
-    def load(self):
-        """Load chain state from disk."""
-        if os.path.exists(CHAIN_FILE):
-            with open(CHAIN_FILE) as f:
-                self.blocks = json.load(f)
+    def load(self, path: str):
+        """Load blocks and mempool from disk, if available."""
+        if not os.path.exists(path):
+            return
+        try:
+            with open(path, "r") as f:
+                data = json.load(f)
+            self.blocks = data.get("blocks", [])
+            self.mempool = data.get("mempool", [])
+        except Exception as e:
+            print(f"[chain.load] {e}")
 
-
-# ---------------------------------------------------------------
-# Global singleton for app-wide access
-# ---------------------------------------------------------------
-chain_instance = ChainState()
+    # ---------------------------------------------------------
+    # Reset
+    # ---------------------------------------------------------
+    def reset(self):
+        """Clear chain state (for testing or re-initialization)."""
+        self.blocks.clear()
+        self.mempool.clear()

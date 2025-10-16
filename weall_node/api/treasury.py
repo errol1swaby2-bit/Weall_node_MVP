@@ -1,149 +1,108 @@
-#!/usr/bin/env python3
-"""
-Treasury API
--------------------------------------------------
-Handles community treasury accounting, deposits,
-withdrawals, and DAO-based fund allocations.
-
-Integrates directly with the shared ledger runtime.
-"""
-
-from fastapi import APIRouter, HTTPException, Query
-from weall_node.app_state import ledger
-from weall_node.weall_runtime.wallet import has_nft
+# api/treasury.py
+from fastapi import APIRouter, HTTPException
+from weall_node.app_state import ledger, chain
+from weall_node.weall_runtime.wallet import mint_nft, burn_nft
 
 router = APIRouter(prefix="/treasury", tags=["treasury"])
 
-# -------------------------------------------------
-# In-memory bootstrap treasury (for early testnet)
-# -------------------------------------------------
+# -------------------------------------------------------------------
+# In-memory treasury (mirrored by chain + ledger)
+# -------------------------------------------------------------------
 treasury_state = {
     "funds": 0.0,
-    "allocations": {},  # proposal_id -> {"amount": x, "recipient": y, "status": "pending/approved/paid"}
+    "receipts": {}  # user_id -> list of receipt NFT ids
 }
 
 
-# -------------------------------------------------
-# Routes
-# -------------------------------------------------
+# -------------------------------------------------------------------
+# Helpers
+# -------------------------------------------------------------------
+def _record_block(tx_type: str, payload: dict):
+    """Append a treasury transaction block to the chain."""
+    block = {
+        "ts": int(__import__("time").time()),
+        "txs": [{"type": tx_type, "payload": payload}],
+        "prev": chain.latest().get("hash", "genesis"),
+        "validator": "system",
+        "sig": "system-auto",
+    }
+    import json, hashlib
+    raw = json.dumps(block, sort_keys=True).encode()
+    block["hash"] = hashlib.sha256(raw).hexdigest()
+    chain.blocks.append(block)
+    chain.persist()
+    return block
+
+
+# -------------------------------------------------------------------
+# Endpoints
+# -------------------------------------------------------------------
+
 @router.get("/")
 def get_treasury_status():
-    """
-    Return current treasury state and aggregate ledger data.
-    """
-    try:
-        pools = getattr(ledger.wecoin, "pools", {})
-        total_balance = sum(ledger.wecoin.balances.values()) if hasattr(ledger.wecoin, "balances") else 0
-        return {
-            "ok": True,
-            "treasury_funds": treasury_state["funds"],
-            "allocations": treasury_state["allocations"],
-            "ledger_total_balance": total_balance,
-            "pools": {name: len(meta.get("members", [])) for name, meta in pools.items()},
-        }
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=f"Treasury status failed: {e}")
+    """Return current treasury funds and receipts summary."""
+    return {
+        "status": "ok",
+        "funds": treasury_state["funds"],
+        "receipts": {
+            u: len(v) for u, v in treasury_state["receipts"].items()
+        },
+    }
 
 
 @router.post("/deposit/{user_id}/{amount}")
 def deposit(user_id: str, amount: float):
-    """
-    Deposit an amount from a user's ledger account into the treasury.
-    """
-    try:
-        if user_id not in ledger.wecoin.balances:
-            raise HTTPException(status_code=404, detail="User not found in ledger")
+    """Deposit funds from user's ledger into treasury and mint receipt NFT."""
+    # Check balance
+    bal = float(ledger.get_balance(user_id))
+    if bal < amount:
+        raise HTTPException(400, f"Insufficient funds: {bal}")
 
-        if ledger.wecoin.balances[user_id] < amount:
-            raise HTTPException(status_code=400, detail="Insufficient user funds")
+    # Ledger updates
+    ledger.balances[user_id] = bal - amount
+    treasury_state["funds"] += amount
 
-        ledger.wecoin.balances[user_id] -= amount
-        treasury_state["funds"] += amount
-        return {"ok": True, "treasury_funds": treasury_state["funds"]}
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=f"Deposit failed: {e}")
+    # Mint Treasury Receipt NFT
+    nft_id = f"TREASURY_RECEIPT::{user_id}::{int(__import__('time').time())}"
+    receipt = mint_nft(user_id, nft_id, metadata=f"Deposit of {amount} WEC")
+    treasury_state["receipts"].setdefault(user_id, []).append(nft_id)
+
+    # Record block
+    _record_block("TREASURY_DEPOSIT", {"user": user_id, "amount": amount, "nft_id": nft_id})
+
+    return {
+        "ok": True,
+        "user_id": user_id,
+        "amount": amount,
+        "treasury_funds": treasury_state["funds"],
+        "nft": receipt,
+    }
 
 
 @router.post("/withdraw/{user_id}/{amount}")
 def withdraw(user_id: str, amount: float):
-    """
-    Withdraw funds from treasury to a user's ledger balance.
-    """
-    try:
-        if treasury_state["funds"] < amount:
-            raise HTTPException(status_code=400, detail="Treasury insufficient funds")
-
-        treasury_state["funds"] -= amount
-        ledger.wecoin.balances[user_id] = ledger.wecoin.balances.get(user_id, 0) + amount
-        return {"ok": True, "treasury_funds": treasury_state["funds"]}
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=f"Withdrawal failed: {e}")
-
-
-@router.post("/allocate")
-def allocate_funds(
-    proposal_id: str = Query(...),
-    recipient: str = Query(...),
-    amount: float = Query(...),
-    allocator_id: str = Query(...)
-):
-    """
-    Allocate funds to a recipient (DAO proposal workflow).
-    Requires PoH Tier-3 verification.
-    """
-    if not has_nft(allocator_id, "PoH", min_level=3):
-        raise HTTPException(status_code=401, detail="PoH Tier-3 required for fund allocation")
-
-    if amount <= 0:
-        raise HTTPException(status_code=400, detail="Invalid amount")
-
+    """Withdraw funds from treasury to user's ledger and burn receipt NFT."""
     if treasury_state["funds"] < amount:
-        raise HTTPException(status_code=400, detail="Insufficient treasury funds")
+        raise HTTPException(400, "Insufficient treasury funds")
 
-    if proposal_id in treasury_state["allocations"]:
-        raise HTTPException(status_code=400, detail="Proposal already allocated")
-
-    treasury_state["allocations"][proposal_id] = {
-        "amount": amount,
-        "recipient": recipient,
-        "status": "pending",
-        "approved_by": allocator_id,
-    }
-
-    return {"ok": True, "proposal_id": proposal_id, "status": "pending"}
-
-
-@router.post("/payout/{proposal_id}")
-def execute_payout(proposal_id: str, executor_id: str = Query(...)):
-    """
-    Execute an approved allocation payout.
-    Requires PoH Tier-3 verification.
-    """
-    if not has_nft(executor_id, "PoH", min_level=3):
-        raise HTTPException(status_code=401, detail="PoH Tier-3 required for payouts")
-
-    alloc = treasury_state["allocations"].get(proposal_id)
-    if not alloc:
-        raise HTTPException(status_code=404, detail="Allocation not found")
-    if alloc["status"] == "paid":
-        return {"ok": True, "message": "Already paid"}
-
-    amount = alloc["amount"]
-    recipient = alloc["recipient"]
-
-    if treasury_state["funds"] < amount:
-        raise HTTPException(status_code=400, detail="Insufficient treasury funds")
-
-    # Perform payout
-    ledger.wecoin.balances[recipient] = ledger.wecoin.balances.get(recipient, 0) + amount
+    # Reduce treasury
     treasury_state["funds"] -= amount
-    alloc["status"] = "paid"
-    alloc["executed_by"] = executor_id
+    ledger.balances[user_id] = ledger.balances.get(user_id, 0) + amount
+
+    # Burn latest treasury receipt if any
+    receipts = treasury_state["receipts"].get(user_id, [])
+    burned = None
+    if receipts:
+        nft_id = receipts.pop()  # Burn most recent
+        burned = burn_nft(nft_id)
+
+    # Record block
+    _record_block("TREASURY_WITHDRAW", {"user": user_id, "amount": amount, "burned": burned})
 
     return {
         "ok": True,
-        "proposal_id": proposal_id,
-        "recipient": recipient,
+        "user_id": user_id,
         "amount": amount,
-        "treasury_remaining": treasury_state["funds"],
+        "treasury_funds": treasury_state["funds"],
+        "burned_receipt": burned,
     }

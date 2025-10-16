@@ -1,211 +1,88 @@
 <!DOCTYPE html>
 <html lang="en">
 <head>
-<meta charset="UTF-8">
-<title>WeAll Node Dashboard</title>
+<meta charset="UTF-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>WeAll • Dashboard</title>
 <style>
-    body {
-        margin: 0;
-        font-family: Arial, sans-serif;
-        background: #000;
-        color: #fff;
-    }
-    nav {
-        display: flex;
-        justify-content: space-around;
-        background: #111;
-        padding: 10px 0;
-    }
-    nav button {
-        background: #222;
-        color: #fff;
-        border: none;
-        padding: 10px 20px;
-        cursor: pointer;
-        font-size: 16px;
-    }
-    nav button.active { background: #555; }
-    section { display: none; padding: 20px; min-height: calc(100vh - 50px); }
-    section.active { display: block; }
-    .post, .proposal, .dispute {
-        border: 1px solid #aaa;
-        padding: 15px;
-        margin: 10px 0;
-        border-radius: 8px;
-        background: #111;
-    }
-    .actions button { margin-right: 5px; }
+body{margin:0;font-family:Arial,Helvetica,sans-serif;background:#000;color:#fff}
+nav{display:flex;justify-content:space-around;align-items:center;background:#111;padding:10px 0;gap:8px}
+nav button{background:#222;color:#fff;border:none;padding:10px 20px;cursor:pointer;font-size:16px;border-radius:6px;position:relative}
+nav button.active{background:#555}
+#welcome-user{font-size:15px;color:#aaa;margin-right:10px}
+.badge{position:absolute;top:-4px;right:-4px;width:10px;height:10px;border-radius:50%;background:#10b981;opacity:0;transition:opacity .25s ease}
+section{display:none;padding:20px;min-height:calc(100vh - 50px)}section.active{display:block}
+.panel{background:#111;border:1px solid #333;border-radius:8px;padding:15px;margin-bottom:15px}
+button{background:#1f2937;color:#fff;border:1px solid #374151;cursor:pointer;border-radius:6px;padding:6px 10px}
+button:hover{background:#374151}
+small.update{color:#888;font-size:13px}
+@keyframes pulse-kf{0%{box-shadow:0 0 0 0 rgba(16,185,129,0.6)}70%{box-shadow:0 0 0 12px rgba(16,185,129,0)}100%{box-shadow:0 0 0 0 rgba(16,185,129,0)}}
+.pulse{animation:pulse-kf 1.2s ease-out;border-color:#10b981 !important}
+.post-card,.proposal-card{border:1px solid #2b2b2b;border-radius:8px;padding:12px;margin:10px 0;background:#0b0b0b}
 </style>
 </head>
 <body>
-
 <nav>
-    <button onclick="showPage('feed')" id="tab-feed" class="active">Feed</button>
-    <button onclick="showPage('governance')" id="tab-governance">Governance</button>
-    <button onclick="showPage('profile')" id="tab-profile">Profile</button>
+  <div id="welcome-user"></div>
+  <button onclick="showPage('feed')" id="tab-feed" class="active">Feed<span id="badge-feed" class="badge"></span></button>
+  <button onclick="showPage('governance')" id="tab-governance">Governance<span id="badge-gov" class="badge"></span></button>
+  <button onclick="showPage('profile')" id="tab-profile">Profile<span id="badge-profile" class="badge"></span></button>
+  <button onclick="logout()" style="background:#400;">Logout</button>
 </nav>
 
-<!-- Feed Page -->
 <section id="feed" class="active">
-    <h2>Posts Feed</h2>
-    <div id="posts_feed"></div>
-</section>
-
-<!-- Governance Page -->
-<section id="governance">
-    <h2>Proposals</h2>
-    <div id="proposals_feed"></div>
-    <h2>Disputes</h2>
-    <div id="disputes_feed"></div>
-</section>
-
-<!-- Profile Page -->
-<section id="profile">
-    <h2>Profile</h2>
-    <div>
-        <input id="profile_user_id" placeholder="User ID">
-        <button onclick="loadProfile()">Load Profile</button>
+  <h2>Feed</h2>
+  <div class="panel" id="feed-panel">
+    <h3>Proof-of-Humanity Onboarding</h3>
+    <div class="actions">
+      <button onclick="registerUser()">Register (Tier 1)</button>
+      <button onclick="requestTier1()">Verify Email</button>
+      <button onclick="startTier3Request()">Request Tier 3</button>
+      <button onclick="initiateFounderVideo()">Founder Video</button>
+      <button onclick="founderApprove()">Founder Approve</button>
+      <button onclick="initiatePanel()">Start Juror Panel</button>
+      <button onclick="checkTier3Status()">Check Status</button>
+      <button onclick="getTier3NFT()">Get NFT</button>
     </div>
-    <div id="profile_info"></div>
-    <h3>Messages</h3>
-    <div id="messages_result"></div>
+  </div>
+  <div class="panel" id="feed-panel-list">
+    <h3>Posts Feed</h3>
+    <div id="feed"></div>
+    <small id="feed-last-updated" class="update"></small>
+  </div>
+</section>
+
+<section id="governance">
+  <h2>Governance</h2>
+  <div class="panel" id="gov-panel">
+    <div id="proposal-list"></div>
+    <small id="gov-last-updated" class="update"></small>
+  </div>
+</section>
+
+<section id="profile">
+  <h2>Profile</h2>
+  <div class="panel" id="profile-panel">
+    <div id="profile-data"></div>
+    <small id="profile-last-updated" class="update"></small>
+  </div>
 </section>
 
 <script>
-const API_BASE = "http://localhost:8000";
+function showPage(p){
+  // clear all badges on tab switch
+  ['badge-feed','badge-gov','badge-profile'].forEach(id=>{const b=document.getElementById(id);if(b)b.style.opacity='0';});
 
-// ---------------- Navigation ----------------
-function showPage(page) {
-    document.querySelectorAll('section').forEach(s => s.classList.remove('active'));
-    document.getElementById(page).classList.add('active');
-    document.querySelectorAll('nav button').forEach(b => b.classList.remove('active'));
-    document.getElementById(`tab-${page}`).classList.add('active');
+  document.querySelectorAll('section').forEach(s=>s.classList.remove('active'));
+  document.getElementById(p).classList.add('active');
+  document.querySelectorAll('nav button').forEach(b=>b.classList.remove('active'));
+  document.getElementById(`tab-${p}`).classList.add('active');
+
+  if(p==='feed')initFeedRefresh();
+  if(p==='governance')initGovRefresh();
+  if(p==='profile')initProfileRefresh();
 }
-
-// ---------------- Feed ----------------
-async function loadPosts() {
-    const posts = await fetch(`${API_BASE}/show_posts`).then(r => r.json());
-    const feedDiv = document.getElementById("posts_feed");
-    feedDiv.innerHTML = "";
-    for (const [pid, post] of Object.entries(posts)) {
-        const div = document.createElement("div");
-        div.className = "post";
-        div.innerHTML = `
-            <strong>${post.user}</strong>: ${post.content}<br>
-            Likes: ${post.likes}
-            <div class="actions">
-                <button onclick="likePost(${pid})">❤️</button>
-                <button onclick="commentPost(${pid})">💬</button>
-            </div>
-        `;
-        feedDiv.appendChild(div);
-    }
-}
-
-async function likePost(post_id) {
-    const user_id = prompt("User ID to like:");
-    await fetch(`${API_BASE}/like_post`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ user_id, post_id })
-    });
-    loadPosts();
-}
-
-async function commentPost(post_id) {
-    const user_id = prompt("User ID:");
-    const content = prompt("Comment:");
-    await fetch(`${API_BASE}/comment`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ user_id, post_id, content })
-    });
-    loadPosts();
-}
-
-// ---------------- Governance ----------------
-async function loadProposals() {
-    const proposals = await fetch(`${API_BASE}/show_proposals`).then(r => r.json());
-    const feed = document.getElementById("proposals_feed");
-    feed.innerHTML = "";
-    for (const [pid, prop] of Object.entries(proposals)) {
-        const div = document.createElement("div");
-        div.className = "proposal";
-        div.innerHTML = `
-            <strong>${prop.title}</strong> | Status: ${prop.status}<br>
-            <button onclick="voteProposal(${pid}, 'yes')">Vote YES</button>
-            <button onclick="voteProposal(${pid}, 'no')">Vote NO</button>
-        `;
-        feed.appendChild(div);
-    }
-}
-
-async function voteProposal(pid, option) {
-    const user_id = prompt("User ID:");
-    await fetch(`${API_BASE}/vote`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ user_id, target_id: pid, vote_option: option })
-    });
-    loadProposals();
-}
-
-async function loadDisputes() {
-    const disputes = await fetch(`${API_BASE}/show_disputes`).then(r => r.json());
-    const feed = document.getElementById("disputes_feed");
-    feed.innerHTML = "";
-    for (const [did, d] of Object.entries(disputes)) {
-        const div = document.createElement("div");
-        div.className = "dispute";
-        div.innerHTML = `
-            Post: ${d.target_post} | Status: ${d.status}<br>
-            <button onclick="jurorVote(${did}, 'approve')">Approve</button>
-            <button onclick="jurorVote(${did}, 'reject')">Reject</button>
-        `;
-        feed.appendChild(div);
-    }
-}
-
-async function jurorVote(dispute_id, option) {
-    const juror_id = prompt("User ID:");
-    await fetch(`${API_BASE}/juror_vote`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ juror_id, dispute_id, vote_option: option })
-    });
-    loadDisputes();
-}
-
-// ---------------- Profile ----------------
-async function loadProfile() {
-    const user_id = document.getElementById("profile_user_id").value;
-    const posts = await fetch(`${API_BASE}/list_user_posts/${user_id}`).then(r => r.json());
-    const profileDiv = document.getElementById("profile_info");
-    profileDiv.innerHTML = `Posts: ${JSON.stringify(posts.posts, null, 2)}`;
-    const messages = await fetch(`${API_BASE}/read_messages/${user_id}`).then(r => r.json());
-    const msgDiv = document.getElementById("messages_result");
-    msgDiv.innerHTML = "";
-    messages.forEach(m => {
-        const div = document.createElement("div");
-        div.innerText = `From ${m.from}: ${m.text}`;
-        msgDiv.appendChild(div);
-    });
-}
-
-// ---------------- Auto-refresh feed ----------------
-setInterval(() => {
-    if(document.getElementById('feed').classList.contains('active')) loadPosts();
-    if(document.getElementById('governance').classList.contains('active')) {
-        loadProposals();
-        loadDisputes();
-    }
-}, 5000);
-
-// Initial load
-loadPosts();
-loadProposals();
-loadDisputes();
 </script>
-
+<script src="main.js"></script>
+<script src="footer.js"></script>
 </body>
 </html>

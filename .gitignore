@@ -1,6 +1,32 @@
+# Python
 __pycache__/
 *.pyc
-.env
-*.sqlite3
+*.pyo
+*.pyd
+
+# State files
+chain.json
+executor_state.json
+ledger_data.json
+
+# Certificates & secrets
+cert.pem
+key.pem
+node_id.json
+
+# Local env
 *.log
+.env
+.venv/
 .ipynb_checkpoints/
+
+# Build/test
+pytest_cache/
+.coverage
+*.egg-info/
+dist/
+build/
+
+# Misc
+*.pdf
+.DS_Store

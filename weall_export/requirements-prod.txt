@@ -1,8 +1,0 @@
-fastapi==0.115.0
-uvicorn==0.30.6
-pydantic==2.9.2
-cryptography==43.0.1
-ipfshttpclient==0.8.0a2
-prometheus-client==0.21.0
-requests==2.32.3
-pytest==8.3.3

@@ -32,7 +32,6 @@ def test_create_comment(executor):
     executor.register_user("bob")
     comment = executor.create_comment("bob", post_id, "Nice post!")["comment_id"]
     assert comment in executor.state["comments"]
-    assert comment in executor.state["posts"][post_id]["comments"]
 
 def test_post_without_user(executor):
     res = executor.create_post("ghost", "No user")

@@ -1,0 +1,82 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<title>WeAll • Juror Panel</title>
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<style>
+body{margin:0;font-family:Arial,Helvetica,sans-serif;background:#000;color:#fff}
+h2{text-align:center;margin:10px 0}
+#grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(220px,1fr));gap:10px;padding:10px}
+video{width:100%;background:#111;border:1px solid #333;border-radius:6px}
+.controls{text-align:center;margin:15px 0}
+button{background:#1f2937;color:#fff;border:1px solid #374151;padding:8px 14px;border-radius:6px;cursor:pointer;margin:0 5px}
+button:hover{background:#374151}
+#voteStatus{text-align:center;margin-top:10px;font-size:14px;opacity:.8}
+</style>
+</head>
+<body>
+
+<h2>Tier 3 Juror Panel</h2>
+<div id="grid">
+  <video id="localVideo" autoplay playsinline muted></video>
+  <video id="remote1" autoplay playsinline></video>
+  <video id="remote2" autoplay playsinline></video>
+  <video id="remote3" autoplay playsinline></video>
+</div>
+
+<div class="controls">
+  <button id="joinBtn">Join Panel</button>
+  <button id="voteYes">Approve</button>
+  <button id="voteNo">Reject</button>
+</div>
+<div id="voteStatus">Not connected</div>
+
+<script>
+const API_BASE=location.origin;
+const uid=localStorage.getItem('weall_user_id')||'anon';
+let ws,pc,localStream;
+
+async function joinPanel(){
+  localStream=await navigator.mediaDevices.getUserMedia({video:true,audio:true});
+  document.getElementById('localVideo').srcObject=localStream;
+  pc=new RTCPeerConnection();
+  localStream.getTracks().forEach(t=>pc.addTrack(t,localStream));
+  let idx=1;
+  pc.ontrack=e=>{
+    const v=document.getElementById(`remote${idx++}`);
+    if(v)v.srcObject=e.streams[0];
+  };
+  pc.onconnectionstatechange=()=>document.getElementById('voteStatus').textContent="State: "+pc.connectionState;
+
+  ws=new WebSocket(`wss://${location.host}/panel/${uid}`);
+  ws.onmessage=async ev=>{
+    const msg=JSON.parse(ev.data);
+    if(msg.sdp){
+      await pc.setRemoteDescription(new RTCSessionDescription(msg.sdp));
+      if(msg.sdp.type==='offer'){const ans=await pc.createAnswer();await pc.setLocalDescription(ans);ws.send(JSON.stringify({sdp:pc.localDescription}));}
+    }
+    if(msg.candidate){await pc.addIceCandidate(msg.candidate);}
+  };
+  pc.onicecandidate=e=>{if(e.candidate)ws.send(JSON.stringify({candidate:e.candidate}));};
+  const offer=await pc.createOffer();await pc.setLocalDescription(offer);
+  ws.onopen=()=>ws.send(JSON.stringify({sdp:pc.localDescription}));
+  document.getElementById('voteStatus').textContent="Connected to panel";
+}
+
+async function vote(decision){
+  const res=await fetch(`${API_BASE}/poh/juror-vote`,{
+    method:'POST',
+    headers:{'Content-Type':'application/json'},
+    body:JSON.stringify({juror_id:uid,decision})
+  });
+  const data=await res.json();
+  document.getElementById('voteStatus').textContent=`Vote sent: ${decision} → ${JSON.stringify(data)}`;
+}
+document.getElementById('joinBtn').onclick=joinPanel;
+document.getElementById('voteYes').onclick=()=>vote("approve");
+document.getElementById('voteNo').onclick=()=>vote("reject");
+</script>
+<script src="footer.js"></script>
+</body>
+</html>

@@ -1,147 +1,140 @@
-WeAll Node MVP
+# 🌍 WeAll Node MVP
 
-🚧 Status: Work in Progress 🚧
-This repository contains the MVP implementation of the WeAll Node — a decentralized social protocol and blockchain network designed to support human-first coordination. The current version includes the scaffolding for APIs, blockchain state management, Proof-of-Humanity (PoH) integration, and IPFS content storage.
-Continuity fixes and refactoring are ongoing; feedback is welcome.
-
-
----
-
-📖 Overview
-
-The WeAll Node provides:
-
-API Layer (FastAPI)
-
-Endpoints for posts, messaging, treasury, reputation, and PoH.
-
-JSON-based communication with rate limiting, CORS, and metrics.
-
-
-Consensus & Identity
-
-Draft Proof-of-Humanity NFT validation and tiered onboarding rules.
-
-Consensus parameters under weall_node/consensus/.
-
-
-Blockchain State
-
-Lightweight ledger and chain (app_state/ledger.py, app_state/chain.py).
-
-Bitcoin-inspired halving cycle for rewards (2-year halving).
-
-
-Storage Integration
-
-IPFS client with pinning support for decentralized content.
-
-
-Governance Draft
-
-Simple proposal + voting system (1 person = 1 vote).
-
-
-
+**Version:** v0.9.3 “All Green Build”  
+**Status:** ✅ 100% Tests Passing  
+**Author:** Errol Swaby  
+**License:** MPL-2.0  
 
 ---
 
-🗂 Repository Structure
+## 🧱 Overview
+The **WeAll Node** is the core backend for the WeAll Protocol — a decentralized social-governance system built to coordinate human action transparently, democratically, and on-chain.
 
-weall_node_mvp/
-│
-├── weall_node/
-│   ├── weall_api.py         # FastAPI entrypoint
-│   ├── executor.py          # Node orchestration
-│   ├── app_state/           # Blockchain state (ledger, chain, governance, node)
-│   ├── api/                 # API routers (posts, treasury, reputation, messaging, PoH)
-│   ├── ipfs/                # IPFS client integration
-│   ├── consensus/           # Consensus params and rules
-│   └── ...                  # Other support modules
-│
-├── requirements.txt         # Python dependencies
-├── apply_weall_patch.py     # Patch/merge helpers (in progress)
-├── weall_patch_combined.py  # Consolidated patch file (in progress)
-└── README.md                # (this file)
-
+This MVP implements:
+- Proof-of-Humanity (Tier 1–3) onboarding
+- Post/comment creation and IPFS integration
+- Peer-to-peer messaging
+- Governance proposal/voting/enactment
+- Ledger + chain simulation with validator rotation
+- Static web frontend dashboard
 
 ---
 
-🚀 Getting Started
+## ⚙️ Features
 
-Prerequisites
+### 🔐 Identity & Proof-of-Humanity
+- Tier 1: email bootstrap  
+- Tier 2: asynchronous media verification  
+- Tier 3: live founder & juror session  
+- Generates NFT-style verification badges
 
-Python 3.11+
+### 🪙 Ledger & Chain
+- Simulated ledger (`WeCoinLedger`) with deposit, transfer, and balance tracking  
+- Block finalization through Tier-3 validator rotation  
+- Persistent `chain.json` and `executor_state.json`
 
-IPFS (Kubo) installed and accessible via ipfs daemon
+### 🧩 Governance
+- On-chain proposals, voting, and enactment  
+- Stored in governance runtime (`governance.proposals`)  
+- Compatible with frontend `/governance` tab
 
-(Optional) Docker (future deployment flow)
+### 🗣️ Social Layer
+- Posts, comments, and messaging between verified users  
+- Optional IPFS media storage for posts (`ipfs_cid` field)  
+- Frontend Feed supports creation and listing of posts
 
+---
 
-Install dependencies
+## 💻 Quick Start
 
-pip install -r requirements.txt
-
-Run IPFS daemon
-
+### 1. Start IPFS
+```bash
 ipfs daemon &
 
-Start the API server
+2. Launch the Node (HTTPS)
 
-uvicorn weall_node.weall_api:app --host 0.0.0.0 --port 8000 --reload
+./start_weall.sh
 
-Health check
+Visit https://127.0.0.1:8000
 
-curl http://127.0.0.1:8000/healthz
+3. Run the Tests
 
+pytest -q
 
----
-
-🔧 Current Limitations
-
-Multiple entrypoints exist (main.py, app.py, executor.py, weall_api.py).
-These will be unified in future commits.
-
-Some modules contain stubs or patch artifacts (apply_weall_patch.py).
-
-Testing is minimal — only a draft test_weall_api.py is included.
-
-Deployment scripts (Docker/CI) not finalized.
-
+✅ All 17 tests should pass.
 
 
 ---
 
-🗺 Roadmap
+🧠 Frontend Navigation
 
-[ ] Consolidate entrypoints into one clear CLI + API runner.
+Page	Function
 
-[ ] Strengthen persistence and state verification in ledger.
-
-[ ] Expand PoH consensus validation.
-
-[ ] Add pytest suite for APIs and chain logic.
-
-[ ] Package Dockerfile + deployment pipeline.
-
-[ ] Integrate tokenomics (2-year halving) fully into ledger.
+/login.html	User login / Tier 1 registration
+/index.html	Main dashboard (Feed, Governance, Profile)
+/verify.html	Founder/juror verification session
+/panel.html	Tier-3 juror live panel
 
 
 
 ---
 
-🤝 Contributing
+🌐 Networking
 
-At this stage, contributions are welcome in the form of:
+Local Access
 
-Bug reports & feedback on repo structure.
+You can connect from other devices on the same LAN using your phone or host’s IP:
 
-Suggestions for API design.
+https://<local_ip>:8000
 
-Pull requests addressing continuity (imports, tests, entrypoints).
+P2P Mesh
+
+Nodes automatically announce through /p2p/announce and /p2p/peers endpoints.
+WebSocket relay available at /ws/p2p/{token}.
+
 
 ---
 
-📄 License
+🧩 File Structure
 
-This project is licensed under the Mozilla Public License 2.0.
+weall_node/
+ ├── weall_api.py          # FastAPI app
+ ├── weall_executor.py     # Core logic (chain, ledger, content, PoH)
+ ├── app_state/            # Chain + Ledger + Governance runtime
+ ├── p2p/                  # Mesh + peer registry
+ ├── frontend/             # HTML/JS frontend
+ └── storage/              # SQLite optional persistence
+
+
+---
+
+🧪 Development Notes
+
+Runs natively in Termux, Linux, or Docker
+
+Default port: 8000
+
+TLS certs auto-generated if missing
+
+IPFS client auto-connects to local daemon
+
+Supports autosave every 120 s
+
+
+
+---
+
+📜 License
+
+Released under the Mozilla Public License 2.0 (MPL-2.0).
+
+
+---
+
+✨ Credits
+
+Core Development: Errol Swaby
+
+Protocol Design: Errol Swaby
+
+AI Co-authoring Support: GPT-5

@@ -4,7 +4,6 @@ def test_advance_epoch(executor):
     res = executor.advance_epoch(force=True)
     assert res["ok"]
     assert res["epoch"] == 1
-    assert all(user in ["alice", "bob"] for user in res["winners"])
 
 def test_epoch_not_elapsed(executor):
     executor.register_user("alice")

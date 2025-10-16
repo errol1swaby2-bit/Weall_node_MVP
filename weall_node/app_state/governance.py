@@ -129,3 +129,7 @@ class GovernanceState:
             return {"status": "ok", "result": result}
         except Exception as e:
             return {"status": "error", "error": str(e)}
+
+# ---- compatibility alias for older imports ----
+GovernanceRuntime = GovernanceState
+__all__ = ["GovernanceState", "GovernanceRuntime"]
