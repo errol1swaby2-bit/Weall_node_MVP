@@ -1,0 +1,269 @@
+diff --git a/.gitignore b/.gitignore
+index 1111111..2222222 100644
+--- a/.gitignore
++++ b/.gitignore
+@@
++# Python / venv
++.venv/
++__pycache__/
++.pytest_cache/
++.mypy_cache/
++
++# Keys / certs (never commit)
++*.pem
++*.pub
++
++# Archives / bundles
++*.tar.gz
++*.zip
++
++# OS/editor junk
++.DS_Store
++Thumbs.db
++*.swp
++
++# Local data
++/data/
+diff --git a/weall_node/executor.py b/weall_node/executor.py
+index 3333333..4444444 100644
+--- a/weall_node/executor.py
++++ b/weall_node/executor.py
+@@
+-# Reward pools (older builds used 4-way; v1.1 uses 5-way)
+-REWARD_POOLS = ["validators", "jurors", "creators", "storage", "treasury"]
++# Reward pools (v1.1): validators, operators, jurors, creators, treasury
++# Operators are nodes that also manage IPFS/storage replication.
++REWARD_POOLS = ["validators", "operators", "jurors", "creators", "treasury"]
+@@
+ class WeAllExecutor:
+     def __init__(self, *args, **kwargs):
+         # existing initialization...
+         self.running = True
+         # ensure state containers exist, etc.
+         # ...
++
++    def stop(self):
++        """
++        Graceful shutdown hook so helpers can call executor.stop().
++        Keeps behavior stable if other modules expect this method.
++        """
++        try:
++            self.save_state()
++        finally:
++            self.running = False
+diff --git a/weall_node/main.py b/weall_node/main.py
+index 5555555..6666666 100644
+--- a/weall_node/main.py
++++ b/weall_node/main.py
+@@
+-from fastapi import FastAPI
+-from fastapi.middleware.cors import CORSMiddleware
++from fastapi import FastAPI
++from fastapi.middleware.cors import CORSMiddleware
++from fastapi.staticfiles import StaticFiles
++import asyncio
+@@
+-app = FastAPI(title="WeAll Node", version="0.1.0")
++app = FastAPI(title="WeAll Node", version="1.1")
+@@
+-# CORS (was permissive; tighten for prod)
+-app.add_middleware(
+-    CORSMiddleware,
+-    allow_origins=["*"],
+-    allow_credentials=True,
+-    allow_methods=["*"],
+-    allow_headers=["*"],
+-)
++# CORS — restrict for production; keep localhost for dev tooling.
++ALLOWED_ORIGINS = [
++    "http://localhost:5173",
++    "http://localhost:8000",
++    "https://weall.app",
++]
++app.add_middleware(
++    CORSMiddleware,
++    allow_origins=ALLOWED_ORIGINS,
++    allow_credentials=True,
++    allow_methods=["*"],
++    allow_headers=["*"],
++)
+@@
+ app.include_router(storage.router, prefix="/storage", tags=["storage"])
+ app.include_router(content.router, prefix="/content", tags=["content"])
+ app.include_router(health.router, prefix="/health", tags=["health"])
++
++# Serve static frontend (HTML/JS/CSS only)
++app.mount(
++    "/static",
++    StaticFiles(directory=str((__file__.rsplit('/', 1)[0]) + '/frontend')),
++    name="static",
++)
++
++# ---- Minimal background scheduler -----------------------------------------
++# Periodically persists state and triggers epoch ticks if defined.
++_scheduler_task = None
++
++async def _background_scheduler():
++    from .executor import WeAllExecutor  # local import to avoid cycles
++    try:
++        from .app_state import executor as shared_executor
++        ex = shared_executor
++    except Exception:
++        ex = None
++    if ex is None:
++        return
++    while True:
++        try:
++            if hasattr(ex, "save_state"):
++                ex.save_state()
++            if hasattr(ex, "epoch_tick"):
++                maybe_coro = ex.epoch_tick()
++                if asyncio.iscoroutine(maybe_coro):
++                    await maybe_coro
++            await asyncio.sleep(60)
++        except asyncio.CancelledError:
++            break
++        except Exception:
++            await asyncio.sleep(5)
++
++@app.on_event("startup")
++async def _start_scheduler():
++    global _scheduler_task
++    _scheduler_task = asyncio.create_task(_background_scheduler())
++
++@app.on_event("shutdown")
++async def _stop_scheduler():
++    global _scheduler_task
++    if _scheduler_task:
++        _scheduler_task.cancel()
++        try:
++            await _scheduler_task
++        except Exception:
++            pass
+diff --git a/weall_node/api/storage.py b/weall_node/api/storage.py
+index 7777777..8888888 100644
+--- a/weall_node/api/storage.py
++++ b/weall_node/api/storage.py
+@@
+-from fastapi import APIRouter, HTTPException
+-
+-router = APIRouter()
+-
+-@router.get("/health")
+-def health():
+-    return {"ok": True, "message": "storage API reachable"}
+-
+-# Add future endpoints for IPFS pin/unpin
++from fastapi import APIRouter, HTTPException
++from typing import Dict
++from ..p2p.ipfs_manager import IPFSManager
++
++router = APIRouter()
++
++# Singleton IPFS manager instance for the operator node.
++ipfs_manager = IPFSManager()
++
++@router.get("/health")
++def ipfs_health() -> Dict:
++    """Check connection status of IPFS node."""
++    return ipfs_manager.health()
++
++@router.post("/pin/{cid}")
++def pin_cid(cid: str):
++    """Pin a CID to local IPFS storage."""
++    success = ipfs_manager.pin_cid(cid)
++    if not success:
++        raise HTTPException(status_code=500, detail="Failed to pin CID")
++    return {"ok": True, "cid": cid}
++
++@router.post("/unpin/{cid}")
++def unpin_cid(cid: str):
++    """Unpin a CID from local IPFS storage."""
++    success = ipfs_manager.unpin_cid(cid)
++    if not success:
++        raise HTTPException(status_code=500, detail="Failed to unpin CID")
++    return {"ok": True, "cid": cid}
+diff --git a/weall_node/p2p/ipfs_manager.py b/weall_node/p2p/ipfs_manager.py
+new file mode 100644
+index 0000000..9999999
+--- /dev/null
++++ b/weall_node/p2p/ipfs_manager.py
+@@
++"""
++weall_node/p2p/ipfs_manager.py
++--------------------------------------------------
++Minimal IPFS manager for Operator nodes.
++Connects to a local/remote IPFS HTTP API, offers pin/unpin/health helpers.
++"""
++from typing import Dict, Any
++
++try:
++    import ipfshttpclient  # type: ignore
++except Exception:  # Optional dependency
++    ipfshttpclient = None
++
++
++class IPFSManager:
++    def __init__(self, api_addr: str = "/dns/localhost/tcp/5001/http"):
++        self.api_addr = api_addr
++        self._client = None
++
++    def connect(self) -> bool:
++        if ipfshttpclient is None:
++            return False
++        try:
++            self._client = ipfshttpclient.connect(self.api_addr)
++            return True
++        except Exception:
++            self._client = None
++            return False
++
++    def health(self) -> Dict[str, Any]:
++        if self._client is None and not self.connect():
++            return {"ok": False, "error": "no_client"}
++        try:
++            id_info = self._client.id()  # type: ignore[attr-defined]
++            return {"ok": True, "id": id_info.get("ID"), "agent": id_info.get("AgentVersion")}
++        except Exception as e:
++            return {"ok": False, "error": str(e)}
++
++    def pin_cid(self, cid: str) -> bool:
++        if self._client is None and not self.connect():
++            return False
++        try:
++            self._client.pin.add(cid)  # type: ignore[attr-defined]
++            return True
++        except Exception:
++            return False
++
++    def unpin_cid(self, cid: str) -> bool:
++        if self._client is None and not self.connect():
++            return False
++        try:
++            self._client.pin.rm(cid)  # type: ignore[attr-defined]
++            return True
++        except Exception:
++            return False
+diff --git a/scripts/start_node.sh b/scripts/start_node.sh
+new file mode 100755
+index 0000000..aaaaaaa
+--- /dev/null
++++ b/scripts/start_node.sh
+@@
++#!/usr/bin/env bash
++set -euo pipefail
++
++# Simple dev/prod bootstrapper for the modular API entrypoint.
++# Usage:
++#   ./scripts/start_node.sh            # default: 0.0.0.0:8000, reload on
++#   PORT=9000 RELOAD=0 ./scripts/start_node.sh
++
++HOST="${HOST:-0.0.0.0}"
++PORT="${PORT:-8000}"
++RELOAD="${RELOAD:-1}"
++
++if [[ "${RELOAD}" == "1" ]]; then
++  exec uvicorn weall_node.main:app --host "$HOST" --port "$PORT" --reload
++else
++  exec uvicorn weall_node.main:app --host "$HOST" --port "$PORT"
++fi
