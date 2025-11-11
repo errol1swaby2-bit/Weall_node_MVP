@@ -36,3 +36,10 @@ __all__ = [
     "PoHRuntime",
     "BlockTimeScheduler",
 ]
+
+from .reputation import ReputationRuntime
+
+try:
+    __all__.append("ReputationRuntime")
+except NameError:
+    __all__ = ["ReputationRuntime"]
