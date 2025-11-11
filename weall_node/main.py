@@ -190,3 +190,18 @@ if _reputation_api is not None:
     except Exception:
         # If it's already mounted or app is wired differently, ignore.
         pass
+
+# --- WeAll Genesis: mount PoH API (non-invasive) ---------------------------
+# Ensure Proof of Humanity routes (including /poh/tier/set) are exposed on this app.
+
+try:
+    from weall_node.api import poh as _poh_api  # type: ignore
+except Exception:
+    _poh_api = None  # type: ignore[assignment]
+
+if _poh_api is not None:
+    try:
+        app.include_router(_poh_api.router)
+    except Exception:
+        # If it's already mounted via another module or wiring, ignore.
+        pass

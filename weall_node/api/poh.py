@@ -411,3 +411,34 @@ def api_status(user: str):
 @router.on_event("startup")
 def init_state():
     rebuild_state_from_chain()
+
+# --- WeAll Genesis: PoH tier registry helper endpoint -----------------------
+# Additive helper to sync PoH tiers into the canonical executor ledger.
+
+from pydantic import BaseModel
+from weall_node.security.permissions import set_poh_tier
+from weall_node.weall_executor import executor as _exec
+
+
+class PohTierSet(BaseModel):
+    user_id: str
+    tier: int
+    source: str | None = "manual"
+
+
+@router.post("/tier/set", tags=["Proof of Humanity"])
+def set_poh_tier_endpoint(req: PohTierSet):
+    """
+    Persist a user's PoH tier into executor.ledger["poh"].
+
+    Assumes upstream PoH verification has already confirmed identity.
+    In production, protect this endpoint with proper authentication/roles.
+    """
+    rec = set_poh_tier(req.user_id, req.tier, req.source or "manual")
+
+    save_state = getattr(_exec, "save_state", None)
+    if callable(save_state):
+        save_state()
+
+    return {"ok": True, "poh": rec}
+
