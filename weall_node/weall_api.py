@@ -594,3 +594,21 @@ try:
 except Exception:
     pass
 # ### <<< EMAIL AUTH (MVP) <<<
+
+# --- WeAll Genesis: mount reputation API ------------------------------------
+# Non-invasive: if this module defines `app` (or a create_app pattern uses it),
+# attach the /reputation endpoints.
+
+try:
+    from weall_node.api import reputation as _reputation_api  # type: ignore
+except Exception:
+    _reputation_api = None  # type: ignore[assignment]
+
+_app = globals().get("app")
+
+if _app is not None and _reputation_api is not None:
+    try:
+        _app.include_router(_reputation_api.router)
+    except Exception:
+        # If routing is structured differently or already mounted, fail silently.
+        pass
