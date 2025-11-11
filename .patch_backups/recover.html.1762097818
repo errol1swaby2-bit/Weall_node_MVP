@@ -1,0 +1,134 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>WeAll — Account Recovery</title>
+  <link rel="stylesheet" href="/static/style.css">
+  <style>
+    body {
+      display:flex;
+      align-items:center;
+      justify-content:center;
+      flex-direction:column;
+      min-height:100vh;
+      text-align:center;
+      padding:20px;
+    }
+    .card {
+      background:#111;
+      border:1px solid #222;
+      border-radius:12px;
+      padding:25px;
+      width:90%;
+      max-width:420px;
+      box-shadow:0 0 10px rgba(0,0,0,0.25);
+    }
+    h2 { color:#2ecc71; margin-bottom:10px; }
+    input {
+      width:100%;
+      margin:10px 0;
+      padding:10px;
+      border:none;
+      border-radius:8px;
+      background:#000;
+      color:#fff;
+    }
+    button {
+      width:100%;
+      margin-top:10px;
+    }
+    .msg {
+      color:#aaa;
+      font-size:0.85em;
+      margin-top:10px;
+    }
+    .step {
+      display:none;
+    }
+    .step.active {
+      display:block;
+    }
+  </style>
+</head>
+<body>
+  <div class="card">
+    <h2>Recover Your Account</h2>
+    <p class="text-muted">Use your verified email to reset your credentials.</p>
+
+    <!-- Step 1: Enter email -->
+    <div id="step1" class="step active">
+      <input id="email" type="email" placeholder="you@example.com">
+      <button class="accent" onclick="requestCode()">Send Recovery Code</button>
+      <div id="msg1" class="msg"></div>
+    </div>
+
+    <!-- Step 2: Enter code -->
+    <div id="step2" class="step">
+      <p>Enter the 6-digit code sent to your email.</p>
+      <input id="code" type="text" maxlength="6" placeholder="A1B2C3">
+      <button class="accent" onclick="verifyCode()">Verify & Restore</button>
+      <div id="msg2" class="msg"></div>
+    </div>
+
+    <!-- Step 3: Success -->
+    <div id="step3" class="step">
+      <h3 style="color:#2ecc71;">✅ Success</h3>
+      <p>Your new credentials have been restored.</p>
+      <button onclick="window.location.href='login.html'">Back to Login</button>
+    </div>
+  </div>
+
+  <script>
+    async function requestCode() {
+      const email = document.getElementById('email').value.trim();
+      const msg1 = document.getElementById('msg1');
+      msg1.textContent = '';
+      if (!email) return msg1.textContent = 'Please enter your verified email.';
+
+      try {
+        const res = await fetch('/recovery/request', {
+          method: 'POST',
+          headers: {'Content-Type': 'application/json'},
+          body: JSON.stringify({ email })
+        });
+        const data = await res.json();
+        if (!res.ok) throw new Error(data.detail || data.message);
+        msg1.textContent = '✅ ' + data.message;
+        document.getElementById('step1').classList.remove('active');
+        document.getElementById('step2').classList.add('active');
+      } catch (err) {
+        msg1.textContent = '⚠️ ' + err.message;
+      }
+    }
+
+    async function verifyCode() {
+      const email = document.getElementById('email').value.trim();
+      const code = document.getElementById('code').value.trim();
+      const msg2 = document.getElementById('msg2');
+      msg2.textContent = '';
+      if (!code) return msg2.textContent = 'Enter the recovery code.';
+
+      try {
+        const res = await fetch('/recovery/verify', {
+          method: 'POST',
+          headers: {'Content-Type': 'application/json'},
+          body: JSON.stringify({ email, code })
+        });
+        const data = await res.json();
+        if (!res.ok) throw new Error(data.detail || data.message);
+
+        // Store new credentials
+        localStorage.setItem('weall_keys', JSON.stringify(data.new_credentials));
+        msg2.textContent = '✅ Account recovered successfully.';
+        setTimeout(() => {
+          document.getElementById('step2').classList.remove('active');
+          document.getElementById('step3').classList.add('active');
+        }, 1000);
+      } catch (err) {
+        msg2.textContent = '⚠️ ' + err.message;
+      }
+    }
+  </script>
+</body>
+</html>

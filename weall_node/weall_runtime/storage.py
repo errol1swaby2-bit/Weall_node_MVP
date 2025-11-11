@@ -16,6 +16,7 @@ class NodeStorage:
         self._memory: Dict[str, bytes] = {}
         try:
             import ipfshttpclient
+
             self._ipfs = ipfshttpclient.connect(addr)
         except Exception:
             self._ipfs = None  # fallback to memory only

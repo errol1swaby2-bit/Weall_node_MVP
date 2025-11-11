@@ -11,15 +11,18 @@ from weall_node.weall_runtime.wallet import has_nft
 
 router = APIRouter(prefix="/validators", tags=["validators"])
 
+
 # ---------------------------------------------------------------
 # Helper: lazy-load executor_instance to break circular import
 # ---------------------------------------------------------------
 def _get_executor():
     try:
         from weall_node.weall_api import executor_instance
+
         return executor_instance
     except Exception as e:
         raise RuntimeError(f"Executor not available: {e}")
+
 
 # ---------------------------------------------------------------
 # Routes
@@ -30,12 +33,16 @@ def opt_in_validator(user_id: str = Query(...)):
     Opt a user into the validator pool (requires PoH Tier-3).
     """
     if not has_nft(user_id, "PoH", min_level=3):
-        raise HTTPException(status_code=401, detail="PoH Tier-3 required to become validator")
+        raise HTTPException(
+            status_code=401, detail="PoH Tier-3 required to become validator"
+        )
 
     executor = _get_executor()
     result = executor.opt_in_validator(user_id)
     if not result.get("ok"):
-        raise HTTPException(status_code=400, detail=result.get("error", "Opt-in failed"))
+        raise HTTPException(
+            status_code=400, detail=result.get("error", "Opt-in failed")
+        )
     return {"ok": True, "message": "User added to validator pool"}
 
 
@@ -47,7 +54,9 @@ def opt_out_validator(user_id: str = Query(...)):
     executor = _get_executor()
     result = executor.opt_out_validator(user_id)
     if not result.get("ok"):
-        raise HTTPException(status_code=400, detail=result.get("error", "Opt-out failed"))
+        raise HTTPException(
+            status_code=400, detail=result.get("error", "Opt-out failed")
+        )
     return {"ok": True, "message": "User removed from validator pool"}
 
 
@@ -83,7 +92,9 @@ def run_validator_epoch(user_id: str = Query(...)):
     Execute validator role for the current epoch (if elected).
     """
     if not has_nft(user_id, "PoH", min_level=3):
-        raise HTTPException(status_code=401, detail="PoH Tier-3 required to run validator")
+        raise HTTPException(
+            status_code=401, detail="PoH Tier-3 required to run validator"
+        )
 
     executor = _get_executor()
     try:

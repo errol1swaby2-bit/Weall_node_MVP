@@ -1,0 +1,125 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<title>WeAll • Genesis Bootstrap</title>
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<style>
+  :root { --bg:#0b0d10; --card:#0f1319; --line:#16202b; --ink:#e8eef7; --mut:#a8b3c2; --btn:#1f2937; --btnh:#374151; --ok:#49d49d; --warn:#f6c56c; --err:#ff7f7f; }
+  html,body { height:100% }
+  body{margin:0;font-family:system-ui,-apple-system,Segoe UI,Roboto,Arial,Helvetica,sans-serif;background:var(--bg);color:var(--ink)}
+  header{padding:12px 16px;border-bottom:1px solid var(--line);background:#0e1218}
+  h2{margin:0;font-size:18px}
+  main{display:grid;grid-template-columns:420px 1fr;gap:12px;padding:12px}
+  .card{background:var(--card);border:1px solid var(--line);border-radius:12px;padding:12px}
+  label{display:block;font-size:12px;color:var(--mut);margin:8px 0 4px}
+  input,textarea,select,button{width:100%;background:#0c1117;color:var(--ink);border:1px solid #223243;border-radius:8px;padding:8px 10px}
+  textarea{min-height:220px}
+  button{cursor:pointer;background:var(--btn);border-color:#2b3a4a}
+  button:hover{background:var(--btnh)}
+  .row{display:flex;gap:8px;align-items:center}
+  .row>*{flex:1}
+  .pill{display:inline-block;font-size:11px;padding:2px 6px;border-radius:999px;border:1px solid #243242;background:#0c1117;margin:2px 6px 2px 0}
+  .mut{color:var(--mut)} .ok{color:var(--ok)} .warn{color:var(--warn)} .err{color:var(--err)}
+  .kvs{font-family:ui-monospace,Menlo,Consolas,monospace;background:#0a0c10;border:1px solid #223243;border-radius:8px;padding:8px;font-size:12px;white-space:pre-wrap;word-break:break-word}
+</style>
+</head>
+<body>
+<script src="/static/./auth.js"></script>
+<script> weallAuth.require({ minTier: 3 }); </script>
+
+<header>
+  <h2>WeAll • Genesis Bootstrap (apply / inspect / seal)</h2>
+</header>
+
+<main>
+  <section class="card">
+    <h3>Manifest</h3>
+    <div class="row">
+      <input id="netId" placeholder="network_id (e.g., weall-testnet-1)" />
+      <input id="genesisTime" placeholder="genesis_time (RFC3339, optional)" />
+    </div>
+    <label>Bootnodes (one per line)</label>
+    <textarea id="bootnodes" placeholder="https://boot1:8443&#10;https://boot2:8443"></textarea>
+
+    <label>Manifest JSON (optional; overrides above if provided)</label>
+    <textarea id="manifestJson" placeholder='{"network_id":"weall-testnet-1","genesis_time":"2025-10-26T00:00:00Z","bootnodes":["https://boot1:8443"]}'></textarea>
+
+    <div class="row" style="margin-top:6px">
+      <button id="btnApply">Apply</button>
+      <button id="btnSeal">Seal</button>
+      <button id="btnStatus">Status</button>
+    </div>
+    <div id="out" class="kvs" style="margin-top:8px"></div>
+  </section>
+
+  <section class="card">
+    <h3>State</h3>
+    <div id="stateBox" class="kvs"></div>
+  </section>
+</main>
+
+<script>
+(() => {
+  const $ = s => document.querySelector(s);
+  const J = x => JSON.stringify(x,null,2);
+
+  async function getJSON(path){
+    const r=await fetch(path,{credentials:'include'});
+    const t=await r.text(); let j={}; try{ j=t?JSON.parse(t):{} }catch{ j={raw:t} }
+    if(!r.ok) throw new Error(j.error||String(r.status)); return j;
+  }
+  async function postJSON(path, body){
+    const r=await fetch(path,{method:'POST',headers:{'Content-Type':'application/json'},credentials:'include',body:JSON.stringify(body||{})});
+    const t=await r.text(); let j={}; try{ j=t?JSON.parse(t):{} }catch{ j={raw:t} }
+    if(!r.ok) throw new Error(j.error||String(r.status)); return j;
+  }
+
+  function buildManifestFromForm(){
+    const network_id = $('#netId').value.trim();
+    const genesis_time = $('#genesisTime').value.trim() || null;
+    const bootnodes = ($('#bootnodes').value||'').split('\n').map(s=>s.trim()).filter(Boolean);
+    const m = { network_id, genesis_time: genesis_time || null, bootnodes };
+    return m;
+  }
+
+  async function status(){
+    const r = await getJSON('/genesis/status');
+    $('#out').textContent = J(r);
+    try {
+      const h = await getJSON('/health');
+      $('#stateBox').textContent = J(h.genesis ? { genesis: h.genesis, network: h.network } : h);
+    } catch(e) {}
+  }
+
+  async function apply(){
+    let manifest = null;
+    const raw = $('#manifestJson').value.trim();
+    if (raw) {
+      try { manifest = JSON.parse(raw); }
+      catch(e){ return alert('Manifest JSON is invalid'); }
+    } else {
+      manifest = buildManifestFromForm();
+    }
+    const r = await postJSON('/genesis/apply', { manifest });
+    $('#out').textContent = J(r);
+    await status();
+  }
+
+  async function seal(){
+    const r = await postJSON('/genesis/seal', {});
+    $('#out').textContent = J(r);
+    await status();
+  }
+
+  // Bindings
+  $('#btnStatus').onclick = ()=>status().catch(e=>$('#out').textContent='Error: '+e.message);
+  $('#btnApply').onclick  = ()=>apply().catch(e=>$('#out').textContent='Error: '+e.message);
+  $('#btnSeal').onclick   = ()=>seal().catch(e=>$('#out').textContent='Error: '+e.message);
+
+  // Boot
+  status().catch(()=>{});
+})();
+</script>
+</body>
+</html>

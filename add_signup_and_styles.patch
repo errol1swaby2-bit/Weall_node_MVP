@@ -1,0 +1,102 @@
+*** /dev/null
+--- signup.html
+***************
+*** 0 ****
+--- 1,120 ----
++ <!DOCTYPE html>
++ <html lang="en">
++ <head>
++   <meta charset="UTF-8" />
++   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
++   <title>WeAll — Sign Up</title>
++   <link rel="stylesheet" href="/styles.css" />
++ </head>
++ <body>
++   <header class="wa-header">
++     <h1>WeAll — Create your account</h1>
++   </header>
++ 
++   <main class="wa-main">
++     <form id="signup-form" class="wa-card" autocomplete="on">
++       <label>Email
++         <input type="email" id="email" name="email" required placeholder="you@example.com" />
++       </label>
++ 
++       <label>Password
++         <input type="password" id="password" name="password" required minlength="8" />
++       </label>
++ 
++       <label>Confirm Password
++         <input type="password" id="confirm" name="confirm" required minlength="8" />
++       </label>
++ 
++       <button type="submit">Create Account</button>
++       <p class="wa-help">
++         Already have an account? <a href="/login.html">Log in</a>.
++       </p>
++     </form>
++ 
++     <section class="wa-note">
++       <p>By creating an account, you agree to follow WeAll community guidelines and complete onboarding.</p>
++       <p>Next step after sign-up: <a href="/onboarding.html">Onboarding</a>.</p>
++     </section>
++   </main>
++ 
++   <script src="/session.js"></script>
++   <script>
++     (function () {
++       const form = document.getElementById('signup-form');
++       form.addEventListener('submit', async (e) => {
++         e.preventDefault();
++         const email = document.getElementById('email').value.trim();
++         const password = document.getElementById('password').value;
++         const confirm = document.getElementById('confirm').value;
++         if (password !== confirm) {
++           alert('Passwords do not match.');
++           return;
++         }
++ 
++         try {
++           // Adjust '/api/signup' to your actual backend route if different.
++           const res = await fetch('/api/signup', {
++             method: 'POST',
++             headers: { 'Content-Type': 'application/json' },
++             body: JSON.stringify({ email, password })
++           });
++           if (!res.ok) {
++             const text = await res.text();
++             throw new Error(text || ('HTTP ' + res.status));
++           }
++           window.location.href = '/onboarding.html';
++         } catch (err) {
++           console.error(err);
++           alert('Sign up failed. ' + (err && err.message ? err.message : ''));
++         }
++       });
++     })();
++   </script>
++ </body>
++ </html>
+*** /dev/null
+--- styles.css
+***************
+*** 0 ****
+--- 1,36 ----
++ /* WeAll root stylesheet mapped to README's /styles.css */
++ :root { --gap: 1rem; --radius: 12px; --maxw: 640px; --bg: #0b1020; --ink: #e7eefc; --card: #121a33; }
++ 
++ html, body { margin: 0; padding: 0; font-family: system-ui, -apple-system, Segoe UI, Roboto, Ubuntu, Cantarell, 'Helvetica Neue', Arial, 'Noto Sans', 'Apple Color Emoji', 'Segoe UI Emoji', 'Segoe UI Symbol'; background: var(--bg); color: var(--ink); }
++ 
++ .wa-header { padding: calc(var(--gap) * 2) var(--gap); text-align: center; }
++ .wa-main { display: grid; gap: var(--gap); padding: var(--gap); place-items: center; }
++ 
++ .wa-card { background: var(--card); border-radius: var(--radius); padding: calc(var(--gap) * 1.25); width: min(100% - 2*var(--gap), var(--maxw)); box-shadow: 0 6px 30px rgba(0,0,0,0.25); display: grid; gap: var(--gap); }
++ .wa-card label { display: grid; gap: 0.5rem; font-weight: 600; }
++ .wa-card input { padding: 0.75rem; border-radius: 10px; border: 1px solid #2a355f; background: #0e1530; color: var(--ink); }
++ .wa-card button { padding: 0.9rem 1.1rem; border-radius: 999px; border: 0; font-weight: 700; cursor: pointer; }
++ .wa-help { opacity: 0.85; }
++ 
++ a { color: #a7c7ff; }
++ 
++ /* Optional: import project-specific styles */
++ /* @import url('/frontendtendtend/style.css'); */

@@ -1,88 +1,557 @@
-<!DOCTYPE html>
+<!doctype html>
 <html lang="en">
 <head>
-<meta charset="UTF-8"><meta name="viewport" content="width=device-width,initial-scale=1">
-<title>WeAll • Dashboard</title>
-<style>
-body{margin:0;font-family:Arial,Helvetica,sans-serif;background:#000;color:#fff}
-nav{display:flex;justify-content:space-around;align-items:center;background:#111;padding:10px 0;gap:8px}
-nav button{background:#222;color:#fff;border:none;padding:10px 20px;cursor:pointer;font-size:16px;border-radius:6px;position:relative}
-nav button.active{background:#555}
-#welcome-user{font-size:15px;color:#aaa;margin-right:10px}
-.badge{position:absolute;top:-4px;right:-4px;width:10px;height:10px;border-radius:50%;background:#10b981;opacity:0;transition:opacity .25s ease}
-section{display:none;padding:20px;min-height:calc(100vh - 50px)}section.active{display:block}
-.panel{background:#111;border:1px solid #333;border-radius:8px;padding:15px;margin-bottom:15px}
-button{background:#1f2937;color:#fff;border:1px solid #374151;cursor:pointer;border-radius:6px;padding:6px 10px}
-button:hover{background:#374151}
-small.update{color:#888;font-size:13px}
-@keyframes pulse-kf{0%{box-shadow:0 0 0 0 rgba(16,185,129,0.6)}70%{box-shadow:0 0 0 12px rgba(16,185,129,0)}100%{box-shadow:0 0 0 0 rgba(16,185,129,0)}}
-.pulse{animation:pulse-kf 1.2s ease-out;border-color:#10b981 !important}
-.post-card,.proposal-card{border:1px solid #2b2b2b;border-radius:8px;padding:12px;margin:10px 0;background:#0b0b0b}
-</style>
+<script>
+(function(){
+  var LOGIN = "/frontend/login.html";
+  function normalize(u){
+    try{
+      if(!u) return u;
+      if(u === "/" || u === window.location.origin || u === window.location.origin + "/") return LOGIN;
+      if(typeof u === "string" && u.trim() === "/") return LOGIN;
+    }catch(e){}
+    return u;
+  }
+  try{
+    var proto = (window.Location && Location.prototype) ? Location.prototype : null;
+    var L = window.location;
+    var rep = (proto && proto.replace) ? proto.replace : L.replace.bind(L);
+    var asn = (proto && proto.assign)  ? proto.assign  : L.assign.bind(L);
+    function safeReplace(u){ return rep.call(this, normalize(u)||u); }
+    function safeAssign(u){  return asn.call(this, normalize(u)||u); }
+    if(proto){
+      if(proto.replace !== safeReplace) proto.replace = safeReplace;
+      if(proto.assign  !== safeAssign ) proto.assign  = safeAssign;
+      try{
+        var hrefDesc = Object.getOwnPropertyDescriptor(Location.prototype, "href");
+        if(hrefDesc && hrefDesc.set){
+          var set0 = hrefDesc.set;
+          Object.defineProperty(Location.prototype, "href", {
+            configurable:true, enumerable:hrefDesc.enumerable, get:hrefDesc.get,
+            set: function(v){ set0.call(this, normalize(v)||v); }
+          });
+        }
+      }catch(_){}
+    }else{
+      window.location.replace = safeReplace;
+      window.location.assign  = safeAssign;
+    }
+    // history
+    try{
+      var p = history.pushState, r = history.replaceState;
+      history.pushState    = function(s,t,u){ return p.call(this, s,t, normalize(u)||u); };
+      history.replaceState = function(s,t,u){ return r.call(this, s,t, normalize(u)||u); };
+    }catch(_){}
+    // DOM attributes
+    function rewrite(root){
+      root = root||document;
+      root.querySelectorAll('[href="/"],[src="/"],[action="/"]').forEach(function(el){
+        if(el.hasAttribute("href"))   el.setAttribute("href",   LOGIN);
+        if(el.hasAttribute("src"))    el.setAttribute("src",    LOGIN);
+        if(el.hasAttribute("action")) el.setAttribute("action", LOGIN);
+      });
+    }
+    document.addEventListener("submit", function(e){
+      try{
+        var f=e.target;
+        if(f && (f.getAttribute("action")==="/" || f.action===window.location.origin+"/")){
+          e.preventDefault(); window.location.assign(LOGIN);
+        }
+      }catch(_){}
+    }, true);
+    if(document.readyState==="loading"){ document.addEventListener("DOMContentLoaded", function(){ rewrite(); }); }
+    else { rewrite(); }
+    try{
+      var obs=new MutationObserver(function(ms){
+        for (var m of ms){ for (var n of (m.addedNodes||[])){ if(n.nodeType===1) rewrite(n); } }
+      });
+      obs.observe(document.documentElement, {childList:true, subtree:true});
+    }catch(_){}
+    // Last resort: if path ever becomes "/", force to login.
+    try{
+      if (location.pathname === "/") { location.replace(LOGIN); }
+      setInterval(function(){ if(location.pathname === "/"){ location.replace(LOGIN); } }, 300);
+    }catch(_){}
+  }catch(_){}
+})();
+</script>
+
+  <base href="/frontend/">
+  <meta charset="utf-8"/>
+  <meta name="viewport" content="width=device-width,initial-scale=1"/>
+  <title>WeAll</title>
+  <style>
+    :root { --bg:#f7f7fa; --card:#fff; --text:#1f2937; --muted:#6b7280; --brand:#2563eb; --ok:#16a34a; }
+    *{box-sizing:border-box} body{margin:0;background:var(--bg);color:var(--text);font:16px/1.4 system-ui,Segoe UI,Roboto}
+    .wrap{max-width:960px;margin:0 auto;padding:20px}
+    .hero{display:flex;flex-direction:column;align-items:center;margin:56px 0 32px}
+    .title{font-size:52px;font-weight:800;color:var(--brand);letter-spacing:.3px;margin:0 0 8px}
+    .tag{color:var(--muted);margin:0 0 24px}
+    .row{display:flex;gap:12px;flex-wrap:wrap}
+    .btn{appearance:none;border:0;border-radius:10px;padding:12px 20px;font-weight:600;cursor:pointer}
+    .btn.blue{background:var(--brand);color:#fff}
+    .btn.green{background:var(--ok);color:#fff}
+    .btn.ghost{background:#e5e7eb;color:#111827}
+    .topbar{display:flex;justify-content:space-between;align-items:center;margin:10px 0 22px}
+    .pill{padding:8px 12px;border-radius:999px;background:#eef2ff;color:#4338ca;font-weight:600}
+    .card{background:var(--card);border-radius:16px;padding:18px 18px;box-shadow:0 6px 18px rgba(0,0,0,.05);margin:12px 0}
+    .card h2{margin:0 0 8px}
+    .muted{color:var(--muted)}
+    .input{width:100%;padding:12px 12px;border:1px solid #e5e7eb;border-radius:10px;outline:none}
+    .stack{display:flex;flex-direction:column;gap:12px}
+    .tabs{position:sticky;bottom:0;background:var(--bg);display:flex;gap:18px;justify-content:center;padding:12px}
+    .tab{padding:10px 18px;border-radius:12px}
+    .tab.active{background:#e5e7eb}
+    .right{display:flex;gap:10px;align-items:center}
+    .badge{font-weight:700}
+    .center{display:flex;justify-content:center}
+    .mono{font-family:ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", "Courier New", monospace}
+    textarea.input{resize:vertical}
+  </style>
+  <script src="env.js"></script>
+  <script src="api_shim.js"></script>
+
+  <script>
+  // Minimal guard: if no session token, go to signup
+  (function(){
+    try{
+      var t = localStorage.getItem('weall_token') || sessionStorage.getItem('weall_token');
+      if(!t){ location.replace('/frontend/login.html'); }
+    }catch(e){}
+  })();
+  </script>
+
 </head>
 <body>
-<nav>
-  <div id="welcome-user"></div>
-  <button onclick="showPage('feed')" id="tab-feed" class="active">Feed<span id="badge-feed" class="badge"></span></button>
-  <button onclick="showPage('governance')" id="tab-governance">Governance<span id="badge-gov" class="badge"></span></button>
-  <button onclick="showPage('profile')" id="tab-profile">Profile<span id="badge-profile" class="badge"></span></button>
-  <button onclick="logout()" style="background:#400;">Logout</button>
+<nav id="topbar" style="position:sticky;top:0;z-index:1000;background:#0b1020;color:#fff;padding:.5rem .75rem;display:flex;justify-content:space-between;align-items:center;border-bottom:1px solid #1f2a44">
+  <strong>WeAll</strong>
+  <a id="ctaSignupTop" href="/frontend/login.html" role="button" aria-label="Join WeAll"
+     style="background:#32d47a;padding:.5rem .9rem;border-radius:.6rem;text-decoration:none;color:#0b1020;font-weight:600">
+    Join WeAll
+  </a>
 </nav>
 
-<section id="feed" class="active">
-  <h2>Feed</h2>
-  <div class="panel" id="feed-panel">
-    <h3>Proof-of-Humanity Onboarding</h3>
-    <div class="actions">
-      <button onclick="registerUser()">Register (Tier 1)</button>
-      <button onclick="requestTier1()">Verify Email</button>
-      <button onclick="startTier3Request()">Request Tier 3</button>
-      <button onclick="initiateFounderVideo()">Founder Video</button>
-      <button onclick="founderApprove()">Founder Approve</button>
-      <button onclick="initiatePanel()">Start Juror Panel</button>
-      <button onclick="checkTier3Status()">Check Status</button>
-      <button onclick="getTier3NFT()">Get NFT</button>
+<div id="toast" role="status" aria-live="polite"></div>
+  <div class="wrap" id="app">
+    <!-- Unauthed landing -->
+    <div id="landing">
+      <div class="hero">
+        <h1 class="title">WeAll</h1>
+        <p class="tag">Decentralized coordination, human-first.</p>
+        <div class="row">
+          <button class="btn blue" id="btnLogin">Login</button>
+          <button class="btn green" id="btnSignup">Sign Up</button>
+        </div>
+        <p class="muted mono">API: <span id="apiBase"></span></p>
+      </div>
+
+      <!-- Signup / Login panels -->
+      <div class="card" id="panelSignup" style="display:none">
+        <h2>Sign Up (Tier-1 Email)</h2>
+        <div class="stack">
+          <input class="input" id="suEmail" placeholder="your@email.com" inputmode="email" />
+          <div class="row">
+            <button class="btn green" id="btnRequestCode">Request Code</button>
+            <button class="btn ghost" id="btnBack1">Back</button>
+          </div>
+          <div id="codeArea" style="display:none" class="stack">
+            <input class="input" id="suCode" placeholder="6-digit code" inputmode="numeric" maxlength="6"/>
+            <div class="row">
+              <button class="btn blue" id="btnVerifyCode">Verify & Login</button>
+              <button class="btn ghost" id="btnResend">Resend</button>
+            </div>
+            <p class="muted">Code is sent from <span class="mono">WeAll &lt;weall.verify@gmail.com&gt;</span> (logged to server console in dev).</p>
+          </div>
+        </div>
+      </div>
+
+      <div class="card" id="panelLogin" style="display:none">
+        <h2>Login (existing ID)</h2>
+        <div class="stack">
+          <input class="input" id="liEmail" placeholder="user id (email)"/>
+          <div class="row">
+            <button class="btn blue" id="btnDoLogin">Login</button>
+            <button class="btn ghost" id="btnBack2">Back</button>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- Authed app -->
+    <div id="authed" style="display:none">
+      <div class="topbar">
+        <div class="pill">WeAll</div>
+        <div class="right">
+          <span id="who" class="muted"></span>
+          <span class="badge" id="pohBadge"></span>
+          <button class="btn ghost" id="btnLogout">Logout</button>
+        </div>
+      </div>
+
+      <!-- FEED -->
+      <div id="viewFeed">
+        <div class="card">
+          <h2>Feed</h2>
+          <div class="stack">
+            <textarea class="input" rows="3" id="postText" placeholder="Share something…"></textarea>
+            <div class="row">
+              <button class="btn green" id="btnPost">Post</button>
+              <button class="btn ghost" id="btnRefreshFeed">Refresh</button>
+            </div>
+          </div>
+        </div>
+
+        <!-- Verification panel (Tier-2 / Tier-3) -->
+        <div class="card" id="verifyPanel" style="margin-top:12px">
+          <h2>Verification</h2>
+          <div class="stack">
+            <div class="row" style="flex-wrap:nowrap">
+              <input class="input" id="tier2Evidence" placeholder="Tier-2: link to selfie or doc (optional)"/>
+              <button class="btn blue" id="btnTier2">Apply Tier-2</button>
+            </div>
+            <div class="row" style="flex-wrap:nowrap">
+              <input class="input" id="tier3Video" placeholder="Tier-3: link to short video proof"/>
+              <button class="btn blue" id="btnTier3">Apply Tier-3</button>
+            </div>
+            <small class="muted">Auto-approve while user count is low; juror flow activates as the network grows.</small>
+          </div>
+        </div>
+
+        <div id="feedList"></div>
+      </div>
+
+      <!-- GOVERNANCE (placeholder) -->
+      <div id="viewGov" style="display:none">
+        <div class="card"><h2>Governance</h2>
+          <p class="muted">Tier-3 quorum ≥ 60%; Yes &gt; 50% among quorum (from config).</p>
+        </div>
+      </div>
+
+      <!-- PROFILE -->
+      <div id="viewProfile" style="display:none">
+        <div class="card"><h2>Profile</h2>
+          <p><strong>User:</strong> <span id="pfUser"></span></p>
+          <p><strong>PoH Level:</strong> <span id="pfPoh"></span></p>
+          <p><strong>NFT Minted:</strong> <span id="pfNft"></span></p>
+        </div>
+      </div>
+
+      <div class="tabs center">
+        <button class="tab active" data-tab="feed">Feed</button>
+        <button class="tab" data-tab="gov">Governance</button>
+        <button class="tab" data-tab="profile">Profile</button>
+      </div>
     </div>
   </div>
-  <div class="panel" id="feed-panel-list">
-    <h3>Posts Feed</h3>
-    <div id="feed"></div>
-    <small id="feed-last-updated" class="update"></small>
-  </div>
-</section>
 
-<section id="governance">
-  <h2>Governance</h2>
-  <div class="panel" id="gov-panel">
-    <div id="proposal-list"></div>
-    <small id="gov-last-updated" class="update"></small>
-  </div>
-</section>
+  <script>
+    // ----------- Config -----------
+    const API = location.origin;
+    document.getElementById("apiBase").textContent = API;
 
-<section id="profile">
-  <h2>Profile</h2>
-  <div class="panel" id="profile-panel">
-    <div id="profile-data"></div>
-    <small id="profile-last-updated" class="update"></small>
-  </div>
-</section>
+    // Prefer modern endpoints; fall back to legacy if 404
+    const PATHS = {
+      requestTier1: "/poh/request-tier1",
+      verifyTier1: "/poh/verify-tier1",
+      contentFeed: "/content/feed",
+      contentPost: "/content/post",
+      legacyFeed: "/show_posts",
+      legacyUserFeed: (uid) => `/list_user_posts/${encodeURIComponent(uid)}`
+    };
+
+    const $ = (id) => document.getElementById(id);
+    const state = {
+      user: localStorage.getItem("weall_user") || "",
+      poh: Number(localStorage.getItem("weall_poh") || "0"),
+      nftMinted: localStorage.getItem("weall_nft") === "1",
+      useLegacyFeed: false,
+    };
+
+    function saveSession() {
+      localStorage.setItem("weall_user", state.user);
+      localStorage.setItem("weall_poh", String(state.poh));
+      localStorage.setItem("weall_nft", state.nftMinted ? "1" : "0");
+    }
+
+    function show(id){ ["landing","authed"].forEach(x=>$(x).style.display = (x===id)?"block":"none"); }
+    function showTab(which){
+      for (const v of ["viewFeed","viewGov","viewProfile"]) $(v).style.display = "none";
+      const map = {feed:"viewFeed", gov:"viewGov", profile:"viewProfile"};
+      $(map[which]).style.display = "block";
+      document.querySelectorAll(".tab").forEach(t => t.classList.toggle("active", t.dataset.tab===which));
+    }
+
+    // ----------- Session/UI boot -----------
+    function renderAuthedBar() {
+      $("who").textContent = state.user || "";
+      $("pohBadge").textContent = `PoH: ${state.poh}`;
+      $("pfUser").textContent = state.user || "";
+      $("pfPoh").textContent = String(state.poh);
+
+    async function detectFeedMode() {
+      try {
+        const r = await fetch(API + PATHS.contentFeed);
+        if (r.status === 404) state.useLegacyFeed = true;
+      } catch { state.useLegacyFeed = true; }
+    }
+
+    async function refreshFeed() {
+      const list = $("feedList");
+      list.innerHTML = "";
+      try {
+        let items = [];
+        if (!state.useLegacyFeed) {
+          const r = await fetch(API + PATHS.contentFeed);
+          if (r.status === 404) { state.useLegacyFeed = true; return refreshFeed(); }
+          items = await r.json();
+        } else {
+          const r = await fetch(API + PATHS.legacyUserFeed(state.user));
+          items = await r.json();
+        }
+
+        if (!Array.isArray(items)) items = items.items || [];
+        if (items.length === 0) {
+          list.innerHTML = `<div class="card"><span class="muted">No posts yet.</span></div>`;
+          return;
+        }
+        for (const it of items) {
+          const author = it.author || it.user || "system";
+          const text = it.text || it.message || JSON.stringify(it);
+          const when = it.ts ? new Date(it.ts*1000) : new Date();
+          const div = document.createElement("div");
+          div.className = "card";
+          div.innerHTML = `<div style="display:flex;justify-content:space-between">
+              <strong>${author}</strong>
+              <span class="muted" style="font-size:12px">${when.toLocaleString()}</span>
+            </div>
+            <div style="margin-top:6px">${escapeHtml(text)}</div>`;
+          list.appendChild(div);
+        }
+      } catch (e) {
+        list.innerHTML = `<div class="card"><span class="muted">Failed to load feed.</span></div>`;
+      }
+    }
+
+    async function postMessage() {
+      const text = $("postText").value.trim();
+      if (!text) return alert("Type something to post.");
+      try {
+        if (!state.useLegacyFeed) {
+          const r = await fetch(API + PATHS.contentPost, {
+            method:"POST",
+            headers:{"content-type":"application/json"},
+            body: JSON.stringify({ author: state.user, text })
+          });
+          if (r.status === 404) {
+            state.useLegacyFeed = true;
+          } else if (!r.ok) {
+            const t = await r.text();
+            throw new Error(t || r.statusText);
+          }
+        } else {
+          // Legacy create endpoint not implemented—UI stays responsive.
+        }
+        $("postText").value = "";
+        await refreshFeed();
+      } catch (e) {
+        alert("Post failed: " + (e.message || e));
+      }
+    }
+
+    // ----------- Email/Tier-1 flow -----------
+    async function requestCode(email) {
+      const r = await fetch(API + PATHS.requestTier1, {
+        method:"POST",
+        headers:{"content-type":"application/json"},
+        body: JSON.stringify({ user: email, email })
+      });
+      if (!r.ok) throw new Error(await r.text());
+      return true;
+    }
+    async function verifyCode(email, code) {
+      const r = await fetch(API + PATHS.verifyTier1, {
+        method:"POST",
+        headers:{"content-type":"application/json"},
+        body: JSON.stringify({ user: email, code: String(code || "").trim() })
+      });
+      if (!r.ok) throw new Error(await r.text());
+      const out = await r.json(); // {ok:true, tier/poh_level:1, nft_minted:bool}
+      return out;
+    }
+
+    // ----------- Tier-2 / Tier-3 actions -----------
+    async function applyTier2() {
+      const evidence = ($("tier2Evidence").value || "").trim() || "selfie";
+      if (!state.user) return alert("Login first.");
+      const r = await fetch(API + "/poh/tier2", {
+        method:"POST",
+        headers:{ "content-type":"application/json" },
+        body: JSON.stringify({ user: state.user, evidence })
+      });
+      const out = await r.json().catch(()=>({}));
+      if (!r.ok || out.ok === false) return alert("Tier-2 failed: " + (out.error || r.statusText));
+      alert("Tier-2 OK: " + (out.status || "approved"));
+      // Optionally bump visible PoH if returned
+      if (typeof out.tier === "number" && out.tier > state.poh) {
+        state.poh = out.tier; saveSession(); renderAuthedBar();
+      }
+    }
+
+    async function applyTier3() {
+      const video_proof = ($("tier3Video").value || "").trim() || "video";
+      if (!state.user) return alert("Login first.");
+      const r = await fetch(API + "/poh/tier3", {
+        method:"POST",
+        headers:{ "content-type":"application/json" },
+        body: JSON.stringify({ user: state.user, video_proof })
+      });
+      const out = await r.json().catch(()=>({}));
+      if (!r.ok || out.ok === false) return alert("Tier-3 failed: " + (out.error || r.statusText));
+      alert("Tier-3 OK: " + (out.status || "approved"));
+      if (typeof out.tier === "number" && out.tier > state.poh) {
+        state.poh = out.tier; saveSession(); renderAuthedBar();
+      }
+    }
+
+    // ----------- Small helpers -----------
+    function escapeHtml(s){ return s.replace(/[&<>"]/g,c=>({ "&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;"}[c])) }
+
+    // ----------- Wire up -----------
+    $("btnSignup").onclick = () => { $("panelLogin").style.display="none"; $("panelSignup").style.display="block"; };
+    $("btnLogin").onclick  = () => { $("panelSignup").style.display="none"; $("panelLogin").style.display="block"; };
+    $("btnBack1").onclick = $("btnBack2").onclick = () => { $("panelSignup").style.display="none"; $("panelLogin").style.display="none"; };
+
+    $("btnRequestCode").onclick = async () => {
+      const email = $("suEmail").value.trim();
+      if (!email) return alert("Enter an email.");
+      try {
+        await requestCode(email);
+        $("codeArea").style.display = "block";
+        alert("Code sent. Check your email.");
+      } catch(e){ alert("Request failed: " + (e.message||e)); }
+    };
+    $("btnResend").onclick = () => $("btnRequestCode").onclick();
+
+    $("btnVerifyCode").onclick = async () => {
+      const email = $("suEmail").value.trim();
+      const code = $("suCode").value.trim();
+      if (!email || !code) return alert("Enter email and code.");
+      try {
+        const out = await verifyCode(email, code);
+        state.user = email;
+        state.poh = Number(out.poh_level ?? out.tier ?? 1);
+        state.nftMinted = !!out.nft_minted;
+        (function(){var e=document.getElementById("pfNft"); if(e){e.textContent=state.nftMinted?"Yes":"No";}})();
+        saveSession();
+        await afterLogin();
+      } catch(e){ alert("Verification failed: " + (e.message||e)); }
+    };
+
+    $("btnDoLogin").onclick = async () => {
+      const email = $("liEmail").value.trim();
+      if (!email) return alert("Enter user id.");
+      state.user = email;
+      state.poh = Number(localStorage.getItem("weall_poh") || "1");
+      saveSession();
+      await afterLogin();
+    };
+
+    $("btnLogout").onclick = () => {
+      state.user = ""; state.poh = 0; state.nftMinted = false;
+      saveSession();
+      show("landing");
+    };
+
+    document.querySelectorAll(".tab").forEach(t => t.onclick = () => showTab(t.dataset.tab));
+    $("btnRefreshFeed").onclick = refreshFeed;
+    $("btnPost").onclick = postMessage;
+
+    // New: Verification buttons
+    (document.getElementById("btnTier2")||{}).onclick = applyTier2;
+    (document.getElementById("btnTier3")||{}).onclick = applyTier3;
+
+    async function afterLogin() {
+      renderAuthedBar();
+      show("authed");
+      showTab("feed");
+      await detectFeedMode();
+      await refreshFeed();
+    }
+
+    // Boot
+    (async () => {
+      if (state.user) { await afterLogin(); } else { show("landing"); }
+    })();
+  </script>
+<!-- CLIENT-ERROR-LISTENER -->
+<script>
+window.addEventListener('error', e => {
+  try { fetch('/content/client-log', {method:'POST', headers:{'content-type':'application/json'}, body: JSON.stringify({ msg:String(e.message||''), file:e.filename, line:e.lineno, col:e.colno })}); } catch(_) {}
+});
+window.addEventListener('unhandledrejection', e => {
+  try { fetch('/content/client-log', {method:'POST', headers:{'content-type':'application/json'}, body: JSON.stringify({ promise:true, reason:String(e.reason||'') })}); } catch(_) {}
+});
+</script>
+
+
+<footer class="weall-footer">
+  <span>© WeAll</span>
+  &nbsp;•&nbsp;<a href="/frontend/privacy.html">Privacy</a>
+  &nbsp;•&nbsp;<a href="/frontend/terms.html">Terms</a>
+</footer>
+
+
+<a id="cta-float" href="/frontend/login.html">Join WeAll</a>
 
 <script>
-function showPage(p){
-  // clear all badges on tab switch
-  ['badge-feed','badge-gov','badge-profile'].forEach(id=>{const b=document.getElementById(id);if(b)b.style.opacity='0';});
+(function(){
+  function isSignUpEl(el){
+    if(!el) return false;
+    const t = (el.innerText || el.textContent || '').trim().toLowerCase();
+    const id = (el.id||'').toLowerCase();
+    const cls = (el.className||'').toString().toLowerCase();
+    const da = (el.getAttribute && (el.getAttribute('data-action')||'').toLowerCase()) || '';
+    return t === 'sign up' || id.includes('signup') || cls.includes('signup') || da === 'signup';
+  }
+  function go(){ location.assign('/frontend/login.html'); }
 
-  document.querySelectorAll('section').forEach(s=>s.classList.remove('active'));
-  document.getElementById(p).classList.add('active');
-  document.querySelectorAll('nav button').forEach(b=>b.classList.remove('active'));
-  document.getElementById(`tab-${p}`).classList.add('active');
+  // Directly wire common candidates
+  var candidates = Array.from(document.querySelectorAll(
+    '#signup, #signUp, #btnSignUp, [data-action="signup"], .signup, button, a'
+  ));
+  candidates.filter(isSignUpEl).forEach(function(el){
+    try { el.removeAttribute('disabled'); } catch(_) {}
+    el.style.pointerEvents = 'auto';
+    el.style.cursor = 'pointer';
+    el.addEventListener('click', function(ev){ try{ev.preventDefault();}catch(_){} go(); }, {passive:false});
+  });
 
-  if(p==='feed')initFeedRefresh();
-  if(p==='governance')initGovRefresh();
-  if(p==='profile')initProfileRefresh();
-}
+  // Global safety net: capture clicks anywhere
+  document.addEventListener('click', function(ev){
+    var el = ev.target;
+    // Walk up a few ancestors in case of nested spans/icons
+    for (var i=0;i<4 && el;i++){
+      if (isSignUpEl(el)) { try{ev.preventDefault();}catch(_){} go(); return; }
+      el = el.parentElement;
+    }
+  }, true);
+})();
 </script>
-<script src="main.js"></script>
-<script src="footer.js"></script>
+
+
+<script>
+  // Gate onboarding only when coming from a user-initiated Tier request
+  function goToOnboarding() {
+    try { sessionStorage.setItem('weall_go_onboarding','1'); } catch(e){}
+    // patched out: no auto-redirect to advanced login
+  }
+  // Wire up any existing buttons with data-go-onboarding
+  document.addEventListener('DOMContentLoaded', function(){
+    document.querySelectorAll('[data-go-onboarding]').forEach(function(btn){
+      btn.addEventListener('click', function(e){ e.preventDefault(); goToOnboarding(); });
+    });
+  });
+</script>
+
 </body>
 </html>

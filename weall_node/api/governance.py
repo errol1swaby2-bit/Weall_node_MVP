@@ -9,13 +9,15 @@ Backed by the app_state.governance runtime.
 import logging
 from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel
-from weall_node.app_state import governance
+from ..weall_executor import executor
 
 router = APIRouter(prefix="/governance", tags=["governance"])
 logger = logging.getLogger("governance")
 
 if not logger.handlers:
-    logging.basicConfig(level=logging.INFO, format="%(asctime)s [%(levelname)s] %(message)s")
+    logging.basicConfig(
+        level=logging.INFO, format="%(asctime)s [%(levelname)s] %(message)s"
+    )
 
 
 # -------------------------------
@@ -56,7 +58,9 @@ class VoteCast(BaseModel):
 def propose(data: ProposalCreate):
     """Submit a new governance proposal."""
     try:
-        result = governance.propose(data.user, data.title, data.description, data.pallet_reference)
+        result = governance.propose(
+            data.user, data.title, data.description, data.pallet_reference
+        )
         logger.info("Proposal created by %s: %s", data.user, data.title)
         return result
     except ValueError as e:
@@ -71,7 +75,9 @@ def vote(data: VoteCast):
     """Cast a vote on an existing proposal."""
     try:
         result = governance.vote(data.user, data.proposal_id, data.vote)
-        logger.info("Vote by %s on proposal %s: %s", data.user, data.proposal_id, data.vote)
+        logger.info(
+            "Vote by %s on proposal %s: %s", data.user, data.proposal_id, data.vote
+        )
         return result
     except ValueError as e:
         raise HTTPException(status_code=400, detail=str(e))

@@ -1,0 +1,221 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <title>WeAll — Profile</title>
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <link rel="stylesheet" href="/static/style.css">
+  <style>
+    body {
+      background:#000;
+      color:#fff;
+      font-family:Arial, sans-serif;
+      margin:0;
+      padding:0;
+    }
+    header {
+      background:#111;
+      padding:12px 16px;
+      display:flex;
+      align-items:center;
+      justify-content:space-between;
+    }
+    header h2 { margin:0; font-size:1.2em; }
+    header a {
+      color:#2ecc71;
+      text-decoration:none;
+      font-weight:bold;
+      font-size:0.9em;
+    }
+    .container {
+      max-width:800px;
+      margin:auto;
+      padding:20px;
+    }
+    .card {
+      background:#111;
+      border-radius:12px;
+      padding:16px;
+      margin-bottom:18px;
+      box-shadow:0 0 5px #222;
+    }
+    h3 { color:#2ecc71; margin-top:0; }
+    .stat { display:flex; justify-content:space-between; margin-bottom:8px; }
+    input {
+      width:100%;
+      background:#000;
+      border:1px solid #333;
+      border-radius:8px;
+      padding:8px;
+      color:#fff;
+      margin-top:6px;
+    }
+    button {
+      background:#2ecc71;
+      border:none;
+      color:#000;
+      border-radius:8px;
+      padding:8px 12px;
+      font-weight:bold;
+      cursor:pointer;
+      margin-top:8px;
+    }
+    button:hover { background:#27ae60; }
+    .msg { color:#aaa; font-size:0.85em; margin-top:8px; }
+    .badge {
+      display:inline-block;
+      background:#2ecc71;
+      color:#000;
+      border-radius:20px;
+      padding:4px 10px;
+      font-weight:bold;
+      margin-right:6px;
+      font-size:0.9em;
+    }
+  </style>
+</head>
+<body>
+  <header>
+    <h2>User Profile</h2>
+    <a href="index.html">← Back to Feed</a>
+  </header>
+
+  <div class="container">
+    <!-- Identity & PoH Tier -->
+    <div class="card">
+      <h3>Proof of Humanity</h3>
+      <div class="stat"><strong>User ID:</strong> <span id="userId">Loading...</span></div>
+      <div class="stat"><strong>Tier:</strong> <span id="tier">Loading...</span></div>
+      <div id="badges" class="msg">Loading badges...</div>
+      <button onclick="refreshPoH()">Refresh Status</button>
+    </div>
+
+    <!-- Wallet -->
+    <div class="card">
+      <h3>Wallet</h3>
+      <div class="stat"><strong>Balance:</strong> <span id="balance">Loading...</span></div>
+      <input id="recipient" placeholder="Recipient User ID">
+      <input id="amount" placeholder="Amount (WEC)" type="number" min="0">
+      <button onclick="transfer()">Send WEC</button>
+      <div class="msg" id="walletMsg"></div>
+    </div>
+
+    <!-- Reputation -->
+    <div class="card">
+      <h3>Reputation</h3>
+      <div class="stat"><strong>Score:</strong> <span id="reputation">Loading...</span></div>
+      <button onclick="refreshReputation()">Refresh</button>
+      <div class="msg" id="repMsg"></div>
+    </div>
+
+    <!-- Security -->
+    <div class="card">
+      <h3>Security</h3>
+      <button onclick="exportKeys()">Export Keys</button>
+      <button onclick="window.location.href='recover.html'">Recover Account</button>
+      <div class="msg" id="keyMsg">Keep your key backup safe!</div>
+    </div>
+  </div>
+
+  <script>
+    const keys = JSON.parse(localStorage.getItem('weall_keys') || '{}');
+    const userId = keys.public || 'unknown';
+
+    async function refreshPoH() {
+      const uid = document.getElementById('userId');
+      const t = document.getElementById('tier');
+      const b = document.getElementById('badges');
+      uid.textContent = userId;
+      try {
+        const res = await fetch(`/poh/status/${encodeURIComponent(userId)}`);
+        if (!res.ok) throw new Error(data.detail || 'Error');
+        t.textContent = data.tier_name || 'Unverified';
+        if (data.badges && data.badges.length) {
+          b.innerHTML = data.badges.map(v => `<span class="badge">${v}</span>`).join('');
+        } else b.textContent = 'No badges earned yet.';
+      } catch (err) {
+        b.textContent = '⚠️ ' + err.message;
+      }
+    }
+
+    async function refreshBalance() {
+      const el = document.getElementById('balance');
+      const msg = document.getElementById('walletMsg');
+      el.textContent = '...';
+      try {
+        const res = await fetch('/ledger/balance/' + userId);
+        const data = await res.json();
+        (function(){var e=document.getElementById("pfNft"); if(e){e.textContent=(data.nft_minted?"Yes":"No");}})();
+if (!res.ok) throw new Error(data.detail || 'Error fetching balance');
+        el.textContent = data.balance + ' WEC';
+      } catch (err) {
+        el.textContent = '⚠️';
+        msg.textContent = err.message;
+      }
+    }
+
+    async function refreshReputation() {
+      const el = document.getElementById('reputation');
+      const msg = document.getElementById('repMsg');
+      el.textContent = '...';
+      try {
+        const res = await fetch('/reputation/' + userId);
+        const data = await res.json();
+        if (!res.ok) throw new Error(data.detail || 'Error fetching reputation');
+        el.textContent = data.score;
+      } catch (err) {
+        el.textContent = '⚠️';
+        msg.textContent = err.message;
+      }
+    }
+
+    async function transfer() {
+      const recipient = document.getElementById('recipient').value.trim();
+      const amount = parseFloat(document.getElementById('amount').value);
+      const msg = document.getElementById('walletMsg');
+      msg.textContent = '';
+      if (!recipient || isNaN(amount)) return msg.textContent = 'Enter recipient and amount.';
+      try {
+        const res = await fetch('/wallet/transfer', {
+          method:'POST',
+          headers:{'Content-Type':'application/json'},
+          body:JSON.stringify({ from:userId, to:recipient, amount })
+        });
+        const data = await res.json();
+        if (!res.ok) throw new Error(data.detail || data.message);
+        msg.textContent = '✅ Transfer complete.';
+        refreshBalance();
+      } catch (err) {
+        msg.textContent = '⚠️ ' + err.message;
+      }
+    }
+
+    function exportKeys() {
+      const keysStr = localStorage.getItem('weall_keys');
+      if (!keysStr) return alert('No keys found in local storage.');
+      const blob = new Blob([keysStr], {type:'application/json'});
+      const a = document.createElement('a');
+      a.href = URL.createObjectURL(blob);
+      a.download = 'weall_keys_backup.json';
+      a.click();
+      document.getElementById('keyMsg').textContent = '✅ Keys exported.';
+    }
+
+    // Auto-init
+    refreshPoH();
+    refreshBalance();
+    refreshReputation();
+  </script>
+  <script src="/static/footer.js"></script>
+<!-- CLIENT-ERROR-LISTENER -->
+<script>
+window.addEventListener('error', e => {
+  try { fetch('/content/client-log', {method:'POST', headers:{'content-type':'application/json'}, body: JSON.stringify({ msg:String(e.message||''), file:e.filename, line:e.lineno, col:e.colno })}); } catch(_) {}
+});
+window.addEventListener('unhandledrejection', e => {
+  try { fetch('/content/client-log', {method:'POST', headers:{'content-type':'application/json'}, body: JSON.stringify({ promise:true, reason:String(e.reason||'') })}); } catch(_) {}
+});
+</script>
+
+</body>
+</html>

@@ -2,6 +2,7 @@
 from .poh import apply_tier2, apply_tier3, juror_submit_vote
 from .sync import Node
 
+
 class PoHNode(Node):
     """
     Extends Node to directly handle PoH application flows.
@@ -24,7 +25,9 @@ class PoHNode(Node):
         """
         return apply_tier3(user_pub, requested_window, self)
 
-    def process_juror_vote(self, app_id: str, juror_pub: str, vote: str, signature_b64: str):
+    def process_juror_vote(
+        self, app_id: str, juror_pub: str, vote: str, signature_b64: str
+    ):
         """
         Process a juror vote:
         - verify signature

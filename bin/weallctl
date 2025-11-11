@@ -1,0 +1,65 @@
+#!/data/data/com.termux/files/usr/bin/bash
+set -euo pipefail
+cd "$(dirname "$0")/.."
+
+IPFS_PID=.pids/ipfs.pid
+API_PID=.pids/api.pid
+mkdir -p .pids
+
+start() {
+  if [ -f "$IPFS_PID" ] && kill -0 "$(cat "$IPFS_PID")" 2>/dev/null; then
+    echo "IPFS already running (pid $(cat "$IPFS_PID"))"
+  else
+    nohup ipfs daemon > ipfs.log 2>&1 &
+    echo $! > "$IPFS_PID"
+    echo "Started IPFS (pid $(cat "$IPFS_PID"))"
+    # wait for API readiness
+    for i in $(seq 1 60); do
+      curl -sf "http://127.0.0.1:5001/api/v0/version" >/dev/null && break
+      sleep 1
+    done
+  fi
+
+  if [ -f "$API_PID" ] && kill -0 "$(cat "$API_PID")" 2>/dev/null; then
+    echo "WeAll API already running (pid $(cat "$API_PID"))"
+  else
+    nohup python3 -m weall_node.main > server.log 2>&1 &
+    echo $! > "$API_PID"
+    echo "Started WeAll API (pid $(cat "$API_PID"))"
+  fi
+}
+
+stop() {
+  for p in "$API_PID" "$IPFS_PID"; do
+    if [ -f "$p" ]; then
+      PID=$(cat "$p")
+      kill "$PID" 2>/dev/null || true
+      sleep 1
+      kill -9 "$PID" 2>/dev/null || true
+      rm -f "$p"
+    fi
+  done
+  echo "Stopped."
+}
+
+status() {
+  for name in IPFS API; do
+    case "$name" in
+      IPFS) p="$IPFS_PID";;
+      API)  p="$API_PID";;
+    esac
+    if [ -f "$p" ] && kill -0 "$(cat "$p")" 2>/dev/null; then
+      echo "$name: running (pid $(cat "$p"))"
+    else
+      echo "$name: stopped"
+    fi
+  done
+}
+
+case "${1:-}" in
+  start) start;;
+  stop)  stop;;
+  restart) stop; start;;
+  status) status;;
+  *) echo "Usage: $0 {start|stop|restart|status}"; exit 1;;
+esac

@@ -1,0 +1,131 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<title>WeAll • Peers & Presence</title>
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<style>
+  :root { --bg:#0b0d10; --card:#0f1319; --line:#16202b; --ink:#e8eef7; --mut:#a8b3c2; --btn:#1f2937; --btnh:#374151; --ok:#49d49d; --warn:#f6c56c; --err:#ff7f7f; }
+  html,body { height:100% }
+  body{margin:0;font-family:system-ui,-apple-system,Segoe UI,Roboto,Arial,Helvetica,sans-serif;background:var(--bg);color:var(--ink)}
+  header{padding:12px 16px;border-bottom:1px solid var(--line);background:#0e1218}
+  h2{margin:0;font-size:18px}
+  main{display:grid;grid-template-columns:360px 1fr;gap:12px;padding:12px}
+  .card{background:var(--card);border:1px solid var(--line);border-radius:12px;padding:12px}
+  label{display:block;font-size:12px;color:var(--mut);margin:8px 0 4px}
+  input,textarea,select,button{width:100%;background:#0c1117;color:var(--ink);border:1px solid #223243;border-radius:8px;padding:8px 10px}
+  button{cursor:pointer;background:var(--btn);border-color:#2b3a4a}
+  button:hover{background:var(--btnh)}
+  .row{display:flex;gap:8px;align-items:center}
+  .row>*{flex:1}
+  .pill{display:inline-block;font-size:11px;padding:2px 6px;border-radius:999px;border:1px solid #243242;background:#0c1117;margin:2px 6px 2px 0}
+  .mut{color:var(--mut)} .ok{color:var(--ok)} .warn{color:var(--warn)} .err{color:var(--err)}
+  .kvs{font-family:ui-monospace,Menlo,Consolas,monospace;background:#0a0c10;border:1px solid #223243;border-radius:8px;padding:8px;font-size:12px;white-space:pre-wrap;word-break:break-word}
+  .grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(280px,1fr));gap:10px}
+  .peer{background:#0c1117;border:1px solid #223243;border-radius:10px;padding:8px}
+</style>
+</head>
+<body>
+<script src="./auth.js"></script>
+<script> weallAuth.require({ minTier: 2 }); </script>
+
+<header>
+  <h2>WeAll • Peers & Presence (signed HTTPS pings)</h2>
+</header>
+
+<main>
+  <section class="card">
+    <h3>Local Node</h3>
+    <div class="row">
+      <button id="btnHealth">Health</button>
+      <button id="btnPeers">List Peers</button>
+    </div>
+    <div id="selfBox" class="kvs" style="margin-top:8px"></div>
+
+    <h3 style="margin-top:12px">Ping a URL</h3>
+    <label>Target HTTPS URL</label>
+    <input id="pingUrl" placeholder="https://peer.host:8443/ping" />
+    <div class="row" style="margin-top:6px">
+      <button id="btnPing">Send Signed Ping</button>
+    </div>
+    <div id="pingBox" class="kvs" style="margin-top:8px"></div>
+  </section>
+
+  <section class="card">
+    <h3>Peers</h3>
+    <div id="peers" class="grid"></div>
+  </section>
+</main>
+
+<script>
+(() => {
+  const $ = s => document.querySelector(s);
+  const J = x => JSON.stringify(x,null,2);
+
+  async function getJSON(path){
+    const r=await fetch(path,{credentials:'include'});
+    const t=await r.text(); let j={}; try{ j=t?JSON.parse(t):{} }catch{ j={raw:t} }
+    if(!r.ok) throw new Error(j.error||String(r.status)); return j;
+  }
+  async function postJSON(path, body){
+    const r=await fetch(path,{method:'POST',headers:{'Content-Type':'application/json'},credentials:'include',body:JSON.stringify(body||{})});
+    const t=await r.text(); let j={}; try{ j=t?JSON.parse(t):{} }catch{ j={raw:t} }
+    if(!r.ok) throw new Error(j.error||String(r.status)); return j;
+  }
+
+  async function loadHealth(){
+    const h = await getJSON('/health');
+    $('#selfBox').textContent = J(h);
+  }
+  async function loadPeers(){
+    // Prefer /network/peers; fallback: /health.network.peers if present
+    let peers = [];
+    try {
+      const r = await getJSON('/network/peers');
+      peers = r.peers || [];
+    } catch {
+      try {
+        const h = await getJSON('/health');
+        peers = (h.network && h.network.peers) ? Object.entries(h.network.peers).map(([peer_id,info])=>({peer_id,...info})) : [];
+      } catch(e) {}
+    }
+    const wrap = $('#peers'); wrap.innerHTML='';
+    for (const p of peers) {
+      const div=document.createElement('div'); div.className='peer';
+      div.innerHTML = `
+        <div><strong>${p.peer_id||p.id||'(unknown)'}</strong></div>
+        <div class="mut">roles: ${(p.roles||[]).join(', ')||'—'}</div>
+        <div class="mut">addrs: ${(p.addrs||p.addresses||[]).join(', ')||'—'}</div>
+        <div class="mut">last_seen: ${p.last_seen? new Date(p.last_seen*1000).toLocaleString() : '—'}</div>
+      `;
+      wrap.appendChild(div);
+    }
+  }
+
+  async function ping(){
+    const url = $('#pingUrl').value.trim();
+    if (!url) return alert('Enter a target URL');
+    try{
+      // executor provides a local endpoint that signs & sends pings.
+      // Payload accepts either {target_url} or {peer_id}; we use URL for admin convenience.
+      const r = await postJSON('/network/ping', { target_url: url });
+      $('#pingBox').textContent = J(r);
+    }catch(e){
+      $('#pingBox').textContent = 'Ping error: ' + e.message;
+    }
+  }
+
+  // Bindings
+  $('#btnHealth').onclick = ()=>loadHealth().catch(e=>$('#selfBox').textContent='Error: '+e.message);
+  $('#btnPeers').onclick  = ()=>loadPeers().catch(()=>{});
+  $('#btnPing').onclick   = ()=>ping();
+
+  // Boot
+  (async function init(){
+    try{ await loadHealth(); }catch{}
+    try{ await loadPeers(); }catch{}
+  })();
+})();
+</script>
+</body>
+</html>

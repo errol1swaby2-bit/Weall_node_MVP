@@ -1,0 +1,67 @@
+import { FormEvent, useState } from 'react'
+import { useNavigate, useLocation } from 'react-router-dom'
+import { api } from '../lib/api'
+import { useAuth } from '../auth/AuthContext'
+
+export default function Login() {
+  const [email, setEmail] = useState('')
+  const [code, setCode] = useState('')
+  const [step, setStep] = useState<'start' | 'verify'>('start')
+  const [error, setError] = useState<string>('')
+  const [sending, setSending] = useState(false)
+  const nav = useNavigate()
+  const loc = useLocation() as any
+  const { refresh } = useAuth()
+
+  const onStart = async (e: FormEvent) => {
+    e.preventDefault()
+    setSending(true); setError('')
+    try {
+      await api.post('/auth/start', { email })
+      setStep('verify')
+    } catch (err:any) {
+      setError(err?.message || 'Failed to send code')
+    } finally { setSending(false) }
+  }
+
+  const onVerify = async (e: FormEvent) => {
+    e.preventDefault()
+    setSending(true); setError('')
+    try {
+      await api.post('/auth/verify', { email, code })
+      await refresh()
+      const dest = loc?.state?.from?.pathname || '/'
+      nav(dest, { replace: true })
+    } catch (err:any) {
+      setError(err?.message || 'Invalid or expired code')
+    } finally { setSending(false) }
+  }
+
+  return (
+    <div style={{maxWidth: 420, margin: '4rem auto', fontFamily: 'system-ui'}}>
+      <h1>Sign in</h1>
+      {step === 'start' && (
+        <form onSubmit={onStart}>
+          <label>Email<br/>
+            <input value={email} onChange={e=>setEmail(e.target.value)} required type="email" />
+          </label>
+          <br/><br/>
+          <button disabled={sending}>Send code</button>
+          {error && <p style={{color:'crimson'}}>{error}</p>}
+        </form>
+      )}
+      {step === 'verify' && (
+        <form onSubmit={onVerify}>
+          <p>We sent a 6-digit code to {email}</p>
+          <label>Code<br/>
+            <input value={code} onChange={e=>setCode(e.target.value)} required inputMode="numeric" pattern="\\d{6}" />
+          </label>
+          <br/><br/>
+          <button disabled={sending}>Verify</button>
+          <button type="button" onClick={()=>setStep('start')} style={{marginLeft:8}}>Change email</button>
+          {error && <p style={{color:'crimson'}}>{error}</p>}
+        </form>
+      )}
+    </div>
+  )
+}

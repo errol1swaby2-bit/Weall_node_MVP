@@ -15,9 +15,9 @@ class WeCoinLedger:
     def __init__(self):
         self.balances: Dict[str, float] = {TREASURY_ACCOUNT: 0.0}
         self.pools: Dict[str, Dict[str, Any]] = {
-            "creators":   {"members": []},
-            "jurors":     {"members": []},
-            "operators":  {"members": []},
+            "creators": {"members": []},
+            "jurors": {"members": []},
+            "operators": {"members": []},
             "validators": {"members": []},
         }
         self.genesis_time = int(time.time())
@@ -65,9 +65,11 @@ class WeCoinLedger:
     def current_epoch_reward(self) -> float:
         elapsed = int(time.time()) - self.genesis_time
         halvings = elapsed // HALVING_INTERVAL
-        return INITIAL_EPOCH_REWARD / (2 ** halvings)
+        return INITIAL_EPOCH_REWARD / (2**halvings)
 
-    def distribute_epoch_rewards(self, current_epoch: int, bootstrap_mode: bool = False) -> Dict[str, Optional[str]]:
+    def distribute_epoch_rewards(
+        self, current_epoch: int, bootstrap_mode: bool = False
+    ) -> Dict[str, Optional[str]]:
         winners: Dict[str, Optional[str]] = {}
         pools = list(self.pools.keys())
         if not pools:
@@ -100,4 +102,6 @@ class LedgerRuntime:
 
     def advance_epoch(self, bootstrap_mode: bool = False) -> Dict[str, Optional[str]]:
         self.current_epoch += 1
-        return self.wecoin.distribute_epoch_rewards(self.current_epoch, bootstrap_mode=bootstrap_mode)
+        return self.wecoin.distribute_epoch_rewards(
+            self.current_epoch, bootstrap_mode=bootstrap_mode
+        )

@@ -8,11 +8,12 @@ PoHRuntime
 import time
 from typing import Dict, Any, Optional
 
+
 class PoHRuntime:
     def __init__(self):
-        self.executor = None   # backref to executor (wired in attach_executor)
-        self.tier2_queue: Dict[str, Dict[str, Any]] = {}   # user_id -> request metadata
-        self.tier3_queue: Dict[str, Dict[str, Any]] = {}   # user_id -> request metadata
+        self.executor = None  # backref to executor (wired in attach_executor)
+        self.tier2_queue: Dict[str, Dict[str, Any]] = {}  # user_id -> request metadata
+        self.tier3_queue: Dict[str, Dict[str, Any]] = {}  # user_id -> request metadata
 
     def attach_executor(self, executor):
         """Link PoH runtime back to main executor for juror/validator calls."""

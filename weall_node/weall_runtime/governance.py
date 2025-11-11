@@ -20,12 +20,12 @@ GLOBAL_PARAMS: Dict[str, Any] = {
     "juror_slash": 1,
     "author_slash": 5,
     "profile_slash": 10,
-    "block_reward": 100,             # total block reward
-    "block_rep_reward": 2,           # rep reward for block proposer
-    "validator_slash": 5,            # rep penalty for misbehavior
-    "operator_reward_online": 1,     # rep reward per uptime check
-    "operator_slash_offline": 1,     # rep penalty for missed uptime
-    "operator_slash_missing": 2,     # rep penalty for missing CID
+    "block_reward": 100,  # total block reward
+    "block_rep_reward": 2,  # rep reward for block proposer
+    "validator_slash": 5,  # rep penalty for misbehavior
+    "operator_reward_online": 1,  # rep reward per uptime check
+    "operator_slash_offline": 1,  # rep penalty for missed uptime
+    "operator_slash_missing": 2,  # rep penalty for missing CID
     "operator_reward_storage_check": 1,  # rep reward for passing PoS challenge
 }
 
@@ -39,7 +39,9 @@ class GovernanceRuntime:
     # ------------------------
     # Proposal lifecycle
     # ------------------------
-    def propose(self, creator: str, title: str, description: str, pallet_ref: str, params=None):
+    def propose(
+        self, creator: str, title: str, description: str, pallet_ref: str, params=None
+    ):
         pid = self.next_proposal_id
         self.next_proposal_id += 1
         prop = {

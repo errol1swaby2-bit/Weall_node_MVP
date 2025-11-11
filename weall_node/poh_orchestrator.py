@@ -14,7 +14,7 @@ import random
 import time
 from typing import Dict, List, Any, Tuple, Set
 
-from weall_node.executor import WeAllExecutor
+from weall_node.weall_executor import WeAllExecutor
 
 
 class JurorOrchestrator:
@@ -31,13 +31,19 @@ class JurorOrchestrator:
     def tier3_pool(self, exclude: Set[str] | None = None) -> List[str]:
         exclude = exclude or set()
         users = self.exec.state.get("users", {})
-        pool = [u for u, meta in users.items() if int(meta.get("poh_level", 0)) >= 3 and u not in exclude]
+        pool = [
+            u
+            for u, meta in users.items()
+            if int(meta.get("poh_level", 0)) >= 3 and u not in exclude
+        ]
         return pool
 
-    def select_random_jurors(self, count: int, exclude: Set[str] | None = None) -> List[str]:
+    def select_random_jurors(
+        self, count: int, exclude: Set[str] | None = None
+    ) -> List[str]:
         pool = self.tier3_pool(exclude=exclude)
         random.shuffle(pool)
-        return pool[:max(0, count)]
+        return pool[: max(0, count)]
 
     def split_live_watch(self, required: int) -> Tuple[int, int]:
         live = min(3, required)  # at most 3 on camera
@@ -54,7 +60,7 @@ class JurorOrchestrator:
         all_needed = live_n + watch_n
         chosen = self.select_random_jurors(count=all_needed, exclude=exclude)
         live = chosen[:live_n]
-        watch = chosen[live_n:live_n + watch_n]
+        watch = chosen[live_n : live_n + watch_n]
         return {
             "target": target,
             "required": required,

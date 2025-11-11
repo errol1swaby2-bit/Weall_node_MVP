@@ -1,6 +1,7 @@
 """
 Consensus/genesis parameters, including Genesis Safeguard Mode (GSM).
 """
+
 import json, os
 from typing import Dict
 
@@ -8,12 +9,13 @@ GENESIS_PARAMS: Dict[str, object] = {}
 
 DEFAULT_GENESIS = {
     "gsm_active": True,
-    "gsm_expire_by_blocks": 2016,   # auto-disable after ~2 weeks if block time ~10m
+    "gsm_expire_by_blocks": 2016,  # auto-disable after ~2 weeks if block time ~10m
     "gsm_expire_by_days": 14,
     "gsm_emergency_extra_jurors": 3,
-    "poh_quorum_threshold": 10,     # unique Tier-3 jurors to auto-disable GSM
-    "premine": []                   # optional, explicit premine allocations
+    "poh_quorum_threshold": 10,  # unique Tier-3 jurors to auto-disable GSM
+    "premine": [],  # optional, explicit premine allocations
 }
+
 
 def load_genesis_params(path: str = None) -> Dict[str, object]:
     """

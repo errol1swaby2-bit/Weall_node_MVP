@@ -1,0 +1,97 @@
+<script>
+/* wallet.js — client-side Ed25519 wallet with AES-GCM keystore export (no deps)
+   - Generates Ed25519 keypair using WebCrypto
+   - Exports public key (raw, base64)
+   - Exports private key (PKCS#8) and encrypts with PBKDF2→AES-GCM
+   - Produces a downloadable keystore JSON (no server private-key handling)
+*/
+
+window.Wallet = (function () {
+  const subtle = (crypto && crypto.subtle) || (window.msCrypto && window.msCrypto.subtle);
+
+  const enc = new TextEncoder();
+  const dec = new TextDecoder();
+
+  function bufToB64(buf) {
+    const b = new Uint8Array(buf);
+    let s = ""; for (let i = 0; i < b.length; i++) s += String.fromCharCode(b[i]);
+    return btoa(s);
+  }
+  function b64ToBuf(b64) {
+    const s = atob(b64);
+    const b = new Uint8Array(s.length);
+    for (let i = 0; i < s.length; i++) b[i] = s.charCodeAt(i);
+    return b.buffer;
+  }
+  function hexRandom(n) {
+    const a = new Uint8Array(n); crypto.getRandomValues(a);
+    return Array.from(a).map(x=>x.toString(16).padStart(2,'0')).join('');
+  }
+
+  async function createEd25519() {
+    if (!subtle || !('Ed25519' in (window ?? {}))) {
+      // Try anyway; many browsers support Ed25519 even if not exposed on window
+    }
+    return subtle.generateKey({ name: "Ed25519" }, true, ["sign", "verify"]);
+  }
+
+  async function exportPublicRawB64(publicKey) {
+    const raw = await subtle.exportKey("raw", publicKey); // 32 bytes
+    return bufToB64(raw);
+  }
+
+  async function exportPrivatePkcs8(privateKey) {
+    return await subtle.exportKey("pkcs8", privateKey); // ArrayBuffer
+  }
+
+  async function deriveAesKey(passphrase, salt, iterations = 250000) {
+    const keyMaterial = await subtle.importKey("raw", enc.encode(passphrase), "PBKDF2", false, ["deriveKey"]);
+    return subtle.deriveKey(
+      { name: "PBKDF2", salt, iterations, hash: "SHA-256" },
+      keyMaterial,
+      { name: "AES-GCM", length: 256 },
+      false,
+      ["encrypt", "decrypt"]
+    );
+  }
+
+  async function makeKeystore(privatePkcs8, publicRawB64, passphrase) {
+    const salt = crypto.getRandomValues(new Uint8Array(16));
+    const iv   = crypto.getRandomValues(new Uint8Array(12));
+    const iters = 250000;
+
+    const aes = await deriveAesKey(passphrase, salt, iters);
+    const ct  = await subtle.encrypt({ name: "AES-GCM", iv }, aes, privatePkcs8);
+
+    const ks = {
+      kty: "OKP",
+      alg: "Ed25519",
+      fmt: "pkcs8",
+      pub_raw_b64: publicRawB64,
+      kdf: { name: "PBKDF2", hash: "SHA-256", iterations: iters, salt_b64: bufToB64(salt) },
+      enc: { name: "AES-GCM", iv_b64: bufToB64(iv) },
+      ciphertext_b64: bufToB64(ct),
+      created: new Date().toISOString(),
+      id: "weall:" + hexRandom(8)
+    };
+    return ks;
+  }
+
+  function downloadKeystore(json, filename) {
+    const blob = new Blob([JSON.stringify(json, null, 2)], { type: "application/json" });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement("a");
+    a.href = url; a.download = filename;
+    document.body.appendChild(a); a.click();
+    setTimeout(()=>{ URL.revokeObjectURL(url); a.remove(); }, 0);
+  }
+
+  return {
+    createEd25519,
+    exportPublicRawB64,
+    exportPrivatePkcs8,
+    makeKeystore,
+    downloadKeystore
+  };
+})();
+</script>

@@ -1,161 +1,387 @@
-<!DOCTYPE html>
+<!doctype html>
 <html lang="en">
 <head>
-<meta charset="UTF-8">
-<meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>WeAll App</title>
-<script src="https://cdn.tailwindcss.com"></script>
-<style>
-  .loader { border-top-color: transparent; border-bottom-color: transparent; }
-  .tab-active { border-b-2 border-blue-500 font-bold text-blue-500; }
-  .card:hover { transform: translateY(-2px); box-shadow: 0 6px 18px rgba(0,0,0,0.1); transition: all 0.2s; }
-</style>
+  <meta charset="utf-8"/>
+  <meta name="viewport" content="width=device-width,initial-scale=1"/>
+  <title>WeAll</title>
+  <style>
+    :root { --bg:#f7f7fa; --card:#fff; --text:#1f2937; --muted:#6b7280; --brand:#2563eb; --ok:#16a34a; }
+    *{box-sizing:border-box} body{margin:0;background:var(--bg);color:var(--text);font:16px/1.4 system-ui,Segoe UI,Roboto}
+    .wrap{max-width:960px;margin:0 auto;padding:20px}
+    .hero{display:flex;flex-direction:column;align-items:center;margin:56px 0 32px}
+    .title{font-size:52px;font-weight:800;color:var(--brand);letter-spacing:.3px;margin:0 0 8px}
+    .tag{color:var(--muted);margin:0 0 24px}
+    .row{display:flex;gap:12px;flex-wrap:wrap}
+    .btn{appearance:none;border:0;border-radius:10px;padding:12px 20px;font-weight:600;cursor:pointer}
+    .btn.blue{background:var(--brand);color:#fff}
+    .btn.green{background:var(--ok);color:#fff}
+    .btn.ghost{background:#e5e7eb;color:#111827}
+    .btn[disabled]{opacity:.6;cursor:not-allowed}
+    .topbar{display:flex;justify-content:space-between;align-items:center;margin:10px 0 22px}
+    .pill{padding:8px 12px;border-radius:999px;background:#eef2ff;color:#4338ca;font-weight:600}
+    .card{background:var(--card);border-radius:16px;padding:18px 18px;box-shadow:0 6px 18px rgba(0,0,0,.05);margin:12px 0}
+    .card h2{margin:0 0 8px}
+    .muted{color:var(--muted)}
+    .input{width:100%;padding:12px 12px;border:1px solid #e5e7eb;border-radius:10px;outline:none}
+    .stack{display:flex;flex-direction:column;gap:12px}
+    .tabs{position:sticky;bottom:0;background:var(--bg);display:flex;gap:18px;justify-content:center;padding:12px}
+    .tab{padding:10px 18px;border-radius:12px}
+    .tab.active{background:#e5e7eb}
+    .right{display:flex;gap:10px;align-items:center}
+    .badge{font-weight:700}
+    .center{display:flex;justify-content:center}
+    .mono{font-family:ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", "Courier New", monospace}
+    /* Toast */
+    #toast{position:fixed;left:50%;bottom:24px;transform:translateX(-50%);
+      background:#111827;color:#fff;padding:12px 16px;border-radius:12px;box-shadow:0 8px 24px rgba(0,0,0,.2);
+      opacity:0;pointer-events:none;transition:opacity .2s;}
+    #toast.show{opacity:1}
+  </style>
 </head>
-<body class="bg-gray-100 font-sans h-screen">
-
-<div id="app" class="flex flex-col h-screen"></div>
-
-<script>
-const state = { user: null, pohLevel: null, nftMinted: false, posts: [] };
-const API_BASE = "http://127.0.0.1:8000/"; // adjust for backend
-
-function apiCall(path, method="GET", body=null){
-  const opts = { method, headers: {"Content-Type":"application/json"} };
-  if(body) opts.body = JSON.stringify(body);
-  return fetch(API_BASE + path, opts).then(r => r.json());
-}
-
-function clearApp(){ document.getElementById('app').innerHTML = ''; }
-
-// ---------------------------
-// Landing / Login / Signup
-// ---------------------------
-function showLanding(){
-  clearApp();
-  document.getElementById('app').innerHTML = `
-    <div class="flex flex-col items-center justify-center flex-1 space-y-4">
-      <h1 class="text-4xl font-bold text-blue-600">WeAll</h1>
-      <button id="loginBtn" class="bg-blue-500 text-white px-8 py-3 rounded hover:bg-blue-600">Login</button>
-      <button id="signupBtn" class="bg-green-500 text-white px-8 py-3 rounded hover:bg-green-600">Sign Up</button>
-    </div>`;
-  document.getElementById('loginBtn').onclick = showLogin;
-  document.getElementById('signupBtn').onclick = showSignup;
-}
-
-function showLogin(){
-  clearApp();
-  document.getElementById('app').innerHTML = `
-    <div class="bg-white p-8 rounded shadow-md w-80 mx-auto mt-24 space-y-4">
-      <h2 class="text-2xl font-bold text-center">Login</h2>
-      <input id="loginUser" placeholder="User ID" class="border p-2 w-full rounded"/>
-      <button id="loginSubmit" class="bg-blue-500 text-white w-full py-2 rounded hover:bg-blue-600">Login</button>
-      <p class="text-gray-500 text-center cursor-pointer" id="backLanding">Back</p>
-    </div>`;
-  document.getElementById('loginSubmit').onclick = async () => {
-    const user = document.getElementById('loginUser').value.trim();
-    if(!user) return;
-    const res = await apiCall('list_user_posts/' + user);
-    if(res.posts !== undefined){ state.user=user; showPoHSelection(); }
-    else alert("User not found");
-  };
-  document.getElementById('backLanding').onclick = showLanding;
-}
-
-function showSignup(){
-  clearApp();
-  document.getElementById('app').innerHTML = `
-    <div class="bg-white p-8 rounded shadow-md w-80 mx-auto mt-24 space-y-4">
-      <h2 class="text-2xl font-bold text-center">Sign Up</h2>
-      <input id="signupUser" placeholder="User ID" class="border p-2 w-full rounded"/>
-      <button id="signupSubmit" class="bg-green-500 text-white w-full py-2 rounded hover:bg-green-600">Sign Up</button>
-      <p class="text-gray-500 text-center cursor-pointer" id="backLanding2">Back</p>
-    </div>`;
-  document.getElementById('signupSubmit').onclick = async () => {
-    const user = document.getElementById('signupUser').value.trim();
-    if(!user) return;
-    const res = await apiCall('register','POST',{user_id:user,poh_level:1});
-    if(res.ok){ state.user=user; showPoHSelection(); }
-    else alert(res.error || "Signup failed");
-  };
-  document.getElementById('backLanding2').onclick = showLanding;
-}
-
-// ---------------------------
-// PoH NFT Minting
-// ---------------------------
-function showPoHSelection(){
-  clearApp();
-  document.getElementById('app').innerHTML = `
-    <div class="bg-white p-8 rounded shadow-md w-80 mx-auto mt-24 text-center space-y-4">
-      <h2 class="text-xl font-bold">Select PoH NFT Level</h2>
-      <div class="flex flex-col space-y-2">
-        <button class="p-2 bg-gray-200 rounded hover:bg-gray-300" onclick="mintNFT(1)">Guest</button>
-        <button class="p-2 bg-gray-200 rounded hover:bg-gray-300" onclick="mintNFT(2)">Async Verified</button>
-        <button class="p-2 bg-gray-200 rounded hover:bg-gray-300" onclick="mintNFT(3)">Live Verified</button>
-      </div>
-      <p class="text-gray-500 cursor-pointer" onclick="showLanding()">Back</p>
-    </div>`;
-}
-
-async function mintNFT(level){
-  state.pohLevel = level;
-  clearApp();
-  document.getElementById('app').innerHTML = `
-    <div class="flex flex-col items-center justify-center h-screen space-y-4">
-      <p class="text-gray-700">Minting your PoH NFT...</p>
-      <div class="loader border-t-4 border-b-4 border-blue-500 w-12 h-12 rounded-full animate-spin"></div>
-    </div>`;
-  const res = await apiCall('register','POST',{user_id:state.user,poh_level:level});
-  if(res.ok){ state.nftMinted=true; showHome(); }
-  else{ alert(res.error||"Minting failed"); showPoHSelection(); }
-}
-
-// ---------------------------
-// Home Page with Tabs
-// ---------------------------
-function showHome(){
-  clearApp();
-  document.getElementById('app').innerHTML = `
-    <div class="flex flex-col h-screen">
-      <div class="bg-white shadow flex justify-between items-center px-4 py-3">
-        <h1 class="text-xl font-bold text-blue-600">WeAll</h1>
-        <span class="text-gray-700 text-sm">${state.user} | PoH: ${state.pohLevel}</span>
-      </div>
-      <div id="contentArea" class="flex-1 overflow-y-auto p-4"></div>
-      <div class="bg-white shadow flex justify-around p-3 fixed bottom-0 w-full">
-        <button onclick="showFeed()" id="tabFeed" class="tabBtn">Feed</button>
-        <button onclick="showGovernance()" id="tabGovernance" class="tabBtn">Governance</button>
-        <button onclick="showProfile()" id="tabProfile" class="tabBtn">Profile</button>
-      </div>
-    </div>`;
-  showFeed();
-}
-
-// ---------------------------
-// Feed
-// ---------------------------
-async function showFeed(){
-  setActiveTab('tabFeed');
-  const area = document.getElementById('contentArea');
-  area.innerHTML = `<h2 class="text-xl font-bold mb-4">Feed</h2><div id="feedPosts" class="space-y-4"></div>`;
-  const feed = document.getElementById('feedPosts');
-  const posts = await apiCall('show_posts');
-  Object.values(posts).forEach(post=>{
-    feed.innerHTML += `
-      <div class="card bg-white p-4 rounded-xl shadow space-y-2">
-        <div class="flex items-center space-x-3">
-          <div class="w-10 h-10 rounded-full bg-blue-500 text-white flex items-center justify-center font-bold">${post.user[0].toUpperCase()}</div>
-          <div><p class="font-bold text-gray-800">${post.user}</p><p class="text-gray-500 text-sm">Just now</p></div>
+<body>
+  <div class="wrap" id="app">
+    <!-- Unauthed landing -->
+    <div id="landing">
+      <div class="hero">
+        <h1 class="title">WeAll</h1>
+        <p class="tag">Decentralized coordination, human-first.</p>
+        <div class="row">
+          <button class="btn blue" id="btnLogin">Login</button>
+          <button class="btn green" id="btnSignup">Sign Up</button>
         </div>
-        <p class="text-gray-700">${post.content}</p>
-        <div class="flex space-x-2 text-sm text-blue-500">${post.tags?post.tags.map(t=>`<span>${t}</span>`).join(' '):''}</div>
-      </div>`;
-  });
-}
+        <p class="muted mono">API: <span id="apiBase"></span></p>
+      </div>
 
-// ---------------------------
-// Governance
-// ---------------------------
-async function showGovernance(){
-  setActiveTab('tabGovernance');
-  const area = document.getElementById('contentArea');
+      <!-- Signup / Login panels -->
+      <div class="card" id="panelSignup" style="display:none">
+        <h2>Sign Up (Tier-1 Email)</h2>
+        <div class="stack">
+          <input class="input" id="suEmail" placeholder="your@email.com" inputmode="email" />
+          <div class="row">
+            <button class="btn green" id="btnRequestCode">Request Code</button>
+            <button class="btn ghost" id="btnBack1">Back</button>
+          </div>
+          <div id="codeArea" style="display:none" class="stack">
+            <input class="input" id="suCode" placeholder="6-digit code" inputmode="numeric" maxlength="6"/>
+            <div class="row">
+              <button class="btn blue" id="btnVerifyCode">Verify & Login</button>
+              <button class="btn ghost" id="btnResend" disabled>Resend (60)</button>
+            </div>
+            <p class="muted">Check your inbox for the code.</p>
+          </div>
+        </div>
+      </div>
+
+      <div class="card" id="panelLogin" style="display:none">
+        <h2>Login (existing ID)</h2>
+        <div class="stack">
+          <input class="input" id="liEmail" placeholder="user id (email)"/>
+          <div class="row">
+            <button class="btn blue" id="btnDoLogin">Login</button>
+            <button class="btn ghost" id="btnBack2">Back</button>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- Authed app -->
+    <div id="authed" style="display:none">
+      <div class="topbar">
+        <div class="pill">WeAll</div>
+        <div class="right">
+          <span id="who" class="muted"></span>
+          <span class="badge" id="pohBadge"></span>
+          <button class="btn ghost" id="btnLogout">Logout</button>
+        </div>
+      </div>
+
+      <!-- FEED -->
+      <div id="viewFeed">
+        <div class="card">
+          <h2>Feed</h2>
+          <div class="stack" id="postPanel">
+            <textarea class="input" rows="3" id="postText" placeholder="Share something…"></textarea>
+            <div class="row">
+              <input type="file" id="fileInput" style="flex:1"/>
+              <button class="btn green" id="btnUpload">Upload</button>
+              <button class="btn green" id="btnPost">Post</button>
+              <button class="btn ghost" id="btnRefreshFeed">Refresh</button>
+            </div>
+          </div>
+        </div>
+        <div id="feedList"></div>
+      </div>
+
+      <!-- GOVERNANCE (placeholder) -->
+      <div id="viewGov" style="display:none">
+        <div class="card"><h2>Governance</h2>
+          <p class="muted">Tier-3 quorum ≥ 60%; Yes &gt; 50% among quorum (from config).</p>
+        </div>
+      </div>
+
+      <!-- PROFILE -->
+      <div id="viewProfile" style="display:none">
+        <div class="card"><h2>Profile</h2>
+          <p><strong>User:</strong> <span id="pfUser"></span></p>
+          <p><strong>PoH Level:</strong> <span id="pfPoh"></span></p>
+          <p><strong>NFT Minted:</strong> <span id="pfNft"></span></p>
+        </div>
+      </div>
+
+      <div class="tabs center">
+        <button class="tab active" data-tab="feed">Feed</button>
+        <button class="tab" data-tab="gov">Governance</button>
+        <button class="tab" data-tab="profile">Profile</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- Toast -->
+  <div id="toast"></div>
+
+  <script>
+    // ----------- Config -----------
+    const API = location.origin;
+    document.getElementById("apiBase").textContent = API;
+
+    const PATHS = {
+      requestTier1: "/poh/request-tier1",
+      verifyTier1: "/poh/verify-tier1",
+      contentFeed: "/content/feed",
+      contentPost: "/content/post",
+      contentUpload: "/content/upload",
+      legacyFeed: "/show_posts",
+      legacyUserFeed: (uid) => \`/list_user_posts/\${encodeURIComponent(uid)}\`
+    };
+
+    const $ = (id) => document.getElementById(id);
+    const state = {
+      user: localStorage.getItem("weall_user") || "",
+      poh: Number(localStorage.getItem("weall_poh") || "0"),
+      nftMinted: localStorage.getItem("weall_nft") === "1",
+      useLegacyFeed: false,
+    };
+
+    function saveSession() {
+      localStorage.setItem("weall_user", state.user);
+      localStorage.setItem("weall_poh", String(state.poh));
+      localStorage.setItem("weall_nft", state.nftMinted ? "1" : "0");
+    }
+
+    function show(id){ ["landing","authed"].forEach(x=>$(x).style.display = (x===id)?"block":"none"); }
+    function showTab(which){
+      for (const v of ["viewFeed","viewGov","viewProfile"]) $(v).style.display = "none";
+      const map = {feed:"viewFeed", gov:"viewGov", profile:"viewProfile"};
+      $(map[which]).style.display = "block";
+      document.querySelectorAll(".tab").forEach(t => t.classList.toggle("active", t.dataset.tab===which));
+    }
+
+    // ----------- Toast -----------
+    let toastTimer = null;
+    function toast(msg){
+      const t = $("toast");
+      t.textContent = msg;
+      t.classList.add("show");
+      clearTimeout(toastTimer);
+      toastTimer = setTimeout(()=>t.classList.remove("show"), 2200);
+    }
+
+    // ----------- Session/UI boot -----------
+    function renderAuthedBar() {
+      $("who").textContent = state.user || "";
+      $("pohBadge").textContent = \`PoH: \${state.poh}\`;
+      $("pfUser").textContent = state.user || "";
+      $("pfPoh").textContent = String(state.poh);
+      $("pfNft").textContent = state.nftMinted ? "Yes" : "No";
+    }
+
+    async function detectFeedMode() {
+      try {
+        const r = await fetch(API + PATHS.contentFeed);
+        if (r.status === 404) state.useLegacyFeed = true;
+      } catch { state.useLegacyFeed = true; }
+    }
+
+    async function refreshFeed() {
+      const list = $("feedList");
+      list.innerHTML = "";
+      try {
+        let items = [];
+        if (!state.useLegacyFeed) {
+          const r = await fetch(API + PATHS.contentFeed);
+          if (r.status === 404) { state.useLegacyFeed = true; return refreshFeed(); }
+          items = await r.json();
+        } else {
+          const r = await fetch(API + PATHS.legacyUserFeed(state.user));
+          items = await r.json();
+        }
+
+        if (!Array.isArray(items)) items = items.items || [];
+        if (items.length === 0) {
+          list.innerHTML = `<div class="card"><span class="muted">No posts yet.</span></div>`;
+          return;
+        }
+        for (const it of items) {
+          const author = it.author || it.user || "system";
+          const text = it.text || it.message || JSON.stringify(it);
+          const when = it.ts ? new Date(it.ts*1000) : new Date();
+          const div = document.createElement("div");
+          div.className = "card";
+          div.innerHTML = `<div style="display:flex;justify-content:space-between">
+              <strong>${author}</strong>
+              <span class="muted" style="font-size:12px">${when.toLocaleString()}</span>
+            </div>
+            <div style="margin-top:6px">${escapeHtml(text)}</div>`;
+          list.appendChild(div);
+        }
+      } catch (e) {
+        list.innerHTML = `<div class="card"><span class="muted">Failed to load feed.</span></div>`;
+      }
+    }
+
+    async function postMessage() {
+      const text = $("postText").value.trim();
+      if (!text) return alert("Type something to post.");
+      try {
+        if (!state.useLegacyFeed) {
+          const r = await fetch(API + PATHS.contentPost, {
+            method:"POST",
+            headers:{"content-type":"application/json"},
+            body: JSON.stringify({ author: state.user, text })
+          });
+          if (r.status === 404) {
+            state.useLegacyFeed = true;
+          } else if (!r.ok) {
+            const t = await r.text();
+            throw new Error(t || r.statusText);
+          }
+        }
+        $("postText").value = "";
+        toast("Posted");
+        await refreshFeed();
+      } catch (e) {
+        alert("Post failed: " + (e.message || e));
+      }
+    }
+
+    async function uploadFile() {
+      const fileEl = $("fileInput");
+      if (!fileEl.files || !fileEl.files[0]) return alert("Choose a file first.");
+      const fd = new FormData();
+      fd.append("file", fileEl.files[0]);
+      fd.append("visibility", "public");
+      try {
+        const r = await fetch(API + PATHS.contentUpload, { method:"POST", body: fd });
+        if (!r.ok) throw new Error(await r.text());
+        const out = await r.json();
+        toast(out.ipfs_stored ? "Uploaded to IPFS" : "Uploaded locally");
+        fileEl.value = "";
+        await refreshFeed(); // if your feed surfaces uploads later
+      } catch (e) {
+        alert("Upload failed: " + (e.message||e));
+      }
+    }
+
+    // ----------- Email/Tier-1 flow -----------
+    let resendTimer = null, resendLeft = 0;
+    function startResendCooldown(sec=60){
+      const btn = $("btnResend");
+      btn.disabled = true; resendLeft = sec; btn.textContent = `Resend (${resendLeft})`;
+      clearInterval(resendTimer);
+      resendTimer = setInterval(()=>{
+        resendLeft -= 1;
+        btn.textContent = resendLeft > 0 ? `Resend (${resendLeft})` : "Resend";
+        if (resendLeft <= 0) { clearInterval(resendTimer); btn.disabled = false; }
+      }, 1000);
+    }
+
+    async function requestCode(email) {
+      const r = await fetch(API + PATHS.requestTier1, {
+        method:"POST",
+        headers:{"content-type":"application/json"},
+        body: JSON.stringify({ user: email, email })
+      });
+      if (!r.ok) throw new Error(await r.text());
+      return true;
+    }
+    async function verifyCode(email, code) {
+      const r = await fetch(API + PATHS.verifyTier1, {
+        method:"POST",
+        headers:{"content-type":"application/json"},
+        body: JSON.stringify({ user: email, code: String(code || "").trim() })
+      });
+      if (!r.ok) throw new Error(await r.text());
+      const out = await r.json(); // {ok:true, tier/poh_level, nft_minted}
+      return out;
+    }
+
+    // ----------- Small helpers -----------
+    function escapeHtml(s){ return s.replace(/[&<>"]/g,c=>({ "&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;"}[c])) }
+
+    // ----------- Wire up -----------
+    $("btnSignup").onclick = () => { $("panelLogin").style.display="none"; $("panelSignup").style.display="block"; };
+    $("btnLogin").onclick  = () => { $("panelSignup").style.display="none"; $("panelLogin").style.display="block"; };
+    $("btnBack1").onclick = $("btnBack2").onclick = () => { $("panelSignup").style.display="none"; $("panelLogin").style.display="none"; };
+
+    $("btnRequestCode").onclick = async () => {
+      const email = $("suEmail").value.trim();
+      if (!email) return alert("Enter an email.");
+      try {
+        await requestCode(email);
+        $("codeArea").style.display = "block";
+        toast("Code sent");
+        startResendCooldown(60);
+      } catch(e){ alert("Request failed: " + (e.message||e)); }
+    };
+    $("btnResend").onclick = () => $("btnRequestCode").onclick();
+
+    $("btnVerifyCode").onclick = async () => {
+      const email = $("suEmail").value.trim();
+      const code = $("suCode").value.trim();
+      if (!email || !code) return alert("Enter email and code.");
+      try {
+        const out = await verifyCode(email, code);
+        state.user = email;
+        state.poh = Number(out.poh_level ?? out.tier ?? 1);
+        state.nftMinted = !!out.nft_minted;
+        saveSession();
+        await afterLogin();
+        toast("Verified ✓");
+      } catch(e){ alert("Verification failed: " + (e.message||e)); }
+    };
+
+    $("btnDoLogin").onclick = async () => {
+      const email = $("liEmail").value.trim();
+      if (!email) return alert("Enter user id.");
+      state.user = email;
+      state.poh = Number(localStorage.getItem("weall_poh") || "1");
+      saveSession();
+      await afterLogin();
+    };
+
+    $("btnLogout").onclick = () => {
+      state.user = ""; state.poh = 0; state.nftMinted = false;
+      saveSession();
+      show("landing");
+    };
+
+    document.querySelectorAll(".tab").forEach(t => t.onclick = () => showTab(t.dataset.tab));
+    $("btnRefreshFeed").onclick = refreshFeed;
+    $("btnPost").onclick = postMessage;
+    $("btnUpload").onclick = uploadFile;
+
+    async function afterLogin() {
+      renderAuthedBar();
+      show("authed");
+      showTab("feed");
+      await detectFeedMode();
+      await refreshFeed();
+    }
+
+    // Boot
+    (async () => {
+      if (state.user) { await afterLogin(); } else { show("landing"); }
+    })();
+  </script>
+</body>
+</html>

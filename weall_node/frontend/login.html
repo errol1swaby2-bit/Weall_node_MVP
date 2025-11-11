@@ -1,39 +1,593 @@
-<!DOCTYPE html>
+<!doctype html>
 <html lang="en">
 <head>
-<meta charset="UTF-8"><meta name="viewport" content="width=device-width,initial-scale=1">
-<title>WeAll • Login</title>
-<style>
-body{background:#000;color:#fff;font-family:Arial;display:flex;flex-direction:column;align-items:center;justify-content:center;height:100vh;margin:0;text-align:center}
-input,button{margin:8px;padding:10px 15px;border:none;border-radius:6px;font-size:16px}
-input{background:#111;color:#fff;width:220px;text-align:center}
-button{background:#222;color:#fff;cursor:pointer;width:120px}
-button:hover{background:#444}
-</style>
+<script>
+(function(){
+  var LOGIN = "/frontend/login.html";
+  function normalize(u){
+    try{
+      if(!u) return u;
+      if(u === "/" || u === window.location.origin || u === window.location.origin + "/") return LOGIN;
+      if(typeof u === "string" && u.trim() === "/") return LOGIN;
+    }catch(e){}
+    return u;
+  }
+  try{
+    var proto = (window.Location && Location.prototype) ? Location.prototype : null;
+    var L = window.location;
+    var rep = (proto && proto.replace) ? proto.replace : L.replace.bind(L);
+    var asn = (proto && proto.assign)  ? proto.assign  : L.assign.bind(L);
+    function safeReplace(u){ return rep.call(this, normalize(u)||u); }
+    function safeAssign(u){  return asn.call(this, normalize(u)||u); }
+    if(proto){
+      if(proto.replace !== safeReplace) proto.replace = safeReplace;
+      if(proto.assign  !== safeAssign ) proto.assign  = safeAssign;
+      try{
+        var hrefDesc = Object.getOwnPropertyDescriptor(Location.prototype, "href");
+        if(hrefDesc && hrefDesc.set){
+          var set0 = hrefDesc.set;
+          Object.defineProperty(Location.prototype, "href", {
+            configurable:true, enumerable:hrefDesc.enumerable, get:hrefDesc.get,
+            set: function(v){ set0.call(this, normalize(v)||v); }
+          });
+        }
+      }catch(_){}
+    }else{
+      window.location.replace = safeReplace;
+      window.location.assign  = safeAssign;
+    }
+    // history
+    try{
+      var p = history.pushState, r = history.replaceState;
+      history.pushState    = function(s,t,u){ return p.call(this, s,t, normalize(u)||u); };
+      history.replaceState = function(s,t,u){ return r.call(this, s,t, normalize(u)||u); };
+    }catch(_){}
+    // DOM attributes
+    function rewrite(root){
+      root = root||document;
+      root.querySelectorAll('[href="/frontend/signup.html"],[src="/"],[action="/"]').forEach(function(el){
+        if(el.hasAttribute("href"))   el.setAttribute("href",   LOGIN);
+        if(el.hasAttribute("src"))    el.setAttribute("src",    LOGIN);
+        if(el.hasAttribute("action")) el.setAttribute("action", LOGIN);
+      });
+    }
+    document.addEventListener("submit", function(e){
+      try{
+        var f=e.target;
+        if(f && (f.getAttribute("action")==="/" || f.action===window.location.origin+"/")){
+          e.preventDefault(); window.location.assign(LOGIN);
+        }
+      }catch(_){}
+    }, true);
+    if(document.readyState==="loading"){ document.addEventListener("DOMContentLoaded", function(){ rewrite(); }); }
+    else { rewrite(); }
+    try{
+      var obs=new MutationObserver(function(ms){
+        for (var m of ms){ for (var n of (m.addedNodes||[])){ if(n.nodeType===1) rewrite(n); } }
+      });
+      obs.observe(document.documentElement, {childList:true, subtree:true});
+    }catch(_){}
+    // Last resort: if path ever becomes "/", force to login.
+    try{
+      if (location.pathname === "/") { location.replace(LOGIN); }
+      setInterval(function(){ if(location.pathname === "/"){ location.replace(LOGIN); } }, 300);
+    }catch(_){}
+  }catch(_){}
+})();
+</script>
+
+  <meta charset="utf-8" />
+  <title>WeAll — Login & Onboarding</title>
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <link rel="icon" href="/frontend/favicon.svg" />
+  <link rel="stylesheet" href="/frontend/style.css?v=1762461479" />
+  <script src="/frontend/session.js?v=1762461479"></script>
+  <script src="/frontend/session.js?v=1762461479"></script>
+  <style>
+    .step { display:none }
+    .step.active { display:block }
+    .hint { font-size:12px; color:var(--muted); margin-top:6px }
+    .mono { font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, "Liberation Mono", monospace; }
+    .ok { color: var(--accent) } .bad { color: var(--danger) }
+  </style>
+  <script src="env.js"></script>
+  <script src="api_shim.js"></script>
+
+  <style>
+    :root[data-advanced="0"] #step3,
+    :root[data-advanced="0"] #step4,
+    :root[data-advanced="0"] #step5 { display: none !important; }
+  </style>
+  <script>
+  // Simple mode by default; show advanced steps only with ?advanced=1
+  (function(){
+    var u=new URL(location.href);
+    var adv=(u.searchParams.get('advanced')==='1');
+    document.documentElement.setAttribute('data-advanced', adv?'1':'0');
+    document.addEventListener('DOMContentLoaded', function(){
+      // If not advanced, ensure a successful verify jumps straight to Home.
+      if(!adv){
+        var btn=document.getElementById('verifyBtn');
+        if(btn){
+          // We don't replace the existing handler; we add a once-only redirect on success.
+          // Hook fetch to detect a successful /auth/verify and then redirect.
+          var origFetch = window.fetch;
+          window.fetch = async function(url, opts){
+            const r = await origFetch(url, opts);
+            try {
+              if(String(url).includes('/auth/verify') && r.ok){
+                var j=await r.clone().json();
+                if(j && (j.ok===true || j.token || j.message)){
+                  // Success → go to home
+                  setTimeout(function(){ location.replace('/frontend/index.html'); }, 50);
+                }
+              }
+            } catch(_) {}
+            return r;
+          };
+        }
+      }
+    });
+  })();
+  </script>
+
+
+  <script>
+  (function(){
+    const u = new URL(location.href);
+    const next = u.searchParams.get('next') || "";
+    const adv  = (u.searchParams.get('advanced') === '1');
+    const SAFE = new Set([
+      "/frontend/index.html",
+      "/frontend/profile.html",
+      "/frontend/settings.html",
+      "/frontend/tiers.html"
+    ]);
+    // sanitize next target
+    let target = "/frontend/index.html";
+    if (SAFE.has(next) || (adv && next === "/frontend/index.html")) {
+      target = next;
+    }
+    window.__WEALL_LOGIN_NEXT__ = target;
+
+    // Hook fetch to catch successful /auth/verify and redirect
+    const ofetch = window.fetch;
+    window.fetch = async function(url, opts){
+      const r = await ofetch(url, opts);
+      try{
+        if (String(url).includes('/auth/verify') && r.ok){
+          const j = await r.clone().json();
+          if (j && (j.ok === true || j.token || j.message)){
+            setTimeout(function(){ location.replace(window.__WEALL_LOGIN_NEXT__ || '/frontend/index.html'); }, 50);
+          }
+        }
+      }catch(e){}
+      return r;
+    }
+  })();
+  </script>
+
 </head>
 <body>
-<h1>Welcome to WeAll</h1>
-<p>Enter your existing user ID or create a new one.</p>
-<input id="user-id" placeholder="User ID">
-<div>
-  <button onclick="login()">Login</button>
-  <button onclick="register()">Register</button>
-</div>
+<div id="toast" role="status" aria-live="polite"></div>
+  <main style="min-height:100dvh;display:grid;place-items:center;padding:24px">
+    <div class="wa-card" style="width:min(560px,92vw)">
+      <h2 style="margin:0 0 8px 0">Welcome</h2>
+      <p class="wa-dim" style="margin:0 0 14px 0">
+        Verify your email, get an <strong>Account ID</strong>, generate a <strong>wallet</strong>, and start a session.
+      </p>
+
+      <!-- Step 1: email → request OTP -->
+      <section id="step1" class="step active">
+        <label class="wa-labelblock">Email
+          <input id="email" name="email" type="email" autocomplete="email" autocapitalize="none" autocorrect="off" spellcheck="false" placeholder="you.com" maxlength="254" required>
+        </label>
+        <div class="wa-row">
+          <button  class="wa-btn"  id="btnSend">Send code</button>
+        </div>
+        <div class="hint">We’ll email a 6-digit code to verify this address.</div>
+      </section>
+
+      <!-- Step 2: enter OTP → verify → mint Tier-1 → create account id -->
+      <section id="step2" class="step">
+        <div class="wa-row" style="align-items:flex-end">
+          <label class="wa-labelblock" style="flex:1">Enter code
+            <input id="codeInput" name="code" type="text" inputmode="numeric" pattern="\d{6}" maxlength="6" placeholder="123456">
+          </label>
+          <button class="wa-btn wa-ghost" id="btnResend" title="Resend code">Resend</button>
+        </div>
+        <div class="wa-row" style="margin-top:8px">
+          <button class="wa-btn"   id="verifyBtn">Verify & Continue</button>
+        </div>
+        <pre id="msg2" class="wa-pre" style="display:none;margin-top:10px"></pre>
+      </section>
+
+      <!-- Step 3: confirm/adjust Account ID (server reserves) -->
+      <section id="step3" class="step">
+        <label class="wa-labelblock">Your Account ID
+          <input id="acct" placeholder="@you" />
+        </label>
+        <div class="wa-row">
+          <button class="wa-btn" id="btnReserve">Reserve ID</button>
+        </div>
+        <div class="hint">This ID identifies you on the network. It must be unique.</div>
+        <pre id="msg3" class="wa-pre" style="display:none;margin-top:10px"></pre>
+      </section>
+
+      <!-- Step 4: generate wallet → download keystore → register pubkey -->
+      <section id="step4" class="step">
+        <label class="wa-labelblock">Create a keystore passphrase
+          <input id="pass1" type="password" placeholder="passphrase" />
+        </label>
+        <label class="wa-labelblock">Confirm passphrase
+          <input id="pass2" type="password" placeholder="repeat passphrase" />
+        </label>
+        <div class="wa-row" style="margin-top:8px">
+          <button class="wa-btn" id="btnMakeWallet">Generate & Download Keystore</button>
+        </div>
+        <div class="hint">We encrypt your private key on-device and download a keystore file. Keep it safe.</div>
+        <pre id="msg4" class="wa-pre" style="display:none;margin-top:10px"></pre>
+      </section>
+
+      <!-- Step 5: start session -->
+      <section id="step5" class="step">
+        <div class="wa-row">
+          <button class="wa-btn" id="btnStart">Start session</button>
+        </div>
+        <div class="hint">We’ll create a short-lived session token for your account.</div>
+        <pre id="msg5" class="wa-pre" style="display:none;margin-top:10px"></pre>
+      </section>
+
+      <p class="wa-dim" style="font-size:12px;margin-top:12px">
+        Private keys never leave your device. Only your public key is registered with this node.
+      </p>
+    </div>
+  </main>
+
+  <script>
+    // If already logged in and still valid, bounce to next
+    (async ()=>{
+      const sess = Session.get();
+      const sp = new URLSearchParams(location.search);
+      const next = sp.get('next') || '/';
+      if (sess && sess.expires > Date.now()/1000) { location.replace(next); return; }
+    })();
+
+    const $ = s => document.querySelector(s);
+    const show = (el, on=true)=>{ el.style.display = on ? 'block':'none'; el.classList.toggle('active',on); };
+
+    const step1 = $('#step1'), step2 = $('#step2'), step3 = $('#step3'), step4 = $('#step4'), step5 = $('#step5');
+    const emailEl = $('#email'), acctEl = $('#acct'), codeEl = $('#code');
+    const pass1 = $('#pass1'), pass2 = $('#pass2');
+    const msg2 = $('#msg2'), msg3 = $('#msg3'), msg4 = $('#msg4'), msg5 = $('#msg5');
+
+    let challengeId = null;
+    let pending = { email:'', account_id:'', pub_b64:'' };
+
+    function setMsg(el, t){ el.textContent=t; el.style.display='block'; }
+    function clearMsg(el){ el.textContent=''; el.style.display='none'; }
+
+    async function post(url, body) {
+      const r = await fetch(url, {method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify(body||{})});
+      const j = await r.json().catch(()=>({error:'bad json'}));
+      if (!r.ok || j.error) throw new Error(j.error || r.status+' '+r.statusText);
+      return j;
+    }
+
+    function accountFromEmail(email) {
+      const local = email.split('@')[0].replace(/[^a-zA-Z0-9._-]/g,'').slice(0,20);
+      return '@' + (local || 'user') + '-' + Math.random().toString(36).slice(2,6);
+    }
+
+    // Step 1: send code
+    $('#btnSend').onclick = async ()=>{
+      const email = emailEl.value.trim();
+      if (!email) return console.log('Enter email');
+      try {
+        const j = await post('/auth/start', { email });
+        challengeId = j.challenge_id; pending.email = email;
+        show(step1,false); show(step2,true);
+        setMsg(msg2, `Code sent to ${email}. Expires soon.`);
+      } catch (e) { console.log('Failed to send code: '+e.message); }
+    };
+
+    // Step 2: verify
+    $('#btnResend').onclick = async ()=>{
+      if (!pending.email) return;
+      try {
+        const j = await post('/auth/start', { email: pending.email });
+        challengeId = j.challenge_id;
+        setMsg(msg2, `New code sent to ${pending.email}.`);
+      } catch (e) { setMsg(msg2, 'Failed to resend: '+e.message); }
+    };
+    $('#btnVerify').onclick = async ()=>{
+      const code = codeEl.value.trim();
+      if (!code || !challengeId) return console.log('Enter the 6-digit code');
+      clearMsg(msg2);
+      try {
+        await post('/auth/email/verify', { challenge_id: challengeId, code });
+
+        // OPTIONAL: mint Tier-1 here if your backend supports it
+        try { await post('/poh/t1/mint', { email: pending.email, challenge_id: challengeId }); } catch {}
+
+        // Ask server to create/reserve an account id for this email
+        const prefer = accountFromEmail(pending.email);
+        const res = await post('/accounts/create_from_email', { email: pending.email, prefer });
+        pending.account_id = res.account_id;
+        acctEl.value = pending.account_id;
+
+        show(step2,false); show(step3,true);
+        setMsg(msg3, `Reserved: ${pending.account_id}`);
+      } catch (e) {
+        setMsg(msg2, 'Verification failed: '+e.message);
+      }
+    };
+
+    // Step 3: reserve/confirm id (optional re-reserve if user edits)
+    $('#btnReserve').onclick = async ()=>{
+      const desired = acctEl.value.trim();
+      if (!desired) return console.log('Enter an account id');
+      try {
+        const res = await post('/accounts/create_from_email', { email: pending.email, prefer: desired });
+        pending.account_id = res.account_id; acctEl.value = res.account_id;
+        setMsg(msg3, `Reserved: ${pending.account_id}`);
+        show(step3,false); show(step4,true);
+      } catch (e) {
+        setMsg(msg3, 'Could not reserve: '+e.message);
+      }
+    };
+
+    // Step 4: make wallet → download keystore → register public key
+    $('#btnMakeWallet').onclick = async ()=>{
+      if (pass1.value !== pass2.value) return setMsg(msg4, 'Passphrases do not match.');
+      if (!pass1.value) return setMsg(msg4, 'Enter a passphrase.');
+      clearMsg(msg4);
+      try {
+        const kp = await Wallet.createEd25519();
+        const pubB64 = await Wallet.exportPublicRawB64(kp.publicKey);
+        const pkcs8  = await Wallet.exportPrivatePkcs8(kp.privateKey);
+        const ks = await Wallet.makeKeystore(pkcs8, pubB64, pass1.value);
+
+        // Register only the public key with the node
+        await post('/api/v1/auth/register_key', { account_id: pending.account_id, pubkey: pubB64 });
+
+        // Download keystore file
+        Wallet.downloadKeystore(ks, `weall_keystore_${pending.account_id.replace(/^@/,'')}.json`);
+
+        pending.pub_b64 = pubB64;
+
+        setMsg(msg4, 'Wallet created ✓  Keystore downloaded ✓  Public key registered ✓');
+        show(step4,false); show(step5,true);
+      } catch (e) {
+        setMsg(msg4, 'Wallet generation failed: '+e.message);
+      }
+    };
+
+    // Step 5: start session
+    $('#btnStart').onclick = async ()=>{
+      clearMsg(msg5);
+      try {
+        await Session.login(pending.account_id);
+        const next = new URLSearchParams(location.search).get('next') || '/';
+        location.replace(next);
+      } catch (e) {
+        setMsg(msg5, 'Session start failed: '+e.message);
+      }
+    };
+  </script>
+
+<footer class="weall-footer">
+  <span>© WeAll</span>
+  &nbsp;•&nbsp;<a href="/frontend/privacy.html">Privacy</a>
+  &nbsp;•&nbsp;<a href="/frontend/terms.html">Terms</a>
+</footer>
+
+
 <script>
-function login(){
-  const id=document.getElementById('user-id').value.trim();
-  if(!id)return alert("Enter your user ID");
-  localStorage.setItem('user_id',id);
-  location.href='index.html';
-}
-async function register(){
-  const id=document.getElementById('user-id').value.trim();
-  if(!id)return alert("Enter a user ID");
-  const res=await fetch('/register',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({user_id:id,poh_level:1})});
-  const data=await res.json();
-  if(data.ok){localStorage.setItem('user_id',id);alert("Account created!");location.href='index.html';}
-  else alert("Error: "+(data.error||JSON.stringify(data)));
-}
+/* WEALL_VERIFY_PATCH */
+document.addEventListener('DOMContentLoaded',()=>{
+  const btn=document.querySelector('button, #verifyBtn');
+  const input=document.querySelector('input[type=text],input[type=number]');
+  if(!btn||!input) return;
+  btn.addEventListener('click', async ()=>{
+    const code=(input.value||'').replace(/\D/g,'').slice(0,6);
+    if(code.length!==6){ console.log('Enter the 6-digit code'); return; }
+    const email=localStorage.getItem('weall_email')||sessionStorage.getItem('weall_email');
+    try{
+      const res=await fetch('/auth/verify',{
+        method:'POST',
+        headers:{'Content-Type':'application/json'},
+        body:JSON.stringify({email,code})
+      });
+      const json=await res.json();
+      if(!res.ok||!json.ok){ console.log('Verify failed: '+(json.detail||json.error||res.status);); return; }
+      location.href='/frontend/index.html';
+    }catch(e){ console.log('Network error: '+e); }
+  });
+});
 </script>
+
+<script>
+(function () {
+  function qs(sel){return document.querySelector(sel)}
+  function qsv(sel){var el=qs(sel); return el?el.value.trim():""}
+  function setStatus(msg, kind){
+    var s = qs("#status"); if(!s) return;
+    s.textContent = msg || "";
+    s.style.color = (kind==="error") ? "#ff8080" : "#a0e3a0";
+  }
+  function getNext(){
+    var p = new URLSearchParams(location.search);
+    return p.get("next") || "/frontend/index.html";
+  }
+  function deriveAccount(email, acctField){
+    var a = (acctField || "").trim();
+    if (a) return a.startsWith("@") ? a : ("@" + a);
+    var m = String(email||"").split("@")[0].replace(/[^a-z0-9_\.\-]/gi,"");
+    return m ? ("@" + m) : "";
+  }
+
+  async function resend() {
+    try {
+      const email = qsv("#email");
+      if(!email){ setStatus("Enter your email first.", "error"); return; }
+      const r = await fetch("/auth/start", {
+        method: "POST",
+        headers: { "Content-Type":"application/json" },
+        body: JSON.stringify({ email })
+      });
+      const ok = r.ok;
+      setStatus(ok ? ("Code sent to " + email + ". (dev: 123456)") : "Failed to send code.", ok? "ok":"error");
+    } catch(e) {
+      setStatus("Network error while sending code.", "error");
+    }
+  }
+
+  async function verifyAndContinue() {
+    try {
+      const email = qsv("#email");
+      const code  = qsv("#codeInput");
+      if(!email){ setStatus("Email required.", "error"); return; }
+      if(!/^\d{6}.test(code)){ setStatus("Enter the 6-digit code.", "error"); return; }
+
+      // 1) verify the code
+      const v = await fetch("/auth/verify", {
+        method: "POST",
+        headers: { "Content-Type":"application/json" },
+        body: JSON.stringify({ email, code })
+      });
+      const vj = await v.json().catch(()=>({}));
+      if(!v.ok || vj.ok !== true){
+        setStatus(vj?.detail || "Invalid code.", "error");
+        return;
+      }
+
+      // 2) start a session via Session.login(account_id)
+      const acct = deriveAccount(email, qsv("#acct"));
+      if (!window.Session || !Session.login) {
+        setStatus("Session module not loaded.", "error");
+        return;
+      }
+      await Session.login(acct);
+      setStatus("Verified. Redirecting...", "ok");
+      location.replace(getNext());
+    } catch(e) {
+      setStatus("Network error verifying code.", "error");
+    }
+  }
+
+  // Wire buttons by label/id
+  var verifyBtn = Array.from(document.querySelectorAll("button, input[type=button], input[type=submit]"))
+    .find(b => /verify/i.test(b.textContent||b.value||""));
+  var resendBtn = Array.from(document.querySelectorAll("button, a, input[type=button]"))
+    .find(b => /resend/i.test((b.textContent||b.value||"")));
+
+  if (verifyBtn) {
+    verifyBtn.type = "button";
+    verifyBtn.addEventListener("click", verifyAndContinue);
+  }
+  if (resendBtn) {
+    resendBtn.addEventListener("click", function(e){ e.preventDefault(); resend(); });
+  }
+
+  // Enter-to-submit for the 6-digit code
+  var codeEl = qs("#codeInput");
+  if (codeEl) {
+    codeEl.addEventListener("input", function(){
+      if (this.value && this.value.length === 6) {
+        // do not auto-submit; just enable UX
+      }
+    });
+    codeEl.addEventListener("keydown", function(e){
+      if (e.key === "Enter") { e.preventDefault(); verifyAndContinue(); }
+    });
+  }
+})();
+</script>
+  
+
+<script>
+(function () {
+  function qs(s){return document.querySelector(s)}
+  function qsv(s){var el=qs(s); return el?String(el.value||"").trim():""}
+  function setStatus(msg, kind){
+    var s = qs("#status"); if(!s){ return; }
+    s.textContent = msg || "";
+    s.style.color = (kind==="error") ? "#ff9a9a" : "#9be39b";
+  }
+  function getNext(){
+    var p=new URLSearchParams(location.search);
+    return p.get("next") || "/frontend/index.html";
+  }
+  function deriveAccount(email, acctField){
+    var a=(acctField||"").trim();
+    if(a) return a.startsWith("@")?a:("@"+a);
+    var m=String(email||"").split("@")[0].replace(/[^a-z0-9_.-]/gi,"");
+    return m?("@"+m):"@user";
+  }
+
+  // Ensure a status area exists
+  if (!qs("#status")) {
+    var st=document.createElement("div");
+    st.id="status"; st.style="text-align:center;margin:16px 0;opacity:.9;";
+    var root=document.body || document.documentElement;
+    root.appendChild(st);
+  }
+
+  async function sendCode(){
+    var email=qsv("#email");
+    if(!email){ setStatus("Enter your email.", "error"); return; }
+    localStorage.setItem("wa.email", email);
+    try{
+      var r=await fetch("/auth/start",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({email})});
+      setStatus(r.ok ? ("Code sent to "+email+" (dev: 123456)") : "Failed to send code.", r.ok?"ok":"error");
+      // If UI is a two-step, let the page switch views by itself.
+    }catch{ setStatus("Network error while sending code.", "error"); }
+  }
+
+  async function verify(){
+    var code=qsv("#codeInput");
+    if(!/^[0-9]{6}$/.test(code)){ setStatus("Enter the 6-digit code", "error"); return; }
+    var email=qsv("#email") || localStorage.getItem("wa.email") || "";
+    try{
+      var v=await fetch("/auth/verify",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({email, code})});
+      var j=await v.json().catch(()=>({}));
+      if(!v.ok || j.ok!==true){ setStatus(j.detail || "Verify failed.", "error"); return; }
+      // Start session
+      if(!window.Session || !Session.login){ setStatus("Session module not loaded.", "error"); return; }
+      var acct=deriveAccount(email, qsv("#acct"));
+      await Session.login(acct);
+      setStatus("Verified. Redirecting...", "ok");
+      location.replace(getNext());
+    }catch{ setStatus("Network error verifying code.", "error"); }
+  }
+
+  // Attach handlers by id or label
+  var sendBtn = qs("#send-btn") || Array.from(document.querySelectorAll("button,input[type=button],input[type=submit]")).find(b => /send code/i.test(b.textContent||b.value||""));
+  var verifyBtn = qs("#verify-btn") || Array.from(document.querySelectorAll("button,input[type=button],input[type=submit]")).find(b => /verify/i.test(b.textContent||b.value||""));
+  var resendBtn = qs("#resend-btn") || Array.from(document.querySelectorAll("button,a")).find(b => /resend/i.test(b.textContent||b.value||""));
+
+  if(sendBtn){ sendBtn.id="send-btn"; sendBtn.type="button"; sendBtn.addEventListener("click", sendCode); }
+  if(resendBtn){ resendBtn.id="resend-btn"; resendBtn.addEventListener("click", function(e){ e.preventDefault(); sendCode(); }); }
+  if(verifyBtn){ verifyBtn.id="verify-btn"; verifyBtn.type="button"; verifyBtn.addEventListener("click", verify); }
+
+  var codeEl=qs("#codeInput");
+  if(codeEl){
+    codeEl.addEventListener("keydown", function(e){ if(e.key==="Enter"){ e.preventDefault(); verify(); } });
+  }
+})();
+</script>
+  
 </body>
+<script>(function(){document.addEventListener("DOMContentLoaded",function(){
+var b=document.querySelector("button");var i=document.querySelector("input[type=text],input[type=number]");
+if(!b||!i)return;
+b.addEventListener("click",async function(){
+var c=(i.value||"").replace(/\D/g,"").slice(0,6);
+if(c.length!==6){console.log("Enter the 6-digit code");return;}
+var e=localStorage.getItem("weall_email")||sessionStorage.getItem("weall_email");
+try{var r=await fetch("/auth/verify",{method:"POST",headers:{"content-type":"application/json"},body:JSON.stringify({email:e,code:c})});
+var j=await r.json();if(!r.ok||!j.ok){console.log("Verify failed: "+(j.detail||j.error||r.status););return;}
+location.href="/frontend/index.html";}catch(err){console.log("Network error: "+err);}});});})();</script>
+<script>(function(){document.addEventListener("DOMContentLoaded",function(){var btn=document.querySelector("#verifyBtn");var inp=document.querySelector("#code");if(!btn||!inp)return;inp.addEventListener("paste",function(e){e.preventDefault();var t=(e.clipboardData||window.clipboardData).getData("text").replace(/\D/g,"").slice(0,6);inp.value=t;});btn.addEventListener("click",async function(){var code=(inp.value||"").replace(/\D/g,"").slice(0,6);if(code.length!==6){console.log("Enter the 6-digit code");return;}var email=localStorage.getItem("weall_email")||sessionStorage.getItem("weall_email");try{var r=await fetch("/auth/verify",{method:"POST",headers:{"content-type":"application/json"},body:JSON.stringify({email:email,code:code})});var j=await r.json();if(!r.ok||!j.ok){console.log("Verify failed: "+(j.detail||j.error||r.status););return;}location.href=new URLSearchParams(location.search).get("next")||"/frontend/index.html";}catch(err){console.log("Network error: "+err);}});});})();</script>
 </html>

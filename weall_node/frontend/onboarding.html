@@ -1,28 +1,24 @@
 <!DOCTYPE html>
 <html lang="en">
 <head>
-    <meta charset="UTF-8">
-    <title>WeAll Sign Up</title>
-    <link rel="stylesheet" href="style.css">
+  <meta charset="UTF-8">
+  <title>WeAll Onboarding • Genesis</title>
+  <link rel="stylesheet" href="/frontend/style.css">
+  <script defer src="/frontend/session.js"></script>
 </head>
 <body>
-    <header>
-        <h1>Welcome to WeAll</h1>
-    </header>
-    <main>
-        <form id="signup-form">
-            <label>User ID: <input type="text" id="user-id"></label>
-            <label>PoH Level:
-                <select id="poh-level">
-                    <option value="1">1 – Guest</option>
-                    <option value="2">2 – Async Verified</option>
-                    <option value="3">3 – Live Verified</option>
-                </select>
-            </label>
-            <button type="button" onclick="signUp()">Sign Up</button>
-        </form>
-        <div id="signup-result"></div>
-    </main>
-    <script src="main.js"></script>
+  <main class="onboarding" style="max-width:720px;margin:2rem auto;font-family:sans-serif;">
+    <h1>Welcome to WeAll • Genesis</h1>
+    <p>This node follows the Genesis / FullScope spec.</p>
+    <ol>
+      <li><strong>Tier 1</strong>: Verify email &amp; create your keys.</li>
+      <li><strong>Tier 2</strong>: Submit async video for human verification.</li>
+      <li><strong>Tier 3</strong>: Complete live juror verification to unlock governance, juror, and validator powers.</li>
+    </ol>
+    <p>
+      When you're ready:
+      <a href="/frontend/login.html">Continue to Login</a>
+    </p>
+  </main>
 </body>
 </html>

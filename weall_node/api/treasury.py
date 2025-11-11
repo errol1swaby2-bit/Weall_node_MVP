@@ -1,108 +1,132 @@
-# api/treasury.py
+"""
+weall_node/api/treasury.py
+--------------------------------------------------
+Unified Treasury API for WeAll Node v1.1
+Handles protocol treasury balance, funding proposals, and NFT-based receipts.
+Uses the unified executor runtime (no app_state or weall_runtime dependencies).
+"""
+
 from fastapi import APIRouter, HTTPException
-from weall_node.app_state import ledger, chain
-from weall_node.weall_runtime.wallet import mint_nft, burn_nft
+from pydantic import BaseModel
+from typing import Dict, Any, List, Optional
+from ..weall_executor import executor
 
-router = APIRouter(prefix="/treasury", tags=["treasury"])
-
-# -------------------------------------------------------------------
-# In-memory treasury (mirrored by chain + ledger)
-# -------------------------------------------------------------------
-treasury_state = {
-    "funds": 0.0,
-    "receipts": {}  # user_id -> list of receipt NFT ids
-}
+router = APIRouter()
 
 
-# -------------------------------------------------------------------
-# Helpers
-# -------------------------------------------------------------------
-def _record_block(tx_type: str, payload: dict):
-    """Append a treasury transaction block to the chain."""
-    block = {
-        "ts": int(__import__("time").time()),
-        "txs": [{"type": tx_type, "payload": payload}],
-        "prev": chain.latest().get("hash", "genesis"),
-        "validator": "system",
-        "sig": "system-auto",
-    }
-    import json, hashlib
-    raw = json.dumps(block, sort_keys=True).encode()
-    block["hash"] = hashlib.sha256(raw).hexdigest()
-    chain.blocks.append(block)
-    chain.persist()
-    return block
+# ---------------------------------------------------------------
+# Data models
+# ---------------------------------------------------------------
+class Proposal(BaseModel):
+    """Simple treasury proposal structure."""
+
+    proposal_id: str
+    proposer: str
+    amount: float
+    description: str
+    approved: bool = False
+    executed: bool = False
 
 
-# -------------------------------------------------------------------
-# Endpoints
-# -------------------------------------------------------------------
-
-@router.get("/")
-def get_treasury_status():
-    """Return current treasury funds and receipts summary."""
-    return {
-        "status": "ok",
-        "funds": treasury_state["funds"],
-        "receipts": {
-            u: len(v) for u, v in treasury_state["receipts"].items()
-        },
-    }
+# ---------------------------------------------------------------
+# In-memory proposal list (temporary)
+# ---------------------------------------------------------------
+PROPOSALS: Dict[str, Proposal] = {}
 
 
-@router.post("/deposit/{user_id}/{amount}")
-def deposit(user_id: str, amount: float):
-    """Deposit funds from user's ledger into treasury and mint receipt NFT."""
-    # Check balance
-    bal = float(ledger.get_balance(user_id))
-    if bal < amount:
-        raise HTTPException(400, f"Insufficient funds: {bal}")
-
-    # Ledger updates
-    ledger.balances[user_id] = bal - amount
-    treasury_state["funds"] += amount
-
-    # Mint Treasury Receipt NFT
-    nft_id = f"TREASURY_RECEIPT::{user_id}::{int(__import__('time').time())}"
-    receipt = mint_nft(user_id, nft_id, metadata=f"Deposit of {amount} WEC")
-    treasury_state["receipts"].setdefault(user_id, []).append(nft_id)
-
-    # Record block
-    _record_block("TREASURY_DEPOSIT", {"user": user_id, "amount": amount, "nft_id": nft_id})
-
-    return {
-        "ok": True,
-        "user_id": user_id,
-        "amount": amount,
-        "treasury_funds": treasury_state["funds"],
-        "nft": receipt,
-    }
+# ---------------------------------------------------------------
+# Helper functions
+# ---------------------------------------------------------------
+def _treasury_balance() -> float:
+    """Return current treasury balance from executor ledger."""
+    return float(executor.ledger.get("treasury_balance", 0.0))
 
 
-@router.post("/withdraw/{user_id}/{amount}")
-def withdraw(user_id: str, amount: float):
-    """Withdraw funds from treasury to user's ledger and burn receipt NFT."""
-    if treasury_state["funds"] < amount:
-        raise HTTPException(400, "Insufficient treasury funds")
+def _update_treasury_balance(amount: float) -> None:
+    executor.ledger["treasury_balance"] = _treasury_balance() + amount
+    executor.save_state()
 
-    # Reduce treasury
-    treasury_state["funds"] -= amount
-    ledger.balances[user_id] = ledger.balances.get(user_id, 0) + amount
 
-    # Burn latest treasury receipt if any
-    receipts = treasury_state["receipts"].get(user_id, [])
-    burned = None
-    if receipts:
-        nft_id = receipts.pop()  # Burn most recent
-        burned = burn_nft(nft_id)
+# ---------------------------------------------------------------
+# Routes
+# ---------------------------------------------------------------
 
-    # Record block
-    _record_block("TREASURY_WITHDRAW", {"user": user_id, "amount": amount, "burned": burned})
 
-    return {
-        "ok": True,
-        "user_id": user_id,
-        "amount": amount,
-        "treasury_funds": treasury_state["funds"],
-        "burned_receipt": burned,
-    }
+@router.get("/balance")
+def get_treasury_balance() -> Dict[str, Any]:
+    """Return current treasury balance."""
+    return {"ok": True, "balance": _treasury_balance()}
+
+
+@router.post("/deposit")
+def deposit_to_treasury(sender: str, amount: float):
+    """Simulate deposit to treasury (for testing)."""
+    if not executor.transfer_funds(sender, "treasury", amount):
+        raise HTTPException(status_code=400, detail="Insufficient funds")
+    _update_treasury_balance(amount)
+    return {"ok": True, "balance": _treasury_balance()}
+
+
+@router.post("/propose")
+def propose_funding(proposal: Proposal):
+    """Submit a new treasury proposal."""
+    if proposal.proposal_id in PROPOSALS:
+        raise HTTPException(status_code=400, detail="Proposal already exists")
+    PROPOSALS[proposal.proposal_id] = proposal
+    return {"ok": True, "proposal": proposal}
+
+
+@router.get("/proposals")
+def list_proposals() -> List[Dict[str, Any]]:
+    """List all current proposals."""
+    return [p.dict() for p in PROPOSALS.values()]
+
+
+@router.post("/approve/{proposal_id}")
+def approve_proposal(proposal_id: str, approver: Optional[str] = None):
+    """Approve a funding proposal."""
+    if proposal_id not in PROPOSALS:
+        raise HTTPException(status_code=404, detail="Proposal not found")
+    prop = PROPOSALS[proposal_id]
+    prop.approved = True
+    return {"ok": True, "proposal": prop}
+
+
+@router.post("/execute/{proposal_id}")
+def execute_proposal(proposal_id: str):
+    """
+    Execute an approved proposal.
+    Deducts amount from treasury and issues an NFT receipt.
+    """
+    if proposal_id not in PROPOSALS:
+        raise HTTPException(status_code=404, detail="Proposal not found")
+
+    prop = PROPOSALS[proposal_id]
+    if not prop.approved:
+        raise HTTPException(status_code=400, detail="Proposal not approved")
+    if prop.executed:
+        raise HTTPException(status_code=400, detail="Proposal already executed")
+
+    balance = _treasury_balance()
+    if balance < prop.amount:
+        raise HTTPException(status_code=400, detail="Insufficient treasury funds")
+
+    # Deduct from treasury balance
+    executor.ledger["treasury_balance"] = balance - prop.amount
+    executor.save_state()
+
+    # Mint NFT receipt (on-ledger proof of disbursement)
+    nft_metadata = f"Treasury grant to {prop.proposer}: {prop.description}"
+    receipt = executor.mint_nft(prop.proposer, prop.proposal_id, nft_metadata)
+
+    prop.executed = True
+    return {"ok": True, "proposal": prop, "receipt": receipt}
+
+
+@router.post("/burn/{nft_id}")
+def burn_treasury_receipt(nft_id: str):
+    """Burn an existing treasury receipt NFT."""
+    success = executor.burn_nft(nft_id)
+    if not success:
+        raise HTTPException(status_code=404, detail="NFT not found or already burned")
+    return {"ok": True, "burned": nft_id}

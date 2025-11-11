@@ -11,7 +11,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from typing import List, Optional
 
 # ✅ Fixed import path
-from weall_node.executor import WeAllExecutor
+from weall_node.weall_executor import WeAllExecutor
 
 app = FastAPI(title="WeAll API", version="0.5.0")
 
@@ -69,12 +69,14 @@ def get_posts():
     """Return all posts with latest first."""
     posts_list = []
     for pid, post in executor.state["posts"].items():
-        posts_list.append({
-            "id": pid,
-            "user": post["user"],
-            "content": _safe_ipfs_cat(post["content_hash"]),
-            "tags": post["tags"]
-        })
+        posts_list.append(
+            {
+                "id": pid,
+                "user": post["user"],
+                "content": _safe_ipfs_cat(post["content_hash"]),
+                "tags": post["tags"],
+            }
+        )
     posts_list.sort(key=lambda x: x["id"], reverse=True)
     return posts_list
 
@@ -86,21 +88,21 @@ def get_proposals():
     proposals_list = []
     for pid, post in executor.state["posts"].items():
         if "Governance" in post.get("tags", []):
-            proposals_list.append({
-                "id": pid,
-                "user": post["user"],
-                "title": f"Proposal {pid}",
-                "description": _safe_ipfs_cat(post["content_hash"]),
-            })
+            proposals_list.append(
+                {
+                    "id": pid,
+                    "user": post["user"],
+                    "title": f"Proposal {pid}",
+                    "description": _safe_ipfs_cat(post["content_hash"]),
+                }
+            )
     return proposals_list
 
 
 # -------------------- Create Post --------------------
 @app.post("/posts")
 def create_post(
-    user_id: str,
-    content: str,
-    tags: Optional[List[str]] = Query(default=None)
+    user_id: str, content: str, tags: Optional[List[str]] = Query(default=None)
 ):
     """Create a new post and store it in IPFS."""
     if user_id not in executor.state["users"]:
@@ -108,7 +110,9 @@ def create_post(
     tags = tags or []
     result = executor.create_post(user_id, content, tags)
     if not result["ok"]:
-        raise HTTPException(status_code=400, detail=result.get("error", "Unknown error"))
+        raise HTTPException(
+            status_code=400, detail=result.get("error", "Unknown error")
+        )
     return result
 
 
@@ -118,6 +122,8 @@ def create_user(user_id: str, poh_level: int = 1):
     """Register a new user with a PoH level."""
     result = executor.register_user(user_id, poh_level)
     if not result["ok"]:
-        raise HTTPException(status_code=400, detail=result.get("error", "Unknown error"))
+        raise HTTPException(
+            status_code=400, detail=result.get("error", "Unknown error")
+        )
     executor.set_user_eligible(user_id)
     return {"ok": True, "user": user_id}

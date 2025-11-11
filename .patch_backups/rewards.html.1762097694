@@ -1,0 +1,210 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <title>WeAll — Rewards & Epochs</title>
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <link rel="stylesheet" href="/static/style.css">
+  <style>
+    body {
+      background:#000;
+      color:#fff;
+      font-family:Arial, sans-serif;
+      margin:0;
+      padding:0;
+    }
+    header {
+      background:#111;
+      padding:12px 16px;
+      display:flex;
+      align-items:center;
+      justify-content:space-between;
+    }
+    header h2 { margin:0; font-size:1.2em; }
+    header a {
+      color:#2ecc71;
+      text-decoration:none;
+      font-weight:bold;
+      font-size:0.9em;
+    }
+    .container {
+      max-width:900px;
+      margin:auto;
+      padding:20px;
+    }
+    .card {
+      background:#111;
+      border-radius:12px;
+      padding:16px;
+      margin-bottom:18px;
+      box-shadow:0 0 5px #222;
+    }
+    h3 { color:#2ecc71; margin-top:0; }
+    .stat { display:flex; justify-content:space-between; margin-bottom:8px; }
+    .table {
+      width:100%;
+      border-collapse:collapse;
+      font-size:0.9em;
+    }
+    th, td {
+      border-bottom:1px solid #222;
+      padding:8px 6px;
+      text-align:left;
+    }
+    th { color:#2ecc71; }
+    tr:hover { background:#1a1a1a; }
+    button {
+      background:#2ecc71;
+      border:none;
+      color:#000;
+      border-radius:8px;
+      padding:8px 12px;
+      font-weight:bold;
+      cursor:pointer;
+      margin-top:8px;
+    }
+    button:hover { background:#27ae60; }
+    .msg { color:#aaa; font-size:0.85em; margin-top:8px; }
+  </style>
+</head>
+<body>
+  <header>
+    <h2>Rewards & Epochs</h2>
+    <a href="index.html">← Back to Feed</a>
+  </header>
+
+  <div class="container">
+    <!-- Current Epoch -->
+    <div class="card">
+      <h3>Current Epoch</h3>
+      <div class="stat"><strong>Epoch Height:</strong> <span id="epochHeight">Loading...</span></div>
+      <div class="stat"><strong>Block Reward:</strong> <span id="blockReward">Loading...</span></div>
+      <div class="stat"><strong>Halving Cycle:</strong> <span id="halving">Loading...</span></div>
+      <button onclick="refreshEpoch()">Refresh</button>
+      <div class="msg" id="epochMsg"></div>
+    </div>
+
+    <!-- Pool Distributions -->
+    <div class="card">
+      <h3>Reward Distribution Pools</h3>
+      <table class="table" id="poolTable">
+        <thead>
+          <tr>
+            <th>Pool</th>
+            <th>Percentage</th>
+            <th>Current Payout (WEC)</th>
+          </tr>
+        </thead>
+        <tbody></tbody>
+      </table>
+      <button onclick="refreshPools()">Refresh</button>
+      <div class="msg" id="poolMsg"></div>
+    </div>
+
+    <!-- Reward History -->
+    <div class="card">
+      <h3>Recent Reward Epochs</h3>
+      <table class="table" id="historyTable">
+        <thead>
+          <tr>
+            <th>Epoch</th>
+            <th>Validators</th>
+            <th>Jurors</th>
+            <th>Operators</th>
+            <th>Creators</th>
+            <th>Treasury</th>
+            <th>Timestamp</th>
+          </tr>
+        </thead>
+        <tbody></tbody>
+      </table>
+      <button onclick="refreshHistory()">Refresh</button>
+      <div class="msg" id="histMsg"></div>
+    </div>
+  </div>
+
+  <script>
+    async function refreshEpoch() {
+      const h = document.getElementById('epochHeight');
+      const r = document.getElementById('blockReward');
+      const hal = document.getElementById('halving');
+      const msg = document.getElementById('epochMsg');
+      msg.textContent = '';
+      h.textContent = r.textContent = hal.textContent = '...';
+      try {
+        const res = await fetch('/chain/height');
+        const data = await res.json();
+        if (!res.ok) throw new Error(data.detail || 'Error fetching epoch');
+        h.textContent = data.height;
+      } catch (err) {
+        msg.textContent = err.message;
+      }
+      try {
+        const res2 = await fetch('/rewards/current');
+        const data2 = await res2.json();
+        if (!res2.ok) throw new Error(data2.detail || 'Error fetching reward data');
+        r.textContent = data2.block_reward + ' WEC';
+        hal.textContent = 'Cycle ' + data2.halving_cycle;
+      } catch (err) {
+        msg.textContent = err.message;
+      }
+    }
+
+    async function refreshPools() {
+      const table = document.querySelector('#poolTable tbody');
+      const msg = document.getElementById('poolMsg');
+      table.innerHTML = '<tr><td colspan="3">Loading...</td></tr>';
+      try {
+        const res = await fetch('/rewards/pools');
+        const data = await res.json();
+        if (!res.ok) throw new Error(data.detail || 'Error fetching pools');
+        table.innerHTML = Object.entries(data).map(([pool, pct]) => `
+          <tr>
+            <td>${pool}</td>
+            <td>${(pct * 100).toFixed(2)}%</td>
+            <td>${(pct * 100).toFixed(2)} WEC</td>
+          </tr>
+        `).join('');
+      } catch (err) {
+        table.innerHTML = '<tr><td colspan="3">⚠️ Error</td></tr>';
+        msg.textContent = err.message;
+      }
+    }
+
+    async function refreshHistory() {
+      const table = document.querySelector('#historyTable tbody');
+      const msg = document.getElementById('histMsg');
+      table.innerHTML = '<tr><td colspan="7">Loading...</td></tr>';
+      try {
+        const res = await fetch('/rewards/history');
+        const data = await res.json();
+        if (!res.ok) throw new Error(data.detail || 'Error fetching history');
+        if (!data.length) {
+          table.innerHTML = '<tr><td colspan="7">No reward history yet.</td></tr>';
+          return;
+        }
+        table.innerHTML = data.map(e => `
+          <tr>
+            <td>${e.epoch}</td>
+            <td>${e.validators}</td>
+            <td>${e.jurors}</td>
+            <td>${e.operators}</td>
+            <td>${e.creators}</td>
+            <td>${e.treasury}</td>
+            <td>${new Date(e.timestamp*1000).toLocaleString()}</td>
+          </tr>
+        `).join('');
+      } catch (err) {
+        table.innerHTML = '<tr><td colspan="7">⚠️ Error</td></tr>';
+        msg.textContent = err.message;
+      }
+    }
+
+    // Auto-init on load
+    refreshEpoch();
+    refreshPools();
+    refreshHistory();
+  </script>
+  <script src="/static/footer.js"></script>
+</body>
+</html>

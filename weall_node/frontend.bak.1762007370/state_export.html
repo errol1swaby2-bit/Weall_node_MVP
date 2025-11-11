@@ -1,0 +1,106 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<title>WeAll • State Snapshot / Export</title>
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<style>
+  :root { --bg:#0b0d10; --card:#0f1319; --line:#16202b; --ink:#e8eef7; --mut:#a8b3c2; --btn:#1f2937; --btnh:#374151; }
+  html,body{height:100%} body{margin:0;background:var(--bg);color:var(--ink);font-family:system-ui,-apple-system,Segoe UI,Roboto,Arial}
+  header{padding:12px 16px;background:#0e1218;border-bottom:1px solid var(--line)}
+  h2{margin:0;font-size:18px}
+  main{display:grid;grid-template-columns:360px 1fr;gap:12px;padding:12px}
+  .card{background:var(--card);border:1px solid var(--line);border-radius:12px;padding:12px}
+  button{width:100%;background:#0c1117;color:var(--ink);border:1px solid #223243;border-radius:8px;padding:8px 10px;cursor:pointer}
+  .kvs{font-family:ui-monospace,Menlo,Consolas,monospace;background:#0a0c10;border:1px solid #223243;border-radius:8px;padding:8px;font-size:12px;white-space:pre-wrap;word-break:break-word}
+  .row{display:flex;gap:8px;align-items:center} .row>*{flex:1}
+</style>
+</head>
+<body>
+<script src="./auth.js"></script>
+<script> weallAuth.require({ minTier: 3 }); </script>
+
+<header><h2>WeAll • State Snapshot / Export</h2></header>
+<main>
+  <section class="card">
+    <h3>Collect</h3>
+    <div class="row">
+      <button id="btnCollect">Collect Snapshot</button>
+      <button id="btnDownload">Download JSON</button>
+    </div>
+    <div class="row" style="margin-top:8px">
+      <button id="btnHealth">Health</button>
+      <button id="btnPeers">Peers</button>
+      <button id="btnCfg">PoH T2 Config</button>
+      <button id="btnIce">ICE</button>
+    </div>
+  </section>
+
+  <section class="card">
+    <h3>Snapshot</h3>
+    <div id="out" class="kvs"></div>
+  </section>
+</main>
+
+<script>
+(() => {
+  const $ = s => document.querySelector(s);
+  const J = x => JSON.stringify(x, null, 2);
+  let snap = { collected_at: null, health:null, peers:null, poh_t2_config:null, webrtc_config:null };
+
+  async function getJSON(url){
+    const r=await fetch(url,{credentials:'include'}); const t=await r.text(); let j={}; try{ j=t?JSON.parse(t):{} }catch{ j={raw:t} }
+    if(!r.ok) throw new Error(j.error||String(r.status)); return j;
+  }
+  async function postJSON(url, body){
+    const r=await fetch(url,{method:'POST',headers:{'Content-Type':'application/json'},credentials:'include',body:JSON.stringify(body||{})});
+    const t=await r.text(); let j={}; try{ j=t?JSON.parse(t):{} }catch{ j={raw:t} }
+    if(!r.ok) throw new Error(j.error||String(r.status)); return j;
+  }
+
+  async function collect(){
+    const [health, ice, t2cfg] = await Promise.allSettled([
+      getJSON('/health'),
+      getJSON('/webrtc/config'),
+      postJSON('/poh/t2/config', {})
+    ]);
+    snap.collected_at = new Date().toISOString();
+    snap.health = health.value || null;
+    snap.webrtc_config = ice.value || null;
+    snap.poh_t2_config = t2cfg.value || null;
+
+    // peers (optional endpoint)
+    try{
+      const peers = await getJSON('/network/peers');
+      snap.peers = peers;
+    }catch{
+      try{
+        snap.peers = (snap.health && snap.health.network && snap.health.network.peers) || null;
+      }catch{}
+    }
+
+    $('#out').textContent = J(snap);
+  }
+  function download(){
+    const data = new Blob([JSON.stringify(snap,null,2)],{type:'application/json'});
+    const url = URL.createObjectURL(data);
+    const a=document.createElement('a');
+    a.href=url; a.download = `weall_snapshot_${Date.now()}.json`;
+    document.body.appendChild(a); a.click(); a.remove();
+    URL.revokeObjectURL(url);
+  }
+
+  // Quick buttons
+  $('#btnCollect').onclick = ()=>collect().catch(e=>alert(e.message));
+  $('#btnDownload').onclick = ()=>download();
+  $('#btnHealth').onclick = async ()=>{ try{ snap.health = await getJSON('/health'); $('#out').textContent=J(snap); }catch(e){ alert(e.message); } };
+  $('#btnPeers').onclick  = async ()=>{ try{ snap.peers = await getJSON('/network/peers'); $('#out').textContent=J(snap); }catch(e){ alert(e.message); } };
+  $('#btnCfg').onclick    = async ()=>{ try{ snap.poh_t2_config = await postJSON('/poh/t2/config',{}); $('#out').textContent=J(snap); }catch(e){ alert(e.message); } };
+  $('#btnIce').onclick    = async ()=>{ try{ snap.webrtc_config = await getJSON('/webrtc/config'); $('#out').textContent=J(snap); }catch(e){ alert(e.message); } };
+
+  // boot
+  collect().catch(()=>{});
+})();
+</script>
+</body>
+</html>

@@ -1,0 +1,148 @@
+{
+  "accounts": {
+    "Errol1swaby2@gmail.com": {
+      "account_id": "Errol1swaby2@gmail.com",
+      "created": 1761451735.7352202,
+      "metadata": {},
+      "poh_nft": null,
+      "tier": 0
+    },
+    "eyJhY2NvdW50X2lkIjoiRXJyb2wxc3dhYnkyQGdtYWlsLmNvbSIsInNjb3BlIjoicmV2ZXJpZnkiLCJleHAiOjE3NjE1MzgxNDUuMzM4OTE1Niwibm9uY2UiOiJheDNnaTVtNCJ9.0d70cfb7e5608390a9e5bb201354d9b41fc5baa9820479c329df9de580571626": {
+      "account_id": "eyJhY2NvdW50X2lkIjoiRXJyb2wxc3dhYnkyQGdtYWlsLmNvbSIsInNjb3BlIjoicmV2ZXJpZnkiLCJleHAiOjE3NjE1MzgxNDUuMzM4OTE1Niwibm9uY2UiOiJheDNnaTVtNCJ9.0d70cfb7e5608390a9e5bb201354d9b41fc5baa9820479c329df9de580571626",
+      "created": 1761451790.8876028,
+      "metadata": {},
+      "poh_nft": null,
+      "tier": 0
+    }
+  },
+  "apply_tokens": {
+    "eyJhY2NvdW50X2lkIjoiRXJyb2wxc3dhYnkyQGdtYWlsLmNvbSIsInNjb3BlIjoicmV2ZXJpZnkiLCJleHAiOjE3NjE1MzgxNDUuMzM4OTE1Niwibm9uY2UiOiJheDNnaTVtNCJ9.0d70cfb7e5608390a9e5bb201354d9b41fc5baa9820479c329df9de580571626": {
+      "account_id": "Errol1swaby2@gmail.com",
+      "exp": 1761538145.3389156,
+      "nonce": "ax3gi5m4",
+      "scope": "reverify"
+    }
+  },
+  "chain": {
+    "height": 0,
+    "peers": 0
+  },
+  "chainstore": {
+    "blocks": {},
+    "finalized_height": 0,
+    "head_height": 0
+  },
+  "config": {
+    "consensus": {
+      "attestation_ttl_sec": 900,
+      "chain_id": "weall-testnet-1",
+      "max_block_items": 5000,
+      "quorum": {
+        "min_signers": 1,
+        "threshold": 0.67
+      },
+      "sample_k": 8
+    },
+    "epoch_seconds": 600,
+    "operator": {
+      "allow_observer": true,
+      "announce_when_unclaimed": false,
+      "remote_verify": {
+        "ask": 3,
+        "need": 2
+      },
+      "required_tier": 3
+    },
+    "p2p": {
+      "bootstrap": [],
+      "enable": true,
+      "gossip_interval_sec": 45,
+      "http_path_announce": "/p2p/announce",
+      "http_path_peers": "/p2p/peers",
+      "max_known_peers": 512,
+      "multicast": {
+        "enable": true,
+        "group": "239.42.0.1",
+        "interval_sec": 30,
+        "port": 42424
+      },
+      "public_url": null
+    },
+    "security": {
+      "enable_cors": false,
+      "post_body_max_bytes": 65536,
+      "rate_limit": {
+        "max_hits": 120,
+        "window_sec": 60
+      },
+      "require_json_ct": true,
+      "require_signatures": false,
+      "trust_proxy": true
+    },
+    "server_secret": "6kVFamDESEj_Gtnwc_8YEUMvtQEbdoJDkeVW7l_tJ00",
+    "t2_config": {
+      "max_pending": 100,
+      "required_yes": 3
+    },
+    "ui": {
+      "max_concurrent": 40,
+      "projector": true,
+      "redirect_when_over": true,
+      "sticky_by_ip": true
+    },
+    "webrtc": {
+      "max_rooms": 100,
+      "room_policy": {
+        "allow_guests": true,
+        "max_participants": 12
+      }
+    }
+  },
+  "groups": {},
+  "ipfs": {
+    "pinned": [],
+    "queue": []
+  },
+  "messages": [],
+  "operator": {
+    "account_id": null,
+    "claimed_sig": null,
+    "enabled": false,
+    "last_check": 1761551352.7771938,
+    "since": null
+  },
+  "p2p": {
+    "node": {
+      "id": "aa3baa68e835003b",
+      "priv": "xoBQP3vp0duZQpyqTopLJZLvqjfBm6JBTyd1w7V0/4Y=",
+      "pub": "jKJ407/syVRENLcIjewuxKUPtidGppz/UCQ8sv0CsKk=",
+      "roles": [
+        "ui",
+        "api",
+        "observer"
+      ]
+    },
+    "peers": {}
+  },
+  "poh": {
+    "t2_jurors": {},
+    "t2_pending": [],
+    "t3_jurors": {}
+  },
+  "posts": {},
+  "proposals": {},
+  "treasury": {
+    "balance": 0.0,
+    "txs": []
+  },
+  "validators": {},
+  "wallets": {},
+  "webrtc": {
+    "rooms": {}
+  },
+  "mempool": [],
+  "events": [],
+  "balances": {},
+  "users": {},
+  "node_id": "node:c57a31871976"
+}

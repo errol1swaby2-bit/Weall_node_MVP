@@ -10,13 +10,15 @@ import logging
 from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel
 from weall_node.api import poh
-from weall_node.weall_runtime.wallet import has_nft
+from ..weall_executor import executor
 
 router = APIRouter(prefix="/verification", tags=["verification"])
 logger = logging.getLogger("verification")
 
 if not logger.handlers:
-    logging.basicConfig(level=logging.INFO, format="%(asctime)s [%(levelname)s] %(message)s")
+    logging.basicConfig(
+        level=logging.INFO, format="%(asctime)s [%(levelname)s] %(message)s"
+    )
 
 
 # -------------------------------
@@ -72,7 +74,7 @@ def request_verification(req: VerificationRequest):
             return {
                 "ok": True,
                 "status": "use_poh_tier1_flow",
-                "hint": "POST /poh/request-tier1 then /poh/verify-tier1 with the code from email logs."
+                "hint": "POST /poh/request-tier1 then /poh/verify-tier1 with the code from email logs.",
             }
         elif req.level == 2:
             out = poh.apply_tier2(req.user_id, evidence="pending")
@@ -80,7 +82,12 @@ def request_verification(req: VerificationRequest):
             return {"ok": True, **out}
         elif req.level == 3:
             logger.info("Tier-3 verification requested by %s", req.user_id)
-            return {"ok": True, "status": "waiting_for_video", "tier": 3, "user": req.user_id}
+            return {
+                "ok": True,
+                "status": "waiting_for_video",
+                "tier": 3,
+                "user": req.user_id,
+            }
         else:
             raise ValueError("Invalid level (must be 1, 2, or 3)")
     except Exception as e:
@@ -116,7 +123,7 @@ def submit_evidence(data: EvidenceSubmission):
                 "ok": True,
                 "status": "session_required",
                 "tier": 3,
-                "hint": "Use /verification/tier3/create-session to begin juror attestation."
+                "hint": "Use /verification/tier3/create-session to begin juror attestation.",
             }
 
         # Default to Tier 2 path
@@ -127,7 +134,11 @@ def submit_evidence(data: EvidenceSubmission):
             "ok": True,
             "status": "approved" if result.get("approved") else "rejected",
             "tier": 2,
-            **({"block": result.get("block"), "nft": result.get("nft")} if result.get("approved") else {})
+            **(
+                {"block": result.get("block"), "nft": result.get("nft")}
+                if result.get("approved")
+                else {}
+            ),
         }
     except Exception as e:
         logger.exception("Evidence submission failed: %s", e)
@@ -140,7 +151,11 @@ def tier3_create_session(data: CreateTier3Session):
     _require_tier(data.user_id, 3)
     try:
         out = poh.create_tier3_session(data.user_id, data.jurors)
-        logger.info("Tier-3 session created by %s with %d jurors", data.user_id, len(data.jurors))
+        logger.info(
+            "Tier-3 session created by %s with %d jurors",
+            data.user_id,
+            len(data.jurors),
+        )
         return {"ok": True, "status": "created", **out}
     except Exception as e:
         logger.exception("Tier3 session creation failed: %s", e)
@@ -153,7 +168,12 @@ def tier3_attest(data: Tier3Attestation):
     _require_tier(data.juror_id, 3)
     try:
         out = poh.juror_attest(data.session_id, data.juror_id, data.decision)
-        logger.info("Juror %s attested on session %s (decision=%s)", data.juror_id, data.session_id, data.decision)
+        logger.info(
+            "Juror %s attested on session %s (decision=%s)",
+            data.juror_id,
+            data.session_id,
+            data.decision,
+        )
         return {"ok": True, **out}
     except Exception as e:
         logger.exception("Tier3 attestation failed: %s", e)
@@ -170,3 +190,35 @@ def tier3_finalize(data: Tier3Finalize):
     except Exception as e:
         logger.exception("Tier3 finalization failed: %s", e)
         raise HTTPException(status_code=400, detail=str(e))
+
+
+# --- local compatibility shim: has_nft(user_id, min_level=1) ---
+def has_nft(user_id: str, min_level: int = 1) -> bool:
+    """Check PoH/NFT level for a user using executor's state.
+    Tries executor.nfts first; then executor.ledger.get("nfts", {})."""
+    # Prefer an explicit accessor if your executor exposes one
+    fn = getattr(executor, "has_nft", None)
+    if callable(fn):
+        try:
+            return bool(fn(user_id, min_level))
+        except TypeError:
+            return bool(fn(user_id))
+
+    nfts = getattr(executor, "nfts", None)
+    if isinstance(nfts, dict):
+        try:
+            lvl = int(nfts.get(user_id, 0))
+            return lvl >= int(min_level)
+        except Exception:
+            pass
+
+    led = getattr(executor, "ledger", {})
+    if isinstance(led, dict):
+        n = led.get("nfts")
+        if isinstance(n, dict):
+            try:
+                lvl = int(n.get(user_id, 0))
+                return lvl >= int(min_level)
+            except Exception:
+                pass
+    return False

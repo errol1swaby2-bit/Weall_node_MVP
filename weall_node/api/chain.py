@@ -9,14 +9,16 @@ Integrates with the shared executor_instance (lazy import to avoid circulars).
 import time, logging
 from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel
-from weall_node.app_state import chain
+from ..weall_executor import executor
 from weall_node.weall_runtime.ledger import INITIAL_EPOCH_REWARD, HALVING_INTERVAL
 
 router = APIRouter(prefix="/chain", tags=["chain"])
 logger = logging.getLogger("chain")
 
 if not logger.handlers:
-    logging.basicConfig(level=logging.INFO, format="%(asctime)s [%(levelname)s] %(message)s")
+    logging.basicConfig(
+        level=logging.INFO, format="%(asctime)s [%(levelname)s] %(message)s"
+    )
 
 
 class BlockModel(BaseModel):
@@ -74,7 +76,11 @@ def tokenomics_status():
         now = int(time.time())
         wecoin = getattr(executor_instance.ledger, "wecoin", None)
         genesis_time = getattr(wecoin, "genesis_time", now)
-        current_reward = wecoin.current_epoch_reward() if hasattr(wecoin, "current_epoch_reward") else INITIAL_EPOCH_REWARD
+        current_reward = (
+            wecoin.current_epoch_reward()
+            if hasattr(wecoin, "current_epoch_reward")
+            else INITIAL_EPOCH_REWARD
+        )
         elapsed = now - genesis_time
         halvings = elapsed // HALVING_INTERVAL
         next_halving_eta = HALVING_INTERVAL - (elapsed % HALVING_INTERVAL)
@@ -82,7 +88,9 @@ def tokenomics_status():
         pools = {}
         raw_pools = getattr(wecoin, "pools", {})
         for name, meta in raw_pools.items():
-            members = list(meta.get("members", [])) if isinstance(meta, dict) else list(meta)
+            members = (
+                list(meta.get("members", [])) if isinstance(meta, dict) else list(meta)
+            )
             pools[name] = {"count": len(members), "members": members}
 
         return {
@@ -99,4 +107,3 @@ def tokenomics_status():
     except Exception as e:
         logger.exception("Tokenomics query failed: %s", e)
         raise HTTPException(status_code=500, detail="Failed to fetch tokenomics status")
-

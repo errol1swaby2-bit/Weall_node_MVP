@@ -1,0 +1,12 @@
+import { useAuth } from '../auth/AuthContext'
+
+export default function Dashboard() {
+  const { session, logout } = useAuth()
+  return (
+    <div style={{padding: 24, fontFamily:'system-ui'}}>
+      <h1>Welcome</h1>
+      <pre>{JSON.stringify(session, null, 2)}</pre>
+      <button onClick={logout}>Log out</button>
+    </div>
+  )
+}
