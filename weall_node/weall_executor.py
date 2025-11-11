@@ -627,3 +627,38 @@ class _ExecFacade:
 # ------------------------------------------------------------
 _EXEC_INSTANCE = WeAllExecutor()
 executor = _ExecFacade(_EXEC_INSTANCE)
+
+# --- WeAll Genesis: minimal persistent ledger binding -----------------------
+# Non-invasive helper:
+# - Uses existing `executor` if present.
+# - Adds `executor.ledger` (dict) if missing.
+# - Adds `executor.save_state()` if missing.
+# - Never raises on import if executor isn't defined or store fails.
+
+try:
+    from weall_node.storage.state_store import JSONStateStore
+except Exception:
+    JSONStateStore = None  # type: ignore[assignment]
+else:
+    _state_store = JSONStateStore() if JSONStateStore is not None else None  # type: ignore[call-arg]
+
+_executor = globals().get("executor", None)
+
+if _executor is not None and JSONStateStore is not None and _state_store is not None:
+    # Ensure ledger exists
+    current_ledger = getattr(_executor, "ledger", None)
+    if not isinstance(current_ledger, dict):
+        loaded = _state_store.load()
+        if isinstance(loaded, dict):
+            _executor.ledger = loaded
+        else:
+            _executor.ledger = {}
+
+    # Ensure save_state exists
+    if not hasattr(_executor, "save_state") or not callable(getattr(_executor, "save_state")):
+        def _save_state() -> None:
+            _state_store.save(_executor.ledger)  # type: ignore[attr-defined]
+
+        _executor.save_state = _save_state  # type: ignore[assignment]
+# If there's no global executor yet, or storage isn't available,
+# we intentionally do nothing. This keeps the original executor behavior intact.
