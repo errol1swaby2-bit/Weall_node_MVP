@@ -177,3 +177,16 @@ def health():
     return {"status": "ok"}
 
 
+
+# --- WeAll Genesis: mount reputation API (non-invasive) ---------------------
+try:
+    from weall_node.api import reputation as _reputation_api  # type: ignore
+except Exception:
+    _reputation_api = None  # type: ignore[assignment]
+
+if _reputation_api is not None:
+    try:
+        app.include_router(_reputation_api.router)
+    except Exception:
+        # If it's already mounted or app is wired differently, ignore.
+        pass
