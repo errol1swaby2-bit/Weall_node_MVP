@@ -1,125 +1,128 @@
-#!/usr/bin/env python3
 """
-Ledger API
-------------------------------------
-Handles user account creation, deposits, and transfers.
-Temporary in-memory ledger with optional blockchain recording.
+weall_node/api/ledger.py
+--------------------------------------------------
+Read-only ledger + balances + cryptographic proofs.
+
+- Return a full ledger snapshot
+- Get a user's token balance
+- List commitments signed by the node (epoch Merkle roots)
+- Retrieve a Merkle proof for a specific account
 """
 
-import logging, time
-from decimal import Decimal, InvalidOperation
 from fastapi import APIRouter, HTTPException
-from pydantic import BaseModel, Field
-from weall_node.app_state import chain
 
+from ..weall_executor import executor
+
+# All routes under /ledger/...
 router = APIRouter(prefix="/ledger", tags=["ledger"])
-logger = logging.getLogger("ledger")
-
-if not logger.handlers:
-    logging.basicConfig(level=logging.INFO, format="%(asctime)s [%(levelname)s] %(message)s")
-
-# Simple in-memory placeholder
-LEDGER = {"balances": {}}
 
 
-# -------------------------------
-# Pydantic Models
-# -------------------------------
-class AccountCreate(BaseModel):
-    user_id: str
+def _ledger():
+    """Safe access to the executor's ledger dict."""
+    led = getattr(executor, "ledger", None)
+    if led is None:
+        led = {}
+        executor.ledger = led
+    return led
 
 
-class DepositRequest(BaseModel):
-    user_id: str
-    amount: Decimal = Field(gt=0, description="Amount to deposit")
-
-
-class TransferRequest(BaseModel):
-    from_user: str
-    to_user: str
-    amount: Decimal = Field(gt=0, description="Amount to transfer")
-
-
-# -------------------------------
-# Routes
-# -------------------------------
 @router.get("/")
-def get_ledger_status():
-    """Basic health/status endpoint for the ledger module."""
-    return {"status": "ok", "message": "Ledger module is active", "accounts": len(LEDGER["balances"])}
+def get_full_ledger():
+    """
+    Full ledger snapshot plus a couple of convenience fields.
 
+    This is intentionally read-only and light:
+    - block_height is derived from len(chain)
+    - epoch falls back to 0 if the runtime hasn't started tracking it yet
+    """
+    try:
+        ledger = _ledger()
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"ledger_unavailable:{e!s}")
 
-@router.post("/create_account")
-def create_account(req: AccountCreate):
-    """Create a new account with zero balance."""
-    uid = req.user_id
-    if uid in LEDGER["balances"]:
-        raise HTTPException(status_code=400, detail="Account already exists")
+    chain = ledger.get("chain") or []
+    height = len(chain)
 
-    LEDGER["balances"][uid] = Decimal("0")
-    logger.info("Created ledger account for %s", uid)
-    return {"ok": True, "user_id": uid, "balance": str(LEDGER["balances"][uid])}
+    epoch = 0
+    try:
+        epoch = int(getattr(executor, "current_epoch", 0))
+    except Exception:
+        epoch = 0
+
+    return {
+        "ok": True,
+        "block_height": int(height),
+        "epoch": epoch,
+        "ledger": ledger,
+    }
 
 
 @router.get("/balance/{user_id}")
 def get_balance(user_id: str):
-    """Get the balance of a user account."""
-    if user_id not in LEDGER["balances"]:
-        raise HTTPException(status_code=404, detail="Account not found")
-    return {"ok": True, "user_id": user_id, "balance": str(LEDGER["balances"][user_id])}
+    """
+    Return the user's token balance, defaulting to 0.
 
+    Profile calls this endpoint as /ledger/balance/{email}.
+    """
+    user_id = (user_id or "").strip()
+    if not user_id:
+        raise HTTPException(status_code=400, detail="user_id_required")
 
-@router.post("/deposit")
-def deposit(req: DepositRequest):
-    """Deposit an amount into a user account."""
-    if req.user_id not in LEDGER["balances"]:
-        raise HTTPException(status_code=404, detail="Account not found")
+    # Prefer the executor helper if present (keeps WeCoin in sync)
+    try:
+        bal = executor.get_balance(user_id)
+    except AttributeError:
+        # Legacy behaviour: read from ledger.balances / ledger.accounts
+        ledger = _ledger()
+        balances = ledger.get("balances") or ledger.get("accounts") or {}
+        try:
+            bal = balances.get(user_id, 0)
+        except AttributeError:
+            bal = 0
 
     try:
-        amt = Decimal(req.amount)
-    except InvalidOperation:
-        raise HTTPException(status_code=400, detail="Invalid amount")
+        bal = float(bal)
+    except Exception:
+        bal = 0.0
 
-    LEDGER["balances"][req.user_id] += amt
-
-    # Record on chain
-    tx = {"type": "DEPOSIT", "user": req.user_id, "amount": float(amt), "timestamp": int(time.time())}
+    # Attach wallet metadata if present (derived from email+password at signup)
+    wallet = None
     try:
-        block = chain.add_block([tx])
-        logger.info("Deposit: %s +%s (block %s)", req.user_id, amt, block["hash"])
-    except Exception as e:
-        logger.warning("Chain record skipped: %s", e)
-        block = {"hash": "unrecorded"}
+        led_full = getattr(executor, "ledger", {}) or {}
+        accounts = led_full.get("accounts") or {}
+        acct = accounts.get(user_id) or {}
+        wallet = acct.get("wallet")
+    except Exception:
+        wallet = None
 
-    return {"ok": True, "user_id": req.user_id, "balance": str(LEDGER["balances"][req.user_id]), "block": block["hash"]}
+    return {"ok": True, "user_id": user_id, "balance": bal, "wallet": wallet}
 
 
-@router.post("/transfer")
-def transfer(req: TransferRequest):
-    """Transfer funds from one account to another."""
-    f, t, amt = req.from_user, req.to_user, Decimal(req.amount)
-
-    if f not in LEDGER["balances"]:
-        raise HTTPException(status_code=404, detail="Sender not found")
-    if t not in LEDGER["balances"]:
-        raise HTTPException(status_code=404, detail="Recipient not found")
-    if LEDGER["balances"][f] < amt:
-        raise HTTPException(status_code=400, detail="Insufficient funds")
-
-    LEDGER["balances"][f] -= amt
-    LEDGER["balances"][t] += amt
-
-    tx = {"type": "TRANSFER", "from": f, "to": t, "amount": float(amt), "timestamp": int(time.time())}
+@router.get("/commitments")
+def get_commitments():
+    """Signed epoch commitments (Merkle roots) with signatures and pubkey."""
     try:
-        block = chain.add_block([tx])
-        logger.info("Transfer %s -> %s : %s (block %s)", f, t, amt, block["hash"])
-    except Exception as e:
-        logger.warning("Chain record skipped: %s", e)
-        block = {"hash": "unrecorded"}
+        commits = executor.get_commitments()
+    except AttributeError:
+        # Older runtimes may not expose commitments yet
+        commits = []
+    return {"ok": True, "commitments": commits}
 
-    return {
-        "ok": True,
-        "from_balance": str(LEDGER["balances"][f]),
-        "to_balance": str(LEDGER["balances"][t]),
-        "block": block["hash"],
-    }
+
+@router.get("/proof/{user_id}")
+def merkle_proof(user_id: str):
+    """Return Merkle proof for the user's balance under the latest snapshot."""
+    user_id = (user_id or "").strip()
+    if not user_id:
+        raise HTTPException(status_code=400, detail="user_id_required")
+
+    try:
+        proof = executor.get_merkle_proof(user_id)
+    except AttributeError:
+        raise HTTPException(
+            status_code=501, detail="merkle_proofs_not_implemented"
+        )
+    except KeyError:
+        raise HTTPException(status_code=404, detail="user_not_in_snapshot")
+
+    return {"ok": True, "user_id": user_id, "proof": proof}

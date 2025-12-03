@@ -1,0 +1,2 @@
+# Only needed on non-Termux servers if you later switch to fastapi-mail again
+fastapi-mail==1.5.7

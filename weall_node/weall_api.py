@@ -1,542 +1,483 @@
-#!/usr/bin/env python3
+# weall_node/weall_api.py
 """
-WeAll Node API (FastAPI)
-------------------------
-Primary API interface for the WeAll Protocol MVP.
-
-Features:
-- Health / metrics
-- Chain + ledger
-- Users / PoH onboarding stubs
-- Content: posts, comments
-- Disputes (init/list + stubs for vote/resolve)
-- Governance (list, vote)
-- Reputation (get/increment)
-- P2P announce / peers / handshake + WebSocket relay
-- IPFS uploads
-- Node diagnostics
-- Static frontend
-
-HTTPS:
-- Set WEALL_FORCE_HTTPS=1 to redirect HTTP→HTTPS and send HSTS.
-- Start uvicorn with --ssl-certfile/--ssl-keyfile to enable TLS.
+WeAll Node — Unified FastAPI Interface
+--------------------------------------
+• Serves frontend HTML/JS under /frontend
+• Exposes all backend API modules
+• Provides all routes called by the web client
+• Production hardening: CORS, request IDs, security headers
 """
+import os
+import uuid
+import secrets
+import time
+import ssl
+import smtplib
+import hashlib, binascii
+from pathlib import Path
+from typing import List, Optional
 
-from __future__ import annotations
-import os, time, json, base64, asyncio, pathlib, logging
-from typing import Optional
+from dotenv import load_dotenv
 
-import ipfshttpclient
-import httpx
-from fastapi import FastAPI, Request, WebSocket
-from fastapi.responses import JSONResponse, PlainTextResponse, RedirectResponse
+load_dotenv()
+
+try:
+    from nacl.signing import SigningKey  # type: ignore
+    from nacl.encoding import HexEncoder  # type: ignore
+    NACL_AVAILABLE = True
+except Exception:
+    SigningKey = None  # type: ignore
+    HexEncoder = None  # type: ignore
+    NACL_AVAILABLE = False
+
+from fastapi import FastAPI, HTTPException, Request, Body
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
+from fastapi.responses import RedirectResponse, FileResponse, JSONResponse
+from pydantic import BaseModel, Field
 
-from prometheus_client import Counter, Histogram, Gauge, generate_latest, CONTENT_TYPE_LATEST
+from .settings import Settings
+from .redirect_legacy_frontend import router as legacy_frontend_router
+from .routers import auth_session_apply
 
-# Core executor + PoH requirements
-from weall_node.weall_executor import WeAllExecutor, POH_REQUIREMENTS
-
-# P2P mesh utilities
-from weall_node.p2p.mesh import (
-    init_mesh, Peer, verify_signature
+from weall_node.weall_executor import executor
+from weall_node.api import (
+    ledger,
+    wallet,
+    pinning,
+    governance,
+    sync,
+    messaging,
+    poh,
+    treasury,
+    verification,
+    disputes,
+    content,
+    reputation,
+    chain,
+    validators,
+    operators,
+    rewards,
+    storage,
+    health,
+    feed,
+    recovery,
 )
 
-# ------------------------------------------------------------------------------
-# App bootstrap
-# ------------------------------------------------------------------------------
+# ------------------------------------------------------------
+# App setup
+# ------------------------------------------------------------
 
-app = FastAPI(title="WeAll Node API", version="0.9.2", docs_url="/docs", redoc_url="/redoc")
+BASE_DIR = Path(__file__).resolve().parent
+FRONTEND_DIR = BASE_DIR / "frontend"
 
-logging.basicConfig(level=logging.INFO, format="%(message)s")
-logger = logging.getLogger("weall_api")
+settings = Settings()
+WEALL_ENV = os.getenv("WEALL_ENV", "dev").lower()
 
-# CORS (open for MVP)
+_CORS_ORIGINS: List[str] = settings.CORS_ORIGINS
+if WEALL_ENV in ("prod", "production") and any(
+    (o or "").strip() == "*" for o in _CORS_ORIGINS
+):
+    raise RuntimeError("Wildcard CORS origins are not allowed when WEALL_ENV=prod")
+
+app = FastAPI(title="WeAll Node API", version="1.1")
+
+# Legacy redirect router for older /frontendtendtend/* paths
+app.include_router(legacy_frontend_router)
+
+# Auth (email proxy / apply-session bridge)
+app.include_router(auth_session_apply.router)
+
+# CORS
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],
-    allow_methods=["*"],
+    allow_origins=_CORS_ORIGINS,
+    allow_credentials=settings.CORS_ALLOW_CREDENTIALS,
     allow_headers=["*"],
+    allow_methods=["GET", "POST", "PUT", "DELETE", "PATCH", "OPTIONS"],
 )
 
-# Observability
-REQ_COUNT = Counter("weall_requests_total", "Total API requests", ["method", "endpoint"])
-REQ_LAT   = Histogram("weall_request_latency_seconds", "Request latency (s)", ["endpoint"])
-CHAIN_ORPHANS = Gauge("weall_chain_orphan_blocks", "Orphan block count")
+# ------------------------------------------------------------
+# Small shims for older frontends expecting /env.js + /api_shim.js
+# ------------------------------------------------------------
 
-FORCE_HTTPS = os.environ.get("WEALL_FORCE_HTTPS", "0") == "1"
+@app.get("/env.js")
+async def serve_env_js():
+    """
+    Compatibility shim: some frontend entrypoints request /env.js at the root.
+    Serve the real file from weall_node/frontend/env.js.
+    """
+    path = FRONTEND_DIR / "env.js"
+    if not path.exists():
+        raise HTTPException(status_code=404, detail="env.js not found")
+    return FileResponse(path, media_type="application/javascript")
+
+
+@app.get("/api_shim.js")
+async def serve_api_shim_js():
+    """
+    Compatibility shim: some frontend entrypoints request /api_shim.js at the root.
+    Serve the real file from weall_node/frontend/api_shim.js.
+    """
+    path = FRONTEND_DIR / "api_shim.js"
+    if not path.exists():
+        raise HTTPException(status_code=404, detail="api_shim.js not found")
+    return FileResponse(path, media_type="application/javascript")
+
+
+# ------------------------------------------------------------
+# Common headers middleware (request ID + security headers)
+# ------------------------------------------------------------
 
 @app.middleware("http")
-async def metrics_and_security(request: Request, call_next):
-    # Optional HTTP→HTTPS redirect
-    if FORCE_HTTPS and request.url.scheme != "https":
-        # preserve path + query
-        https_url = str(request.url).replace("http://", "https://", 1)
-        return RedirectResponse(url=https_url, status_code=307)
-
-    start = time.time()
-    try:
-        response = await call_next(request)
-    except Exception as e:
-        logger.exception("Request failed: %s", e)
-        return JSONResponse({"ok": False, "error": str(e)}, status_code=500)
-
-    # Metrics
-    try:
-        REQ_COUNT.labels(request.method, request.url.path).inc()
-        REQ_LAT.labels(request.url.path).observe(time.time() - start)
-    except Exception:
-        pass
-
-    # Security headers
-    response.headers.setdefault("X-Content-Type-Options", "nosniff")
-    response.headers.setdefault("X-Frame-Options", "DENY")
-    response.headers.setdefault("Referrer-Policy", "no-referrer")
-    response.headers.setdefault("Permissions-Policy", "camera=(), microphone=(), geolocation=()")
-    if FORCE_HTTPS and request.url.scheme == "https":
-        response.headers.setdefault("Strict-Transport-Security", "max-age=31536000; includeSubDomains")
-    return response
-
-# ------------------------------------------------------------------------------
-# IPFS (safe-fail)
-# ------------------------------------------------------------------------------
-try:
-    IPFS = ipfshttpclient.connect("/ip4/127.0.0.1/tcp/5001")
-    logger.info("[IPFS] Connected OK")
-except Exception as e:
-    IPFS = None
-    logger.warning(f"[IPFS] connection failed: {e}")
-
-# ------------------------------------------------------------------------------
-# Executor + Mesh
-# ------------------------------------------------------------------------------
-EXEC = WeAllExecutor(
-    dsl_file="weall_dsl_v0.5.yaml",
-    poh_requirements=POH_REQUIREMENTS,
-)
-# repo root = two parents up from this file
-REPO_ROOT = pathlib.Path(__file__).resolve().parents[1]
-REGISTRY, IDENTITY = init_mesh(REPO_ROOT)
-
-# ------------------------------------------------------------------------------
-# Health & metrics
-# ------------------------------------------------------------------------------
-@app.get("/healthz")
-async def healthz():
-    return {"ok": True, "uptime": time.time() - EXEC.start_ts}
-
-@app.get("/ready")
-async def ready():
-    return {"ok": True, "chain_blocks": len(EXEC.chain.blocks)}
-
-@app.get("/metrics")
-async def metrics():
-    return PlainTextResponse(generate_latest(), media_type=CONTENT_TYPE_LATEST)
-
-# ------------------------------------------------------------------------------
-# Chain
-# ------------------------------------------------------------------------------
-@app.get("/chain/blocks")
-async def get_chain():
-    return EXEC.chain.blocks
-
-@app.get("/chain/mempool")
-async def get_mempool():
-    return EXEC.chain.get_mempool()
-
-@app.post("/chain/finalize")
-async def finalize_chain(req: Request):
-    data = await req.json()
-    return EXEC.finalize_block(data.get("user_id"))
-
-# ------------------------------------------------------------------------------
-# Ledger
-# ------------------------------------------------------------------------------
-@app.post("/ledger/create_account")
-async def ledger_create(req: Request):
-    data = await req.json()
-    return EXEC.ledger.create_account(data["user_id"])
-
-@app.post("/ledger/deposit")
-async def ledger_deposit(req: Request):
-    data = await req.json()
-    return EXEC.ledger.deposit(data["user_id"], data["amount"])
-
-@app.post("/ledger/transfer")
-async def ledger_transfer(req: Request):
-    data = await req.json()
-    return EXEC.ledger.transfer(data["from_user"], data["to_user"], data["amount"])
-
-@app.get("/ledger/balance/{user_id}")
-async def ledger_balance(user_id: str):
-    """LedgerState has .balance(); fallback to accounts dict for legacy."""
-    try:
-        balance = EXEC.ledger.balance(user_id)
-    except AttributeError:
-        balance = EXEC.ledger.accounts.get(user_id, 0.0)
-    return {"user_id": user_id, "balance": balance}
-
-# ------------------------------------------------------------------------------
-# Users / PoH (minimal stubs)
-# ------------------------------------------------------------------------------
-@app.post("/register")
-async def register(req: Request):
-    data = await req.json()
-    res = EXEC.register_user(data.get("user_id"), int(data.get("poh_level", 1)))
-    if not res.get("ok"):
-        return JSONResponse({"detail": res.get("error", "error")}, status_code=400)
-    return {"ok": True}
-
-@app.post("/poh/request-tier1")
-async def poh_request_tier1(req: Request):
-    d = await req.json()
-    return EXEC.request_tier1(d["user"], d["email"])
-
-@app.post("/poh/tier2")
-async def poh_tier2(req: Request):
-    d = await req.json()
-    try:
-        return EXEC.verify_tier2(d["user"], d["evidence"])
-    except AttributeError:
-        return {"ok": True, "tier": 2, "message": "Evidence received (stub)"}
-
-@app.post("/poh/tier3/request")
-async def poh_tier3_request(req: Request):
-    d = await req.json()
-    uid = d.get("user_id")
-    EXEC.state.setdefault("governance_log", []).append(
-        {"type": "tier3_request", "user": uid, "ts": time.time(), "phase": "A_pending"}
+async def common_headers(request: Request, call_next):
+    req_id = request.headers.get("X-Request-ID") or str(uuid.uuid4())
+    request.state.request_id = req_id
+    resp = await call_next(request)
+    resp.headers["X-Request-ID"] = req_id
+    resp.headers.setdefault("X-Frame-Options", "DENY")
+    resp.headers.setdefault("X-Content-Type-Options", "nosniff")
+    resp.headers.setdefault("Referrer-Policy", "no-referrer")
+    resp.headers.setdefault(
+        "Permissions-Policy",
+        "geolocation=(), microphone=(), camera=(), interest-cohort=()",
     )
-    EXEC.save_state()
-    return {"ok": True, "user": uid, "phase": "A_pending"}
+    resp.headers.setdefault(
+        "Content-Security-Policy",
+        "default-src 'self'; img-src 'self' data: blob:; media-src 'self' blob:; "
+        "script-src 'self' 'unsafe-inline'; style-src 'self' 'unsafe-inline'; "
+        "connect-src 'self'; frame-ancestors 'none'; base-uri 'self';",
+    )
+    return resp
 
-@app.post("/poh/video/initiate")
-async def poh_video_initiate(req: Request):
-    d = await req.json()
-    founder, target = d.get("founder_id"), d.get("target_user")
-    token_res = await p2p_handshake(Request(scope={"type": "http"}))
-    token = token_res["token"]
+
+# ------------------------------------------------------------
+# Serve frontend static files
+# ------------------------------------------------------------
+
+frontend_dir = os.path.join(os.path.dirname(__file__), "frontend")
+if os.path.isdir(frontend_dir):
+    app.mount("/frontend", StaticFiles(directory=frontend_dir), name="frontend")
+else:
+    print(f"[WARN] Frontend directory not found: {frontend_dir}")
+
+
+# Root route – show login page (frontend handles redirect to feed if authed)
+@app.get("/")
+def root():
+    login_path = Path(frontend_dir) / "login.html"
+    if login_path.exists():
+        return FileResponse(login_path)
+    # Fallback: old location
+    return RedirectResponse("/frontend/login.html", status_code=302)
+
+
+# ------------------------------------------------------------
+# Router mounts (modular API)
+# ------------------------------------------------------------
+
+app.include_router(ledger.router)
+app.include_router(wallet.router)
+app.include_router(pinning.router)
+app.include_router(governance.router)
+app.include_router(sync.router)
+app.include_router(messaging.router)
+app.include_router(poh.router)
+app.include_router(treasury.router)
+app.include_router(verification.router)
+app.include_router(disputes.router)
+app.include_router(content.router)
+app.include_router(reputation.router)
+app.include_router(chain.router)
+app.include_router(validators.router)
+app.include_router(operators.router)
+app.include_router(rewards.router)
+app.include_router(storage.router)
+app.include_router(health.router)
+app.include_router(feed.router)
+app.include_router(recovery.router)
+
+
+# ------------------------------------------------------------
+# Error boundary (wrap all handlers)
+# ------------------------------------------------------------
+
+@app.middleware("http")
+async def error_boundary(request: Request, call_next):
+    try:
+        return await call_next(request)
+    except HTTPException:
+        raise
+    except Exception as e:
+        req_id = getattr(getattr(request, "state", None), "request_id", "-")
+        return JSONResponse(
+            status_code=500,
+            content={
+                "error": "internal_error",
+                "detail": str(e),
+                "request_id": req_id,
+            },
+        )
+
+
+# ------------------------------------------------------------
+# System meta
+# ------------------------------------------------------------
+
+@app.get("/version")
+def version():
+    return {"executor": "1.1", "api": app.version}
+
+
+
+@app.get("/api/meta")
+def api_meta():
+    """
+    Node metadata for top nav / diagnostics panel.
+    Mirrors the shape expected by frontend/app.js:
+      { ok: true, data: { node_id, roles, load, peers, env } }
+    """
+    # Derive node_id from executor or node_id.json
+    node_id = getattr(executor, "node_id", None)
+    if not node_id:
+        try:
+            import json
+            nid_path = Path(settings.ROOT_DIR) / "node_id.json"
+            if nid_path.exists():
+                node_id = json.loads(nid_path.read_text()).get("node_id")
+        except Exception:
+            node_id = None
+    if not node_id:
+        node_id = "unknown"
+
+    # Simple role model: operator vs observer + env-based role
+    roles = []
+    if WEALL_ENV != "observer":
+        roles.append("operator")
+    else:
+        roles.append("observer")
+    roles.append("dev" if WEALL_ENV != "prod" else "prod")
+
+    # Basic node load metric: 1-minute system load or 0.0
+    try:
+        load_val = os.getloadavg()[0]
+    except Exception:
+        load_val = 0.0
+
+    # Peer info from executor, if available
+    peers = []
+    try:
+        peers = getattr(executor, "get_peer_list", lambda: [])() or []
+    except Exception:
+        peers = []
+
     return {
         "ok": True,
-        "session_id": token,
-        "join_urls": {
-            "founder":  f"/verify.html?token={token}&role=founder&uid={founder}",
-            "candidate": f"/verify.html?token={token}&role=candidate&uid={target}",
+        "data": {
+            "node_id": node_id,
+            "roles": roles,
+            "load": load_val,
+            "peers": len(peers),
+            "env": WEALL_ENV,
         },
     }
 
-@app.post("/poh/tier3/founder_approve")
-async def poh_founder_approve(req: Request):
-    d = await req.json()
-    EXEC.state.setdefault("governance_log", []).append(
-        {"type": "tier3_founder_approve", "founder": d.get("founder_id"),
-         "user": d.get("target_user"), "ts": time.time(), "phase": "B_pending"}
-    )
-    EXEC.save_state()
-    return {"ok": True, "phase": "B_pending"}
 
-@app.get("/poh/tier3/status/{user_id}")
-async def poh_tier3_status(user_id: str):
-    u = EXEC.state.get("users", {}).get(user_id) or {}
-    return {
-        "user": user_id,
-        "poh_level": int(u.get("poh_level", 0)),
-        "epoch": EXEC.current_epoch,
-        "pending": [e for e in EXEC.state.get("governance_log", []) if e.get("user") == user_id][-5:],
-    }
+@app.post("/api/signup")
+async def api_signup(payload: dict = Body(...)):
+    """
+    Email + password signup.
 
-@app.get("/poh/tier3/nft/{user_id}")
-async def poh_tier3_nft(user_id: str):
-    u = EXEC.state.get("users", {}).get(user_id) or {}
-    if int(u.get("poh_level", 0)) < 3:
-        return JSONResponse({"ok": False, "error": "not_tier3"}, status_code=400)
-    nft = {
-        "kind": "weall_tier3_badge",
-        "user": user_id,
-        "issued": int(time.time()),
-        "sig": IDENTITY.sign(f"tier3|{user_id}".encode()),
-    }
-    return {"ok": True, "nft": nft}
+    - normalises email to an @handle account_id
+    - derives a deterministic wallet (pubkey/address) from email+password
+      using PBKDF2, without storing the raw password.
+    - stores wallet metadata in executor.ledger["accounts"][account_id]
+    """
+    payload = payload or {}
+    email = (payload.get("email") or "").strip().lower()
+    password = payload.get("password") or ""
+    if not email or "@" not in email:
+        raise HTTPException(status_code=400, detail="invalid_email")
+    if len(password) < 8:
+        raise HTTPException(status_code=400, detail="weak_password")
 
-# ------------------------------------------------------------------------------
-# Messaging
-# ------------------------------------------------------------------------------
-@app.post("/messaging/send")
-async def messaging_send(req: Request):
-    d = await req.json()
-    return EXEC.send_message(d["from_user"], d["to_user"], d["message"])
+    account_id = "@" + email.split("@", 1)[0]
 
-@app.get("/messaging/inbox/{user_id}")
-async def messaging_inbox(user_id: str):
-    return {"user_id": user_id, "messages": EXEC.read_messages(user_id)}
-
-# ------------------------------------------------------------------------------
-# Content: posts + comments
-# ------------------------------------------------------------------------------
-@app.get("/show_posts")
-async def show_posts():
-    """Return posts dict; enrich with media_url if ipfs_cid present."""
-    posts = EXEC.state.get("posts", {})
-    if posts and IPFS is not None:
-        # Gateway runs at 127.0.0.1:8080 by default
-        for p in posts.values():
-            cid = p.get("ipfs_cid")
-            if cid:
-                p["media_url"] = f"http://127.0.0.1:8080/ipfs/{cid}"
-    return posts
-
-@app.post("/post")
-async def create_post(req: Request):
-    d = await req.json()
-    res = EXEC.create_post(d["user_id"], d["content"], d.get("tags", []), ipfs_cid=d.get("ipfs_cid"))
-    if not res.get("ok"):
-        return JSONResponse({"detail": res.get("error", "error")}, status_code=400)
-    return res
-
-@app.post("/comment")
-async def create_comment(req: Request):
-    d = await req.json()
-    res = EXEC.create_comment(d["user_id"], int(d["post_id"]), d["content"])
-    if not res.get("ok"):
-        return JSONResponse({"detail": res.get("error", "error")}, status_code=400)
-    return res
-
-# ------------------------------------------------------------------------------
-# Disputes (MVP)
-# ------------------------------------------------------------------------------
-@app.post("/disputes/initiate")
-async def disputes_initiate(req: Request):
-    d = await req.json()
-    dispute = {
-        "id": len(EXEC.state.setdefault("disputes", [])),
-        "user_id": d["user_id"],
-        "post_id": d["post_id"],
-        "reason": d.get("reason", ""),
-        "evidence": d.get("evidence"),
-        "status": "pending",
-        "ts": time.time(),
-    }
-    EXEC.state["disputes"].append(dispute)
-    EXEC.save_state()
-    return {"ok": True, "dispute": dispute}
-
-@app.get("/disputes/list")
-async def disputes_list():
-    return EXEC.state.get("disputes", [])
-
-@app.post("/disputes/vote")
-async def disputes_vote(req: Request):
-    """Stub: record juror votes; no tally logic yet."""
-    d = await req.json()
-    EXEC.state.setdefault("dispute_votes", []).append(
-        {"dispute_id": int(d["dispute_id"]), "juror": d["juror_id"], "vote": d["vote"], "ts": time.time()}
-    )
-    EXEC.save_state()
-    return {"ok": True}
-
-@app.post("/disputes/resolve")
-async def disputes_resolve(req: Request):
-    """Stub: set dispute status; in future enforce penalties/rewards."""
-    d = await req.json()
-    disputes = EXEC.state.get("disputes", [])
-    idx = int(d["dispute_id"])
-    if 0 <= idx < len(disputes):
-        disputes[idx]["status"] = d.get("status", "resolved")
-        EXEC.save_state()
-        return {"ok": True, "dispute": disputes[idx]}
-    return JSONResponse({"ok": False, "error": "invalid_dispute_id"}, status_code=400)
-
-# ------------------------------------------------------------------------------
-# Reputation
-# ------------------------------------------------------------------------------
-@app.get("/reputation/{user_id}")
-async def reputation_get(user_id: str):
-    score = 0
-    rep = getattr(EXEC, "reputation", None)
-    if isinstance(rep, dict):
-        score = rep.get(user_id, 0)
-    return {"user_id": user_id, "score": score}
-
-@app.post("/reputation/increment")
-async def reputation_increment(req: Request):
-    d = await req.json()
-    user = d["user_id"]
-    amount = float(d.get("amount", 1))
-    if not hasattr(EXEC, "reputation") or not isinstance(EXEC.reputation, dict):
-        EXEC.reputation = {}
-    EXEC.reputation[user] = EXEC.reputation.get(user, 0) + amount
-    EXEC.save_state()
-    return {"ok": True, "new_score": EXEC.reputation[user]}
-
-# ------------------------------------------------------------------------------
-# Governance
-# ------------------------------------------------------------------------------
-@app.get("/governance/proposals")
-async def governance_list():
     try:
-        return EXEC.list_proposals()
+        wallet = derive_wallet_from_credentials(email, password, settings)
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"wallet_derive_failed: {e}")
+
+    # Persist minimal account record
+    try:
+        led = getattr(executor, "ledger", None)
+        if led is not None:
+            accounts = led.setdefault("accounts", {})
+            acc = accounts.get(account_id) or {}
+            acc.setdefault("email", email)
+            acc["wallet"] = wallet
+            accounts[account_id] = acc
+            executor.save_state()
     except Exception:
-        return getattr(EXEC.governance, "proposals", {})
+        # Don't block signup if persistence fails in MVP
+        pass
 
-@app.post("/governance/vote")
-async def governance_vote(req: Request):
-    d = await req.json()
-    return EXEC.vote_on_proposal(d["user"], int(d["proposal_id"]), d["vote"])
-
-# ------------------------------------------------------------------------------
-# Epoch / Node diagnostics
-# ------------------------------------------------------------------------------
-@app.get("/epoch/status")
-async def epoch_status():
-    return {
-        "epoch": EXEC.current_epoch,
-        "validators": len(EXEC.state.get("validators", {})),
-        "active_jurors": len(EXEC.state.get("jurors", {})),
-        "treasury_balance": getattr(EXEC, "treasury_balance", 0),
-    }
-
-@app.get("/node/status")
-async def node_status():
-    peers = REGISTRY.list_peers()
     return {
         "ok": True,
-        "node_id": IDENTITY.node_id,
-        "peer_count": len(peers),
-        "chain_height": len(EXEC.chain.blocks),
-        "user_count": len(EXEC.state.get("users", {})),
-        "posts": len(EXEC.state.get("posts", {})),
+        "account_id": account_id,
+        "wallet": wallet,
+        "hint": "Now verify your email via /auth/start + /auth/verify.",
     }
 
-# ------------------------------------------------------------------------------
-# IPFS uploads
-# ------------------------------------------------------------------------------
-@app.post("/ipfs/add")
-async def ipfs_add(req: Request):
-    if IPFS is None:
-        return JSONResponse({"ok": False, "error": "IPFS not connected"}, status_code=500)
-    data = await req.body()
-    cid = IPFS.add_bytes(data)
-    return {"ok": True, "cid": cid}
 
-# ------------------------------------------------------------------------------
-# P2P: announce / peers / ping / sign / status
-# ------------------------------------------------------------------------------
-@app.post("/p2p/announce")
-async def p2p_announce(req: Request):
-    data = await req.json()
-    pub = data.get("public_key") or ""
-    url = data.get("url") or ""
-    ts = int(data.get("ts") or 0)
-    ttl = int(data.get("ttl") or 900)
-    nonce = data.get("nonce") or ""
-    sig = data.get("signature") or ""
-
-    if not (pub and url and sig and ts and nonce):
-        return JSONResponse({"ok": False, "error": "missing_fields"}, status_code=400)
-
-    # replay & clock skew
-    if REGISTRY.nonce_seen(nonce):
-        return JSONResponse({"ok": False, "error": "replay"}, status_code=400)
-    if abs(time.time() - ts) > 600:
-        return JSONResponse({"ok": False, "error": "ts_out_of_range"}, status_code=400)
-
-    message = f"{pub}|{url}|{ts}|{nonce}".encode()
-    if not verify_signature(pub, message, sig):
-        return JSONResponse({"ok": False, "error": "bad_signature"}, status_code=400)
-
-    node_id = data.get("node_id") or pub[:16]
-    p = Peer(
-        node_id=node_id,
-        public_key=pub,
-        url=url,
-        addrs=data.get("addrs", []),
-        capabilities=data.get("capabilities", []),
-        ttl=ttl,
-    )
-    p.last_seen = time.time()
-    REGISTRY.upsert_peer(p)
-    return {"ok": True, "node_id": node_id}
-
-@app.get("/p2p/peers")
-async def p2p_peers():
-    return {"ok": True, "self": {"node_id": IDENTITY.node_id, "public_key": IDENTITY.pub_hex}, "peers": REGISTRY.list_peers()}
-
-@app.get("/p2p/ping")
-async def p2p_ping():
-    return {"ok": True, "ts": int(time.time()), "node_id": IDENTITY.node_id}
-
-@app.post("/p2p/sign")
-async def p2p_sign(req: Request):
-    d = await req.json()
-    msg = (d.get("message") or "").encode()
-    if not msg:
-        return JSONResponse({"ok": False, "error": "missing_message"}, status_code=400)
-    sig = IDENTITY.sign(msg)
-    return {"ok": True, "node_id": IDENTITY.node_id, "public_key": IDENTITY.pub_hex, "signature": sig}
-
-@app.get("/p2p/status")
-async def p2p_status():
-    peers = REGISTRY.list_peers()
-    return {"ok": True, "node_id": IDENTITY.node_id, "peer_count": len(peers), "peers": peers}
-
-# ------------------------------------------------------------------------------
-# P2P: handshake + WebSocket signaling (opaque relay)
-# ------------------------------------------------------------------------------
-@app.post("/p2p/handshake")
-async def p2p_handshake(_: Request):
-    token = REGISTRY.new_token()
-    secret = REGISTRY.new_secret()  # 32-byte key
-    REGISTRY.set_room_secret(token, secret)
-    return {"ok": True, "token": token, "ws": f"/ws/p2p/{token}", "secret_b64": base64.b64encode(secret).decode()}
-
-@app.websocket("/ws/p2p/{token}")
-async def ws_p2p(websocket: WebSocket, token: str):
-    await websocket.accept()
-    uid = None
-    enc = False
+@app.get("/api/v1/governance/proposals")
+def api_v1_governance_proposals():
+    """
+    Back-compat alias for older frontends expecting /api/v1/governance/proposals.
+    Delegates to the governance router's list_proposals().
+    """
     try:
-        hello = await websocket.receive_json()
-        if not (isinstance(hello, dict) and hello.get("action") == "hello" and "uid" in hello):
-            await websocket.send_json({"error": "send hello first: {action:'hello', uid:'...'}"})
-            await websocket.close()
-            return
-        uid = str(hello["uid"])
-        enc = bool(hello.get("enc", False))
-        if enc and not REGISTRY.get_room_secret(token):
-            await websocket.send_json({"error": "no room secret; call /p2p/handshake first"})
-            await websocket.close()
-            return
+        return governance.list_proposals()
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"governance_alias_failed: {e}")
 
-        others = REGISTRY.join_room(token, uid, lambda payload: websocket.send_json(payload))
-        await websocket.send_json({"status": "joined", "uid": uid, "others": others, "enc": enc})
 
-        while True:
-            msg = await websocket.receive_json()
-            if enc:
-                if not ("cipher" in msg and "nonce" in msg):
-                    await websocket.send_json({"error": "encrypted room requires {cipher,nonce}"})
-                    continue
-                REGISTRY.relay(token, uid, {"from": uid, "cipher": msg["cipher"], "nonce": msg["nonce"]})
-            else:
-                dst = str(msg.get("to", ""))
-                payload = {"from": uid, "data": msg.get("data")}
-                REGISTRY.relay(token, uid, payload, dst=dst)
-    except Exception:
-        pass
-    finally:
-        try:
-            REGISTRY.leave_room(token, uid)
-        except Exception:
-            pass
-        await websocket.close()
+def derive_wallet_from_credentials(email: str, password: str, settings: Settings) -> dict:
+    """
+    Derive a deterministic wallet (pubkey + address) from email+password
+    using PBKDF2. This is MVP-only and assumes passwords have reasonable
+    entropy for low/medium-value balances.
+    """
+    email_norm = (email or "").strip().lower()
+    pwd = (password or "").strip()
+    if not email_norm or not pwd:
+        raise ValueError("email_and_password_required")
 
-# ------------------------------------------------------------------------------
-# Static frontend
-# ------------------------------------------------------------------------------
-frontend_dir = pathlib.Path(__file__).resolve().parent / "frontend"
-if frontend_dir.exists():
-    # Serve index.html at "/"
-    app.mount("/", StaticFiles(directory=str(frontend_dir), html=True), name="frontend")
+    identity = f"{email_norm}|{pwd}".encode("utf-8")
+    node_salt_str = getattr(settings, "SECRET_KEY", None) or "weall-node-default-salt"
+    node_salt = node_salt_str.encode("utf-8")
 
-logger.info("✅ WeAll API started — ready to serve requests.")
+    seed = hashlib.pbkdf2_hmac("sha256", identity, node_salt, 200_000, dklen=32)
+
+    if NACL_AVAILABLE and SigningKey is not None:
+        sk = SigningKey(seed)
+        vk = sk.verify_key
+        pub_hex = vk.encode(encoder=HexEncoder).decode("ascii")
+    else:
+        # Fallback: still deterministic, just less nice crypto
+        pub_hex = hashlib.sha256(seed).hexdigest()
+
+    address = "we:" + pub_hex[:40]
+
+    return {
+        "kdf": "pbkdf2_sha256",
+        "iterations": 200_000,
+        "salt_hint": hashlib.sha256(node_salt).hexdigest()[:16],
+        "pubkey": pub_hex,
+        "address": address,
+    }
+
+
+# ------------------------------------------------------------
+# EMAIL AUTH (MVP)
+# ------------------------------------------------------------
+
+# In-memory one-time codes
+_AUTH_CODES = {}  # email -> { "code": str, "exp": float }
+
+
+def _send_email_smtp(to_email: str, subject: str, body: str) -> bool:
+    """
+    Minimal SMTP helper; falls back to console logging if SMTP_* are unset.
+    """
+    host = os.getenv("SMTP_HOST", "")
+    port = int(os.getenv("SMTP_PORT", "465") or 465)
+    user = os.getenv("SMTP_USER", "")
+    pwd = os.getenv("SMTP_PASS", "")
+    from_addr = os.getenv("MAIL_FROM", "WeAll <no-reply@weall.local>")
+    use_ssl = os.getenv("MAIL_SSL", "1") == "1"
+    use_tls = os.getenv("MAIL_TLS", "0") == "1"
+
+    if not host or not port:
+        print(f"[MAIL:FALLBACK] {to_email} <- {subject}\n{body}")
+        return False
+
+    msg = f"From: {from_addr}\r\nTo: {to_email}\r\nSubject: {subject}\r\n\r\n{body}"
+    try:
+        if use_ssl:
+            ctx = ssl.create_default_context()
+            with smtplib.SMTP_SSL(host, port, context=ctx, timeout=20) as s:
+                if user:
+                    s.login(user, pwd)
+                s.sendmail(from_addr, [to_email], msg.encode("utf-8"))
+        else:
+            with smtplib.SMTP(host, port, timeout=20) as s:
+                s.ehlo()
+                if use_tls:
+                    s.starttls(context=ssl.create_default_context())
+                if user:
+                    s.login(user, pwd)
+                s.sendmail(from_addr, [to_email], msg.encode("utf-8"))
+        print(f"[MAIL] sent to {to_email}")
+        return True
+    except Exception as e:
+        print(f"[MAIL] send failed to {to_email}: {e}")
+        print(f"[MAIL:FALLBACK] {to_email} <- {subject}\n{body}")
+        return False
+
+
+@app.post("/auth/start")
+async def auth_start(payload: dict = Body(...)):
+    email = (payload or {}).get("email", "").strip().lower()
+    if not email or "@" not in email:
+        raise HTTPException(status_code=400, detail="invalid_email")
+
+    code = f"{secrets.randbelow(10**6):06d}"
+    _AUTH_CODES[email] = {"code": code, "exp": time.time() + 600}  # 10 minutes
+
+    subject = "Your WeAll verification code"
+    text = f"Your WeAll login code is: {code}\nThis code expires in 10 minutes."
+    _send_email_smtp(email, subject, text)
+
+    return {"ok": True, "ttl_sec": 600}
+
+
+
+
+@app.post("/auth/send-code")
+async def auth_send_code_alias(payload: dict = Body(...)):
+    """
+    Backwards-compatible alias for older frontends.
+    Delegates to /auth/start.
+    """
+    return await auth_start(payload)
+
+@app.post("/auth/verify")
+async def auth_verify(payload: dict = Body(...)):
+    email = (payload or {}).get("email", "").strip().lower()
+    code = (payload or {}).get("code", "").strip()
+
+    rec = _AUTH_CODES.get(email)
+    if not rec:
+        raise HTTPException(status_code=404, detail="no_code")
+    if time.time() > rec["exp"]:
+        _AUTH_CODES.pop(email, None)
+        raise HTTPException(status_code=400, detail="expired")
+    if code != rec["code"]:
+        raise HTTPException(status_code=400, detail="bad_code")
+
+    _AUTH_CODES.pop(email, None)
+    acct = "@" + email.split("@")[0]
+    resp = JSONResponse({"ok": True, "account_id": acct, "nft_minted": False})
+    resp.set_cookie("weall_session", f"dev::{acct}", httponly=False, samesite="Lax")
+    return resp
+
+
+# Legacy aliases for the old frontend
+try:
+    app.add_api_route("/auth/email/request_code", auth_start, methods=["POST"])
+    app.add_api_route("/auth/email/verify_code", auth_verify, methods=["POST"])
+except Exception:
+    pass

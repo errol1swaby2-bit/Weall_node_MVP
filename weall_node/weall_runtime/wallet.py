@@ -1,14 +1,22 @@
 """
-weall_runtime/wallet.py
+weall_node/weall_runtime/wallet.py
 --------------------------------------------------
-Wallet + NFT management for Proof-of-Humanity,
-connected to ledger. Provides mint/transfer/burn
-helpers and an adaptive has_nft() for access checks.
+Wallet + NFT management for Proof-of-Humanity.
+Provides mint/transfer/burn helpers and a has_nft()
+utility used by the validator and PoH modules.
 """
 
 import json, os
-from typing import Dict, List
-from weall_node.app_state import ledger  # ✅ direct Ledger object
+from typing import Dict, List, Any
+
+# Attempt to load the unified ledger object from the executor runtime
+try:
+    from weall_node.weall_executor import executor
+
+    ledger = executor.ledger
+except Exception:
+    # fallback: minimal in-memory ledger for local dev
+    ledger = {}
 
 # ---------------------------------------------------------------
 # In-memory NFT registry
@@ -19,7 +27,7 @@ NFT_REGISTRY: Dict[str, dict] = {}
 # ---------------------------------------------------------------
 # NFT mint / transfer / burn
 # ---------------------------------------------------------------
-def mint_nft(user_id: str, nft_id: str, metadata: str) -> dict:
+def mint_nft(user_id: str, nft_id: str, metadata: Any) -> dict:
     """Simulate minting an NFT and record it in the ledger."""
     nft = {
         "nft_id": nft_id,
@@ -28,113 +36,102 @@ def mint_nft(user_id: str, nft_id: str, metadata: str) -> dict:
         "status": "minted",
     }
     NFT_REGISTRY[nft_id] = nft
-    ledger.record_mint_event(user_id, nft_id)
+    # also record in ledger if supported
+    if hasattr(ledger, "record_nft"):
+        ledger.record_nft(user_id, nft_id, metadata)
     return nft
 
 
-def transfer_nft(nft_id: str, new_owner: str) -> dict:
-    """Transfer ownership of an NFT to another user and record in ledger."""
+def transfer_nft(nft_id: str, new_owner: str) -> bool:
+    """Transfer NFT ownership."""
     if nft_id not in NFT_REGISTRY:
-        raise ValueError(f"NFT {nft_id} not found")
-
-    old_owner = NFT_REGISTRY[nft_id]["owner"]
+        return False
     NFT_REGISTRY[nft_id]["owner"] = new_owner
     NFT_REGISTRY[nft_id]["status"] = "transferred"
-    ledger.record_transfer_event(old_owner, new_owner, nft_id)
-    return NFT_REGISTRY[nft_id]
+    return True
 
 
-def burn_nft(nft_id: str) -> dict:
-    """Burn (remove) an NFT and record in ledger."""
+def burn_nft(nft_id: str) -> bool:
+    """Burn an NFT."""
     if nft_id not in NFT_REGISTRY:
-        raise ValueError(f"NFT {nft_id} not found")
-
-    owner = NFT_REGISTRY[nft_id]["owner"]
+        return False
     NFT_REGISTRY[nft_id]["status"] = "burned"
-    ledger.record_burn_event(owner, nft_id)
-    return NFT_REGISTRY[nft_id]
+    return True
 
 
 # ---------------------------------------------------------------
-# Lookup helpers
+# has_nft() — required by validators.py
+# ---------------------------------------------------------------
+def has_nft(user_id: str, nft_type: str = None) -> bool:
+    """
+    Check if a user holds an active NFT, optionally of a given type.
+    Validators and PoH modules use this to check tier access.
+    """
+    for nft in NFT_REGISTRY.values():
+        if nft["owner"] == user_id and nft.get("status") == "minted":
+            if nft_type is None or nft.get("metadata", {}).get("type") == nft_type:
+                return True
+    return False
+
+
+# ---------------------------------------------------------------
+# Utility: List all NFTs for a user
 # ---------------------------------------------------------------
 def list_user_nfts(user_id: str) -> List[dict]:
-    """Return all NFTs owned by the given user."""
     return [n for n in NFT_REGISTRY.values() if n["owner"] == user_id]
 
 
 # ---------------------------------------------------------------
-# NFT ownership check (multi-layer)
+# Proof-of-Humanity NFT Integration
 # ---------------------------------------------------------------
-def has_nft(user_id: str, prefix: str = "POH", min_level: int = 1) -> bool:
-    """
-    Return True if the user owns an NFT of the given prefix and at least `min_level`.
-    Searches memory (NFT_REGISTRY), ledger events, then on-disk chain.json.
-    """
 
-    # --- 0. Ensure registry exists safely ---
-    global NFT_REGISTRY
-    try:
-        NFT_REGISTRY
-    except NameError:
-        NFT_REGISTRY = {}
+# Map tier levels to canonical NFT types
+TIER_BADGE_MAP = {
+    1: "poh_tier1_badge",
+    2: "poh_tier2_badge",
+    3: "poh_tier3_badge",
+}
 
-    # --- 1. In-memory NFTs (fast path) ---
+
+def ensure_poh_badge(user_id: str, tier: int) -> dict:
+    """
+    Ensure a user owns an NFT badge matching their PoH tier.
+    Called automatically when advancing through verification.
+    """
+    nft_type = TIER_BADGE_MAP.get(tier)
+    if not nft_type:
+        raise ValueError(f"Invalid PoH tier: {tier}")
+
+    # Return existing badge if already minted
     for nft in NFT_REGISTRY.values():
-        if nft.get("owner") != user_id:
-            continue
-        nft_id = nft.get("nft_id", "")
-        if prefix in nft_id:
-            try:
-                # handle IDs like POH_T1::alice::timestamp
-                if "_T" in nft_id:
-                    tier = int(nft_id.split("_T")[1].split("::")[0])
-                elif "-" in nft_id:
-                    tier = int(nft_id.split("-")[-1])
-                else:
-                    tier = 1
-                if tier >= min_level and nft.get("status") == "minted":
-                    return True
-            except Exception:
-                continue
+        if (
+            nft["owner"] == user_id
+            and nft.get("metadata", {}).get("type") == nft_type
+            and nft.get("status") == "minted"
+        ):
+            return nft
 
-    # --- 2. Ledger mint events ---
-    try:
-        if hasattr(ledger, "mint_events"):
-            for evt in ledger.mint_events:
-                nft_id = evt.get("nft_id", "")
-                owner = evt.get("user_id") or evt.get("owner")
-                if owner != user_id:
-                    continue
-                if prefix in nft_id:
-                    try:
-                        tier = int(nft_id.split("_T")[1].split("::")[0])
-                        if tier >= min_level:
-                            return True
-                    except Exception:
-                        continue
-    except Exception:
-        pass
+    # Otherwise, mint a new badge NFT
+    metadata = {
+        "type": nft_type,
+        "tier": tier,
+        "title": f"Proof of Humanity Tier {tier}",
+    }
+    nft_id = f"{user_id}_{nft_type}"
+    return mint_nft(user_id, nft_id, metadata)
 
-    # --- 3. Fallback to on-disk chain.json ---
-    try:
-        if os.path.exists("chain.json"):
-            with open("chain.json") as f:
-                chain = json.load(f)
-            for block in chain:
-                for tx in block.get("txs", []):
-                    ttype = tx.get("type", "")
-                    u = tx.get("user")
-                    if not u or u != user_id:
-                        continue
-                    if ttype.startswith("POH_TIER"):
-                        try:
-                            tier = int(ttype.replace("POH_TIER", "").split("_")[0])
-                            if tier >= min_level:
-                                return True
-                        except Exception:
-                            continue
-    except Exception:
-        pass
 
+# Extend has_nft() to include PoH badge detection
+def has_nft(user_id: str, nft_type: str = None) -> bool:
+    """
+    Check if user holds an active NFT.
+    If nft_type is 'poh_verified', any tier badge qualifies.
+    """
+    for nft in NFT_REGISTRY.values():
+        if nft["owner"] == user_id and nft.get("status") == "minted":
+            nft_t = nft.get("metadata", {}).get("type")
+            if nft_type is None or nft_t == nft_type:
+                return True
+            if nft_type == "poh_verified" and nft_t in TIER_BADGE_MAP.values():
+                return True
     return False

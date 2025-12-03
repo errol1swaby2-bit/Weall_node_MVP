@@ -1,66 +1,278 @@
-<!DOCTYPE html>
+<!doctype html>
 <html lang="en">
 <head>
-<meta charset="UTF-8">
-<title>WeAll • Profile</title>
-<meta name="viewport" content="width=device-width, initial-scale=1">
-<style>
-body{margin:0;font-family:Arial,Helvetica,sans-serif;background:#000;color:#fff;padding:20px}
-.panel{background:#111;border:1px solid #333;border-radius:8px;padding:15px;margin-bottom:15px}
-input,button{font-size:15px;border-radius:6px;padding:6px 10px}
-button{background:#1f2937;color:#fff;border:1px solid #374151;cursor:pointer}
-button:hover{background:#374151}
-pre{background:#0b0b0b;border:1px solid #222;border-radius:8px;padding:10px;overflow:auto}
-</style>
+  <meta charset="utf-8">
+  <title>WeAll - User Profile</title>
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <style>
+    body {
+      margin: 0;
+      padding: 1.2rem;
+      font-family: system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+      background: #020617;
+      color: #f9fafb;
+    }
+    a { color: #22c55e; text-decoration: none; }
+    a:hover { text-decoration: underline; }
+    header { margin-bottom: 1rem; display: flex; align-items: center; gap: 0.5rem; }
+    header h1 { font-size: 1.6rem; margin: 0; }
+    .back-link { font-size: 0.9rem; }
+    .cards { display: flex; flex-direction: column; gap: 1rem; }
+    .card {
+      background: #020617;
+      border-radius: 12px;
+      padding: 1rem;
+      border: 1px solid #1f2937;
+      box-shadow: 0 8px 20px rgba(0,0,0,0.35);
+    }
+    .card h2 {
+      margin: 0 0 0.4rem;
+      font-size: 1.1rem;
+    }
+    .card.poh h2,
+    .card.wallet h2,
+    .card.rep h2 { color: #22c55e; }
+    .label { font-weight: 600; font-size: 0.9rem; }
+    .value { font-size: 0.95rem; }
+    .row { margin-top: 0.3rem; }
+    button {
+      border: none;
+      border-radius: 999px;
+      padding: 0.45rem 0.9rem;
+      background: #22c55e;
+      color: #022c22;
+      font-weight: 600;
+      margin-top: 0.6rem;
+    }
+    button:active { transform: scale(0.97); }
+    input {
+      width: 100%;
+      padding: 0.45rem 0.6rem;
+      margin-top: 0.25rem;
+      border-radius: 8px;
+      border: 1px solid #374151;
+      background: #020617;
+      color: #f9fafb;
+      box-sizing: border-box;
+    }
+    .muted { font-size: 0.85rem; opacity: 0.8; }
+    .error { color: #f97373; font-size: 0.85rem; margin-top: 0.4rem; }
+    .success { color: #4ade80; font-size: 0.85rem; margin-top: 0.4rem; }
+  </style>
 </head>
 <body>
+  <header>
+    <div class="back-link"><a href="/frontend/index.html">← Back to Feed</a></div>
+    <h1>User Profile</h1>
+  </header>
 
-<h1>Your Profile</h1>
+  <div class="muted" id="userIdLine">User: loading…</div>
 
-<div class="panel">
-  <input id="user-id" placeholder="User ID">
-  <button onclick="loadProfile()">Load Profile</button>
-</div>
+  <div class="cards">
 
-<div class="panel">
-  <h3>Account Info</h3>
-  <div id="profile-data">—</div>
-</div>
+    <!-- Proof of Humanity -->
+    <section class="card poh">
+      <h2>Proof of Humanity</h2>
+      <div class="row">
+        <span class="label">User ID:</span>
+        <span class="value" id="pohUserId">loading…</span>
+      </div>
+      <div class="row">
+        <span class="label">Tier:</span>
+        <span class="value" id="pohTier">Loading…</span>
+      </div>
+      <div class="row muted" id="pohStatusMsg"></div>
+      <button id="pohRefreshBtn">Refresh Status</button>
+      <div class="error" id="pohError"></div>
+    </section>
 
-<div class="panel">
-  <h3>Tier 2 Verification (Video Upload)</h3>
-  <input type="file" id="tier2File" accept="video/*">
-  <button onclick="uploadTier2()">Upload & Submit</button>
-  <pre id="tier2Output"></pre>
-</div>
+    <!-- Wallet -->
+    <section class="card wallet">
+      <h2>Wallet</h2>
+      <div class="row">
+        <span class="label">Address:</span>
+        <span class="value" id="walletAddress">(loading…)</span>
+      </div>
+      <div class="row">
+        <span class="label">Balance:</span>
+        <span class="value" id="walletBalance">0 WEC</span>
+      </div>
 
-<div class="panel">
-  <h3>Tier 3 Verification (Founder / Juror Flow)</h3>
-  <button onclick="startTier3Request()">Request Tier 3</button>
-  <button onclick="initiateFounderVideo()">Founder Video</button>
-  <button onclick="founderApprove()">Founder Approve</button>
-  <button onclick="initiatePanel()">Start Juror Panel</button>
-  <button onclick="checkTier3Status()">Check Status</button>
-  <button onclick="getTier3NFT()">Get NFT</button>
-</div>
+      <div class="row" style="margin-top:0.7rem;">
+        <span class="label">Recipient User ID</span>
+        <input id="sendRecipient" placeholder="@friend">
+      </div>
+      <div class="row">
+        <span class="label">Amount (WEC)</span>
+        <input id="sendAmount" placeholder="0.0" inputmode="decimal">
+      </div>
+      <button id="sendBtn">Send WEC</button>
+      <div class="error" id="walletError"></div>
+      <div class="success" id="walletSuccess"></div>
+    </section>
 
-<div class="panel small">
-  <p><b>Founder:</b> bitcoinwasjustthebeginning@gmail.com</p>
-</div>
+    <!-- Reputation -->
+    <section class="card rep">
+      <h2>Reputation</h2>
+      <div class="row">
+        <span class="label">Score:</span>
+        <span class="value" id="repScore">Loading…</span>
+      </div>
+      <button id="repRefreshBtn">Refresh</button>
+      <div class="error" id="repError"></div>
+    </section>
 
-<script src="main.js"></script>
-<script src="footer.js"></script>
+    <!-- Governance -->
+    <section class="card">
+      <h2>Governance</h2>
+      <div class="muted">Create and vote on proposals.</div>
+      <button onclick="window.location.href='/frontend/governance.html'">Open Governance</button>
+    </section>
+
+  </div>
+
 <script>
-async function uploadTier2(){
-  const f=document.getElementById('tier2File').files[0];
-  if(!f)return alert('No file selected.');
-  const buf=await f.arrayBuffer();
-  const base64=btoa(String.fromCharCode(...new Uint8Array(buf)));
-  const body={user:"demo",evidence:base64};
-  const res=await fetch('/poh/tier2',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(body)});
-  const data=await res.json();
-  document.getElementById('tier2Output').textContent=JSON.stringify(data,null,2);
-}
+  // -------------------------
+  // User identity
+  // -------------------------
+  function getCurrentUserId() {
+    let v = localStorage.getItem("weall.account") ||
+            localStorage.getItem("weall_user") ||
+            "";
+    v = (v || "").trim().toLowerCase();
+    if (!v) return "unknown";
+    if (v.includes("@") && !v.startsWith("@")) {
+      return "@" + v.split("@", 1)[0];
+    }
+    return v;
+  }
+
+  const userId = getCurrentUserId();
+  document.getElementById("userIdLine").textContent = "User: " + userId;
+  document.getElementById("pohUserId").textContent = userId;
+
+  async function fetchJSON(url, opts) {
+    const res = await fetch(url, opts || {});
+    let data = {};
+    try { data = await res.json(); } catch {}
+    if (!res.ok) throw new Error(data.detail || data.error || "Request failed");
+    return data;
+  }
+
+  // -------------------------
+  // PoH Section
+  // -------------------------
+  async function refreshPoh() {
+    const tEl = document.getElementById("pohTier");
+    const sEl = document.getElementById("pohStatusMsg");
+    const eEl = document.getElementById("pohError");
+
+    tEl.textContent = "Loading…";
+    sEl.textContent = "";
+    eEl.textContent = "";
+
+    try {
+      const data = await fetchJSON("/poh/status/" + encodeURIComponent(userId));
+      tEl.textContent = data.tier ?? "None";
+      sEl.textContent = data.status || (data.tier ? "Verified" : "Not verified");
+    } catch (err) {
+      eEl.textContent = "PoH error: " + err.message;
+      tEl.textContent = "Unknown";
+    }
+  }
+
+  document.getElementById("pohRefreshBtn").onclick = refreshPoh;
+
+  // -------------------------
+  // Wallet Section
+  // -------------------------
+  async function refreshWallet() {
+    const balEl = document.getElementById("walletBalance");
+    const addrEl = document.getElementById("walletAddress");
+    const errEl = document.getElementById("walletError");
+
+    balEl.textContent = "Loading…";
+    errEl.textContent = "";
+
+    try {
+      const data = await fetchJSON("/ledger/balance/" + encodeURIComponent(userId));
+      balEl.textContent = (data.balance || 0) + " WEC";
+      addrEl.textContent = (data.wallet && data.wallet.address) || "(not set)";
+    } catch (err) {
+      errEl.textContent = "Wallet error: " + err.message;
+      balEl.textContent = "0 WEC";
+    }
+  }
+
+  async function sendWEC() {
+    const recip = document.getElementById("sendRecipient").value.trim().toLowerCase();
+    const amt = parseFloat(document.getElementById("sendAmount").value);
+    const errEl = document.getElementById("walletError");
+    const okEl = document.getElementById("walletSuccess");
+
+    errEl.textContent = "";
+    okEl.textContent = "";
+
+    if (!recip) {
+      errEl.textContent = "Recipient required.";
+      return;
+    }
+    let cleanRecip = recip;
+    if (recip.includes("@") && !recip.startsWith("@")) {
+      cleanRecip = "@" + recip.split("@", 1)[0];
+    }
+
+    if (!amt || amt <= 0) {
+      errEl.textContent = "Enter a positive amount.";
+      return;
+    }
+
+    try {
+      await fetchJSON("/wallet/transfer", {
+        method: "POST",
+        headers: { "Content-Type":"application/json" },
+        body: JSON.stringify({
+          sender: userId,
+          recipient: cleanRecip,
+          amount: amt
+        })
+      });
+      okEl.textContent = "Transfer complete.";
+      refreshWallet();
+    } catch (err) {
+      errEl.textContent = "Transfer failed: " + err.message;
+    }
+  }
+
+  document.getElementById("sendBtn").onclick = sendWEC;
+
+  // -------------------------
+  // Reputation Section
+  // -------------------------
+  async function refreshRep() {
+    const scoreEl = document.getElementById("repScore");
+    const errEl = document.getElementById("repError");
+
+    scoreEl.textContent = "Loading…";
+    errEl.textContent = "";
+
+    try {
+      const data = await fetchJSON("/reputation/" + encodeURIComponent(userId));
+      scoreEl.textContent = data.score ?? data.reputation ?? 0;
+    } catch (err) {
+      errEl.textContent = "Reputation error: " + err.message;
+      scoreEl.textContent = "0";
+    }
+  }
+
+  document.getElementById("repRefreshBtn").onclick = refreshRep;
+
+  // -------------------------
+  // Initial Load
+  // -------------------------
+  refreshPoh();
+  refreshWallet();
+  refreshRep();
 </script>
 </body>
 </html>

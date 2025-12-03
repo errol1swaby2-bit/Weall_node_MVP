@@ -1,0 +1,102 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <title>WeAll — Juror Console</title>
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <link rel="icon" href="/frontend/favicon.svg" />
+  <link rel="stylesheet" href="/frontend/style.css?v=1762461479" />
+  <script src="/frontend/session.js?v=1762461479"></script>
+  <script>Session.ensure(true);</script>
+  <script src="env.js"></script>
+  <script src="api_shim.js"></script>
+</head>
+<body>
+<div id="toast" role="status" aria-live="polite"></div>
+<script>
+(async () => {
+  const acct = localStorage.getItem('weall.account');
+  if (!acct) return location.href = '/frontend/login.html';
+  const r = await fetch(`/poh/status/${encodeURIComponent(acct)}`);
+  const s = await r.json();
+  const tier = (s.tier ?? s.poh_level ?? 0);
+  if (tier < 3) location.href = '/frontend/verify.html?reason=tier3_required';
+})();
+</script>
+
+  <header class="wa-topbar">
+    <div class="wa-left">
+      <a class="wa-link" href="/frontend/index.html">← Back</a>
+      <h1 class="wa-brand">Juror</h1>
+    </div>
+    <div class="wa-right">
+      <button class="wa-iconbtn" onclick="Session.logout()" title="Logout" aria-label="Logout">
+        <svg viewBox="0 0 24 24"><path d="M16 17l5-5-5-5M21 12H9M13 21H6a2 2 0 01-2-2V5a2 2 0 012-2h7"/></svg>
+      </button>
+    </div>
+  </header>
+
+  <main style="padding-top:60px;max-width:900px;margin:0 auto;padding:60px 16px 24px 16px">
+    <div class="wa-card">
+      <h3>Tier-2 Candidates</h3>
+      <div class="wa-row">
+        <button class="wa-btn" id="btnList">Refresh</button>
+        <input id="candId" placeholder="candidate id" />
+        <button class="wa-btn" id="btnItem">Details</button>
+      </div>
+      <pre id="out" class="wa-pre"></pre>
+    </div>
+
+    <div class="wa-card">
+      <h3>Vote</h3>
+      <div class="wa-row">
+        <input id="jurorId" placeholder="@juror123" />
+        <input id="voteCand" placeholder="candidate id" />
+        <label class="wa-row" style="gap:6px"><input type="checkbox" id="approve" /> approve</label>
+        <button class="wa-btn" id="btnVote">Submit</button>
+      </div>
+    </div>
+  </main>
+
+  <script>
+    const $ = s=>document.querySelector(s);
+    async function post(url, body) {
+      const r = await Session.authFetch(url, {method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify(body||{})});
+      return r.json();
+    }
+    $('#btnList').onclick = async ()=>{
+      const j = await post('/poh/t2/list', {});
+      $('#out').textContent = JSON.stringify(j,null,2);
+    };
+    $('#btnItem').onclick = async ()=>{
+      const j = await post('/poh/t2/item', {candidate_id: $('#candId').value.trim()});
+      $('#out').textContent = JSON.stringify(j,null,2);
+    };
+    $('#btnVote').onclick = async ()=>{
+      const j = await post('/poh/t2/vote', {
+        candidate_id: $('#voteCand').value.trim(),
+        juror_id: $('#jurorId').value.trim(),
+        approve: $('#approve').checked
+      });
+      alert('Vote submitted'); console.log(j);
+    };
+  </script>
+<!-- CLIENT-ERROR-LISTENER -->
+<script>
+window.addEventListener('error', e => {
+  try { fetch('/content/client-log', {method:'POST', headers:{'content-type':'application/json'}, body: JSON.stringify({ msg:String(e.message||''), file:e.filename, line:e.lineno, col:e.colno })}); } catch(_) {}
+});
+window.addEventListener('unhandledrejection', e => {
+  try { fetch('/content/client-log', {method:'POST', headers:{'content-type':'application/json'}, body: JSON.stringify({ promise:true, reason:String(e.reason||'') })}); } catch(_) {}
+});
+</script>
+
+
+<footer class="weall-footer">
+  <span>© WeAll</span>
+  &nbsp;•&nbsp;<a href="/frontend/privacy.html">Privacy</a>
+  &nbsp;•&nbsp;<a href="/frontend/terms.html">Terms</a>
+</footer>
+
+</body>
+</html>

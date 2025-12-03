@@ -1,0 +1,99 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <title>WeAll - Create your account</title>
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <style>
+    body { font-family: system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; margin: 1.5rem; }
+    h1 { font-size: 1.8rem; margin-bottom: 1rem; }
+    label { display: block; margin-top: 0.75rem; font-weight: 600; }
+    input { width: 100%; padding: 0.5rem; margin-top: 0.25rem; box-sizing: border-box; }
+    button { margin-top: 1rem; padding: 0.5rem 1rem; }
+    .error { color: #b00020; margin-top: 0.5rem; }
+    .success { color: #006400; margin-top: 0.5rem; }
+  </style>
+</head>
+<body>
+  <h1>WeAll - Create your account</h1>
+
+  <form id="signupForm">
+    <label>
+      Email
+      <input type="email" id="email" required autocomplete="email">
+    </label>
+
+    <label>
+      Password
+      <input type="password" id="password" required minlength="8" autocomplete="new-password">
+    </label>
+
+    <label>
+      Confirm Password
+      <input type="password" id="confirm" required minlength="8">
+    </label>
+
+    <button type="submit">Create Account</button>
+  </form>
+
+  <p class="error" id="error"></p>
+  <p class="success" id="success"></p>
+
+  <p style="margin-top:1.5rem;">
+    Already have an account?
+    <a href="/frontend/login.html">Log in.</a>
+  </p>
+
+  <script>
+    const form = document.getElementById('signupForm');
+    const errorEl = document.getElementById('error');
+    const successEl = document.getElementById('success');
+
+    form.addEventListener('submit', async (e) => {
+      e.preventDefault();
+      errorEl.textContent = '';
+      successEl.textContent = '';
+
+      const email = document.getElementById('email').value.trim();
+      const password = document.getElementById('password').value;
+      const confirm = document.getElementById('confirm').value;
+
+      if (!email || !password) {
+        errorEl.textContent = 'Email and password are required.';
+        return;
+      }
+      if (password !== confirm) {
+        errorEl.textContent = 'Passwords do not match.';
+        return;
+      }
+      if (password.length < 8) {
+        errorEl.textContent = 'Password must be at least 8 characters.';
+        return;
+      }
+
+      try {
+        const res = await fetch('/api/signup', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ email, password }),
+        });
+        const data = await res.json();
+
+        if (!res.ok || !data.ok) {
+          errorEl.textContent = data.detail || data.error || 'Signup failed.';
+          return;
+        }
+
+        successEl.textContent = 'Account created for ' + (data.account_id || email) +
+          '. Redirecting to login…';
+
+        setTimeout(() => {
+          window.location.href = '/frontend/login.html';
+        }, 1200);
+      } catch (err) {
+        errorEl.textContent = 'Network error during signup.';
+      }
+    });
+  </script>
+</body>
+</html>

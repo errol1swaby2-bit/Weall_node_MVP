@@ -11,6 +11,9 @@ persistence:
 
 ipfs:
   require_ipfs: false     # Set true for live IPFS daemon mode
+  # -- Optional: set your IPFS HTTP API and gateway (used by UI/tools)
+  api_url: "http://127.0.0.1:5001"
+  gateway: "https://ipfs.io"
 
 governance:
   tier3_quorum_fraction: 0.6  # 60% quorum required to close proposals
@@ -22,6 +25,9 @@ chain:
 security:
   require_signed_votes: true   # Verify Ed25519 signatures on votes
   require_signed_tx: false     # Verify Ed25519 signatures on txs (optional)
+  # Non-secret knobs (secrets via ENV): these can be read by config helpers
+  session_cookie_name: "weall_session"
+  jwt_expire_min: 60
 
 logging:
   level: "INFO"           # DEBUG, INFO, WARNING, ERROR
@@ -34,3 +40,32 @@ runtime:
     - pallets
     - runtime
   backup_dir: ".weall_backups"
+
+# ------------------------------------------------------------
+# Server: bind address and the public base URL your frontend calls
+# ------------------------------------------------------------
+server:
+  host: "0.0.0.0"                 # uvicorn bind address
+  port: 8000                      # uvicorn port
+  public_base_url: "http://127.0.0.1:8000"  # what clients should use to reach this backend
+
+# ------------------------------------------------------------
+# CORS: explicitly list UI origins that may send cookies (no "*")
+# ------------------------------------------------------------
+cors:
+  origins:
+    - "http://localhost:5173"
+    - "http://127.0.0.1:5173"
+    # add your production webapp origin(s), e.g.:
+    # - "https://app.weall.org"
+
+# ------------------------------------------------------------
+# Email / Recovery configuration
+# ------------------------------------------------------------
+email:
+  smtp_server: "smtp.gmail.com"
+  smtp_port: 465
+  smtp_user: "weall.verify@gmail.com"
+  from_name: "WeAll Network"
+  from_email: "weall.verify@gmail.com"
+  use_tls: false

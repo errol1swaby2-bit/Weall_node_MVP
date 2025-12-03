@@ -1,0 +1,220 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <title>WeAll — Treasury Dashboard</title>
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <link rel="stylesheet" href="/frontend/style.css?v=1762461479">
+  <style>
+    body {
+      background:#000;
+      color:#fff;
+      font-family:Arial, sans-serif;
+      margin:0;
+      padding:0;
+    }
+    header {
+      background:#111;
+      padding:12px 16px;
+      display:flex;
+      align-items:center;
+      justify-content:space-between;
+    }
+    header h2 { margin:0; font-size:1.2em; }
+    header a {
+      color:#2ecc71;
+      text-decoration:none;
+      font-weight:bold;
+      font-size:0.9em;
+    }
+    .container {
+      max-width:900px;
+      margin:auto;
+      padding:20px;
+    }
+    .card {
+      background:#111;
+      border-radius:12px;
+      padding:16px;
+      margin-bottom:18px;
+      box-shadow:0 0 5px #222;
+    }
+    h3 { color:#2ecc71; margin-top:0; }
+    .stat { display:flex; justify-content:space-between; margin-bottom:6px; }
+    .table {
+      width:100%;
+      border-collapse:collapse;
+      font-size:0.9em;
+    }
+    th, td {
+      border-bottom:1px solid #222;
+      padding:8px 6px;
+      text-align:left;
+    }
+    th { color:#2ecc71; }
+    tr:hover { background:#1a1a1a; }
+    button {
+      background:#2ecc71;
+      border:none;
+      color:#000;
+      border-radius:8px;
+      padding:8px 12px;
+      font-weight:bold;
+      cursor:pointer;
+      margin-top:8px;
+    }
+    button:hover { background:#27ae60; }
+    .msg { color:#aaa; font-size:0.85em; margin-top:8px; }
+  </style>
+  <script src="env.js"></script>
+  <script src="api_shim.js"></script>
+</head>
+<body>
+<div id="toast" role="status" aria-live="polite"></div>
+  <header>
+    <h2>Treasury Dashboard</h2>
+    <a href="index.html">← Back to Feed</a>
+  </header>
+
+  <div class="container">
+    <!-- Treasury Summary -->
+    <div class="card">
+      <h3>Current Treasury Balance</h3>
+      <div class="stat">
+        <strong>Total:</strong>
+        <span id="balance">Loading...</span>
+      </div>
+      <div class="stat">
+        <strong>Last Updated:</strong>
+        <span id="lastUpdate">—</span>
+      </div>
+      <button onclick="refreshBalance()">Refresh</button>
+      <div class="msg" id="balMsg"></div>
+    </div>
+
+    <!-- Active Proposals -->
+    <div class="card">
+      <h3>Active Funding Proposals</h3>
+      <table class="table" id="propTable">
+        <thead>
+          <tr>
+            <th>ID</th>
+            <th>Title</th>
+            <th>Requester</th>
+            <th>Amount</th>
+            <th>Status</th>
+          </tr>
+        </thead>
+        <tbody></tbody>
+      </table>
+      <button onclick="refreshProposals()">Refresh</button>
+      <div class="msg" id="propMsg"></div>
+    </div>
+
+    <!-- Transaction History -->
+    <div class="card">
+      <h3>Recent Treasury Transactions</h3>
+      <table class="table" id="txTable">
+        <thead>
+          <tr>
+            <th>Tx ID</th>
+            <th>Type</th>
+            <th>Amount</th>
+            <th>Timestamp</th>
+          </tr>
+        </thead>
+        <tbody></tbody>
+      </table>
+      <button onclick="refreshTx()">Refresh</button>
+      <div class="msg" id="txMsg"></div>
+    </div>
+  </div>
+
+  <script>
+    async function refreshBalance() {
+      const b = document.getElementById('balance');
+      const t = document.getElementById('lastUpdate');
+      const m = document.getElementById('balMsg');
+      m.textContent = '';
+      b.textContent = '...';
+      try {
+        const res = await fetch('/treasury/balance');
+        const data = await res.json();
+        if (!res.ok) throw new Error(data.detail || 'Error fetching balance');
+        b.textContent = data.balance + ' WEC';
+        t.textContent = new Date().toLocaleString();
+      } catch (err) {
+        b.textContent = '⚠️';
+        m.textContent = err.message;
+      }
+    }
+
+    async function refreshProposals() {
+      const table = document.querySelector('#propTable tbody');
+      const msg = document.getElementById('propMsg');
+      msg.textContent = '';
+      table.innerHTML = '<tr><td colspan="5">Loading...</td></tr>';
+      try {
+        const res = await fetch('/governance/proposals');
+        const data = await res.json();
+        if (!res.ok) throw new Error(data.detail || 'Error fetching proposals');
+        if (!data.length) {
+          table.innerHTML = '<tr><td colspan="5">No active proposals.</td></tr>';
+          return;
+        }
+        table.innerHTML = data.map(p => `
+          <tr>
+            <td>${p.id}</td>
+            <td>${p.title || '—'}</td>
+            <td>${p.requester || '—'}</td>
+            <td>${p.amount || '—'} WEC</td>
+            <td>${p.status}</td>
+          </tr>
+        `).join('');
+      } catch (err) {
+        table.innerHTML = '<tr><td colspan="5">⚠️ Error</td></tr>';
+        msg.textContent = err.message;
+      }
+    }
+
+    async function refreshTx() {
+      const table = document.querySelector('#txTable tbody');
+      const msg = document.getElementById('txMsg');
+      table.innerHTML = '<tr><td colspan="4">Loading...</td></tr>';
+      try {
+        const res = await fetch('/treasury/transactions');
+        const data = await res.json();
+        if (!res.ok) throw new Error(data.detail || 'Error fetching transactions');
+        if (!data.length) {
+          table.innerHTML = '<tr><td colspan="4">No recent transactions.</td></tr>';
+          return;
+        }
+        table.innerHTML = data.map(tx => `
+          <tr>
+            <td>${tx.tx_id}</td>
+            <td>${tx.type}</td>
+            <td>${tx.amount} WEC</td>
+            <td>${new Date(tx.timestamp*1000).toLocaleString()}</td>
+          </tr>
+        `).join('');
+      } catch (err) {
+        table.innerHTML = '<tr><td colspan="4">⚠️ Error</td></tr>';
+        msg.textContent = err.message;
+      }
+    }
+
+    // Auto-init
+    refreshBalance();
+    refreshProposals();
+    refreshTx();
+  </script>
+  <script src="/static/footer.js"></script>
+
+<footer class="weall-footer">
+  <span>© WeAll</span>
+  &nbsp;•&nbsp;<a href="/frontend/privacy.html">Privacy</a>
+  &nbsp;•&nbsp;<a href="/frontend/terms.html">Terms</a>
+</footer>
+
+</body>
+</html>

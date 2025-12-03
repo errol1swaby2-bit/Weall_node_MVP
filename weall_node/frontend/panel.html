@@ -2,81 +2,339 @@
 <html lang="en">
 <head>
 <meta charset="UTF-8">
-<title>WeAll • Juror Panel</title>
+<title>WeAll • Juror Panel (Tier-3)</title>
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <style>
-body{margin:0;font-family:Arial,Helvetica,sans-serif;background:#000;color:#fff}
-h2{text-align:center;margin:10px 0}
-#grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(220px,1fr));gap:10px;padding:10px}
-video{width:100%;background:#111;border:1px solid #333;border-radius:6px}
-.controls{text-align:center;margin:15px 0}
-button{background:#1f2937;color:#fff;border:1px solid #374151;padding:8px 14px;border-radius:6px;cursor:pointer;margin:0 5px}
-button:hover{background:#374151}
-#voteStatus{text-align:center;margin-top:10px;font-size:14px;opacity:.8}
+  :root { --bg:#000; --card:#0b0e13; --line:#1b2530; --ink:#e8eef7; --mut:#9fb0c0; --btn:#1f2937; --btnh:#374151; --ok:#49d49d; --warn:#f6c56c; --err:#ff7f7f; }
+  html,body { height:100% }
+  body{margin:0;font-family:system-ui,-apple-system,Segoe UI,Roboto,Arial,Helvetica,sans-serif;background:var(--bg);color:var(--ink)}
+  header{padding:10px 12px;border-bottom:1px solid var(--line);background:#0e1218}
+  h2{margin:6px 0 0 0;font-size:18px}
+  .wrap{padding:10px}
+  .grid{display:grid;grid-template-columns:320px 1fr;gap:10px}
+  .card{background:var(--card);border:1px solid var(--line);border-radius:10px;padding:10px}
+  label{display:block;font-size:12px;color:var(--mut);margin:8px 0 4px}
+  input,select,button{width:100%;background:#0c1117;color:var(--ink);border:1px solid #223243;border-radius:8px;padding:8px 10px}
+  button{cursor:pointer;background:var(--btn);border-color:#2b3a4a}
+  button:hover{background:var(--btnh)}
+  .row{display:flex;gap:8px;align-items:center}
+  .row > *{flex:1}
+  .inline{width:auto;display:inline-block}
+  .pill{display:inline-block;font-size:11px;padding:2px 6px;border-radius:999px;border:1px solid #223243;background:#0c1117;margin:2px 6px 2px 0}
+  #grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(240px,1fr));gap:10px}
+  video{width:100%;aspect-ratio:16/9;background:#0a0c10;border:1px solid #223243;border-radius:8px}
+  #log{font-family:ui-monospace,Menlo,Consolas,monospace;background:#0a0c10;border:1px solid #223243;border-radius:8px;height:150px;overflow:auto;padding:8px;font-size:12px}
+  .ok{color:var(--ok)} .warn{color:var(--warn)} .err{color:var(--err)} .mut{color:var(--mut)}
 </style>
+  <script src="env.js"></script>
+  <script src="api_shim.js"></script>
 </head>
 <body>
+<div id="toast" role="status" aria-live="polite"></div>
+<header>
+  <h2>WeAll • Tier-3 Panel — Candidate + 3 interactive jurors publish; others watch-only & vote</h2>
+</header>
 
-<h2>Tier 3 Juror Panel</h2>
-<div id="grid">
-  <video id="localVideo" autoplay playsinline muted></video>
-  <video id="remote1" autoplay playsinline></video>
-  <video id="remote2" autoplay playsinline></video>
-  <video id="remote3" autoplay playsinline></video>
-</div>
+<div class="wrap grid">
+  <section class="card">
+    <h3>Identity</h3>
+    <label>Account ID (you)</label>
+    <input id="accountId" placeholder="acct_..." />
+    <div class="row">
+      <div>
+        <label>Role hint</label>
+        <select id="role">
+          <option value="candidate">Candidate</option>
+          <option value="juror">Juror</option>
+          <option value="observer" selected>Observer</option>
+        </select>
+      </div>
+      <div>
+        <label>Client ID</label>
+        <input id="clientId" placeholder="auto" />
+      </div>
+    </div>
 
-<div class="controls">
-  <button id="joinBtn">Join Panel</button>
-  <button id="voteYes">Approve</button>
-  <button id="voteNo">Reject</button>
+    <h3 style="margin-top:10px">Room</h3>
+    <label>Room ID</label>
+    <input id="roomId" placeholder="leave blank to create/schedule" />
+    <div class="row" style="margin-top:6px">
+      <button class="inline" id="btnCreateRoom">Create</button>
+      <button class="inline" id="btnJoinRoom">Join</button>
+      <button class="inline" id="btnLeaveRoom">Leave</button>
+    </div>
+    <div class="row" style="margin-top:6px">
+      <button class="inline" id="btnPublishOn">Publish On</button>
+      <button class="inline" id="btnPublishOff">Publish Off</button>
+    </div>
+
+    <h3 style="margin-top:10px">Onboarding</h3>
+    <div class="row">
+      <button class="inline" id="btnStartT3">Start Tier-3 Onboarding</button>
+      <button class="inline" id="btnSchedulePanel">Schedule Panel</button>
+      <button class="inline" id="btnFinalize">Finalize</button>
+    </div>
+
+    <h3 style="margin-top:10px">Panel Vote (Jurors)</h3>
+    <div class="row">
+      <button class="inline" id="btnVoteYes">Vote YES</button>
+      <button class="inline" id="btnVoteNo">Vote NO</button>
+    </div>
+
+    <div style="margin-top:10px">
+      <span class="pill" id="badgeRole">role: observer</span>
+      <span class="pill" id="badgePub">stream: watch-only</span>
+    </div>
+
+    <h3 style="margin-top:10px">Roster</h3>
+    <div id="roster"></div>
+  </section>
+
+  <section class="card">
+    <h3>Media</h3>
+    <div class="row" style="margin-bottom:6px">
+      <button class="inline" id="btnMediaOn">Start Camera+Mic</button>
+      <button class="inline" id="btnMediaOff">Stop Media</button>
+    </div>
+    <div id="grid">
+      <div>
+        <div class="pill mut">Local</div>
+        <video id="localVideo" autoplay playsinline muted></video>
+      </div>
+      <div id="remotes"></div>
+    </div>
+
+    <h3 style="margin-top:12px">Log</h3>
+    <div id="log"></div>
+  </section>
 </div>
-<div id="voteStatus">Not connected</div>
 
 <script>
-const API_BASE=location.origin;
-const uid=localStorage.getItem('weall_user_id')||'anon';
-let ws,pc,localStream;
-
-async function joinPanel(){
-  localStream=await navigator.mediaDevices.getUserMedia({video:true,audio:true});
-  document.getElementById('localVideo').srcObject=localStream;
-  pc=new RTCPeerConnection();
-  localStream.getTracks().forEach(t=>pc.addTrack(t,localStream));
-  let idx=1;
-  pc.ontrack=e=>{
-    const v=document.getElementById(`remote${idx++}`);
-    if(v)v.srcObject=e.streams[0];
+(() => {
+  const S = {
+    roomId:null, clientId:null, accountId:null, role:'observer',
+    isPublisher:false, interactive:false, iceServers:null,
+    pcs:new Map(), lastMid:0, pollStop:false, roster:new Map()
   };
-  pc.onconnectionstatechange=()=>document.getElementById('voteStatus').textContent="State: "+pc.connectionState;
 
-  ws=new WebSocket(`wss://${location.host}/panel/${uid}`);
-  ws.onmessage=async ev=>{
-    const msg=JSON.parse(ev.data);
-    if(msg.sdp){
-      await pc.setRemoteDescription(new RTCSessionDescription(msg.sdp));
-      if(msg.sdp.type==='offer'){const ans=await pc.createAnswer();await pc.setLocalDescription(ans);ws.send(JSON.stringify({sdp:pc.localDescription}));}
+  const $ = sel => document.querySelector(sel);
+  const logEl = $('#log'), remotesEl = $('#remotes'), rosterEl = $('#roster');
+  const badgeRole = $('#badgeRole'), badgePub = $('#badgePub'), localVideo = $('#localVideo');
+
+  function log(msg, cls=''){ const d=document.createElement('div'); d.innerHTML=`<span class="${cls}">${new Date().toLocaleTimeString()} — ${msg}</span>`; logEl.appendChild(d); logEl.scrollTop = logEl.scrollHeight; }
+  async function getJSON(url){ const r=await fetch(url); if(!r.ok) throw new Error(`GET ${url} -> ${r.status}`); return r.json(); }
+  async function postJSON(url, body){ const r=await fetch(url,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(body||{})}); const t=await r.text(); let j={}; try{j=t?JSON.parse(t):{}}catch{j={raw:t}} if(!r.ok) throw new Error(j.error||`${r.status}`); return j; }
+
+  function updateBadges(){
+    badgeRole.textContent = `role: ${S.role}${S.interactive?' (interactive)':''}`;
+    badgePub.textContent = `stream: ${S.isPublisher?'publishing':'watch-only'}`;
+  }
+
+  function renderRoster(){
+    const arr=[...S.roster.entries()].map(([id,v])=>({id,...v}));
+    arr.sort((a,b)=> a.role.localeCompare(b.role) || (b.interactive-a.interactive) || a.id.localeCompare(b.id));
+    rosterEl.innerHTML = arr.map(p=>`<span class="pill">${p.id} • ${p.role}${p.interactive?'*':''} • ${p.publisher?'pub':'watch'}</span>`).join(' ');
+  }
+
+  function ensureRemoteVideoEl(id){
+    let el=document.getElementById('remote-'+id);
+    if(!el){
+      const wrap=document.createElement('div');
+      wrap.innerHTML=`<div class="pill mut">Remote ${id}</div><video id="remote-${id}" autoplay playsinline></video>`;
+      remotesEl.appendChild(wrap);
+      el=wrap.querySelector('video');
     }
-    if(msg.candidate){await pc.addIceCandidate(msg.candidate);}
-  };
-  pc.onicecandidate=e=>{if(e.candidate)ws.send(JSON.stringify({candidate:e.candidate}));};
-  const offer=await pc.createOffer();await pc.setLocalDescription(offer);
-  ws.onopen=()=>ws.send(JSON.stringify({sdp:pc.localDescription}));
-  document.getElementById('voteStatus').textContent="Connected to panel";
-}
+    return el;
+  }
 
-async function vote(decision){
-  const res=await fetch(`${API_BASE}/poh/juror-vote`,{
-    method:'POST',
-    headers:{'Content-Type':'application/json'},
-    body:JSON.stringify({juror_id:uid,decision})
-  });
-  const data=await res.json();
-  document.getElementById('voteStatus').textContent=`Vote sent: ${decision} → ${JSON.stringify(data)}`;
-}
-document.getElementById('joinBtn').onclick=joinPanel;
-document.getElementById('voteYes').onclick=()=>vote("approve");
-document.getElementById('voteNo').onclick=()=>vote("reject");
+  async function loadIce(){
+    if(S.iceServers) return S.iceServers;
+    try{
+      const {iceServers}=await getJSON('/webrtc/config');
+      S.iceServers=iceServers && iceServers.length ? iceServers : [{urls:['stun:stun.l.google.com:19302']}];
+      log('ICE ready','ok');
+    }catch{
+      S.iceServers=[{urls:['stun:stun.l.google.com:19302']}];
+      log('ICE fallback','warn');
+    }
+    return S.iceServers;
+  }
+
+  // -------- Media
+  async function startMedia(){
+    if(S.localStream) return S.localStream;
+    S.localStream = await navigator.mediaDevices.getUserMedia({video:true,audio:true});
+    localVideo.srcObject = S.localStream;
+    if(!S.isPublisher){ S.localStream.getTracks().forEach(t=>t.enabled=false); }
+    log('Local media started','ok');
+    return S.localStream;
+  }
+  function stopMedia(){
+    if(!S.localStream) return;
+    S.localStream.getTracks().forEach(t=>t.stop());
+    S.localStream=null; localVideo.srcObject=null;
+    log('Local media stopped','warn');
+  }
+
+  // -------- WebRTC helpers
+  async function pcFor(peerId){
+    let pc=S.pcs.get(peerId);
+    if(pc) return pc;
+    pc=new RTCPeerConnection({iceServers:await loadIce()});
+    S.pcs.set(peerId,pc);
+    pc.onicecandidate=ev=>{ if(ev.candidate) signal(peerId,'candidate',{candidate:ev.candidate}); };
+    pc.ontrack=ev=>{ ensureRemoteVideoEl(peerId).srcObject=ev.streams[0]; };
+    if(S.isPublisher && S.localStream){ S.localStream.getTracks().forEach(t=>pc.addTrack(t,S.localStream)); }
+    return pc;
+  }
+
+  async function makeOffer(peerId){
+    const pc=await pcFor(peerId);
+    const offer=await pc.createOffer({offerToReceiveAudio:true,offerToReceiveVideo:true});
+    await pc.setLocalDescription(offer);
+    await signal(peerId,'offer',{sdp:pc.localDescription});
+  }
+  async function handleOffer(from,sdp){
+    const pc=await pcFor(from);
+    await pc.setRemoteDescription(sdp);
+    const answer=await pc.createAnswer();
+    await pc.setLocalDescription(answer);
+    await signal(from,'answer',{sdp:pc.localDescription});
+  }
+  async function handleAnswer(from,sdp){
+    const pc=S.pcs.get(from); if(!pc) return;
+    await pc.setRemoteDescription(sdp);
+  }
+  async function handleCandidate(from,c){ const pc=await pcFor(from); try{ await pc.addIceCandidate(c); }catch{} }
+
+  async function signal(to,type,data){ return postJSON('/webrtc/signal',{room_id:S.roomId,from:S.clientId,to,type,data}); }
+
+  // -------- Presence / Polling
+  async function refreshRoster(){
+    if(!S.roomId) return;
+    try{
+      const r=await postJSON('/webrtc/state',{room_id:S.roomId});
+      S.roster.clear();
+      for(const p of r.participants||[]){
+        S.roster.set(p.client_id,{role:p.role,interactive:!!p.interactive,publisher:!!p.publisher});
+        if(p.client_id===S.clientId){ S.role=p.role; S.interactive=!!p.interactive; S.isPublisher=!!p.publisher; }
+      }
+      updateBadges(); renderRoster();
+    }catch{}
+  }
+
+  async function pollLoop(){
+    if(!S.roomId||!S.clientId) return;
+    S.pollStop=false;
+    while(!S.pollStop){
+      try{
+        const res=await postJSON('/webrtc/poll',{room_id:S.roomId,client_id:S.clientId,since_mid:S.lastMid});
+        S.lastMid=res.last_mid||S.lastMid;
+        for(const m of res.messages||[]){
+          S.lastMid=Math.max(S.lastMid,m.mid);
+          if(m.from===S.clientId) continue;
+          const {type,data}=m;
+          if(type==='offer') await handleOffer(m.from,data.sdp);
+          else if(type==='answer') await handleAnswer(m.from,data.sdp);
+          else if(type==='candidate') await handleCandidate(m.from,data.candidate);
+          else if(type==='bye'){ const id=(data&&data.client_id)||m.from; const pc=S.pcs.get(id); if(pc) try{pc.close();}catch{} S.pcs.delete(id); await refreshRoster(); }
+          else if(type==='presence'){ await refreshRoster(); if(S.isPublisher && data.client_id && data.client_id!==S.clientId && data.event!=='unpublish'){ await makeOffer(data.client_id); } }
+        }
+      }catch(e){ log('poll error: '+e.message,'err'); await new Promise(r=>setTimeout(r,800)); }
+    }
+  }
+
+  // -------- Room lifecycle
+  async function createRoom(){
+    const out = await postJSON('/webrtc/room',{policy:{max_participants:12,max_publishers:4,reserve_candidate:true}});
+    S.roomId = out.room_id; $('#roomId').value = S.roomId; S.lastMid=0;
+    log('Room created: '+S.roomId,'ok');
+  }
+  async function joinRoom(){
+    S.roomId = ($('#roomId').value||'').trim() || S.roomId;
+    if(!S.roomId) throw new Error('Missing room id');
+    S.clientId = ($('#clientId').value||'').trim() || ( (crypto.randomUUID?crypto.randomUUID():Math.random().toString(16).slice(2)).replace(/-/g,'').slice(0,12) );
+    $('#clientId').value = S.clientId;
+    S.accountId = ($('#accountId').value||'').trim() || null;
+    const roleHint = $('#role').value;
+
+    const res = await postJSON('/webrtc/join',{room_id:S.roomId,client_id:S.clientId,account_id:S.accountId,role:roleHint});
+    S.roster.clear();
+    for(const p of res.participants||[]){
+      S.roster.set(p.client_id,{role:p.role,interactive:!!p.interactive,publisher:!!p.publisher});
+      if(p.client_id===S.clientId){ S.role=p.role; S.interactive=!!p.interactive; S.isPublisher=!!p.publisher; }
+    }
+    updateBadges(); renderRoster();
+    if(S.isPublisher){ await startMedia(); for(const p of res.participants||[]){ if(p.client_id!==S.clientId) await makeOffer(p.client_id); } }
+    pollLoop();
+    log(`Joined room ${S.roomId} as ${S.clientId}`,'ok');
+  }
+  async function leaveRoom(){
+    if(!S.roomId||!S.clientId) return;
+    S.pollStop=true;
+    try{ await postJSON('/webrtc/leave',{room_id:S.roomId,client_id:S.clientId}); }catch{}
+    for(const pc of S.pcs.values()){ try{pc.close();}catch{} } S.pcs.clear();
+    stopMedia(); log('Left room','warn');
+  }
+  async function publish(enable){
+    if(!S.roomId||!S.clientId) throw new Error('Join first');
+    const out = await postJSON('/webrtc/publish',{room_id:S.roomId,client_id:S.clientId,enable:!!enable,role:S.role});
+    S.isPublisher = !!enable;
+    if(S.isPublisher && !S.localStream){ await startMedia(); }
+    if(enable){ for(const p of (out.participants||[])){ if(p.client_id!==S.clientId) await makeOffer(p.client_id); } }
+    updateBadges();
+  }
+
+  // -------- Onboarding (Tier-3)
+  async function startT3(){ const acct=$('#accountId').value.trim(); if(!acct) return alert('Enter your account ID'); await postJSON('/weall/onboarding/start',{account_id:acct,tier:3}); log('Onboarding started','ok'); }
+  async function schedulePanel(){
+    const acct=$('#accountId').value.trim(); if(!acct) return alert('Enter your account ID');
+    const out = await postJSON('/weall/onboarding/panel/schedule',{account_id:acct,required:10});
+    if(!S.roomId){ S.roomId = out.room_id; $('#roomId').value = out.room_id; }
+    log('Panel scheduled: '+out.panel_id,'ok');
+  }
+  async function finalize(){ const acct=$('#accountId').value.trim(); if(!acct) return alert('Enter your account ID'); const r=await postJSON('/weall/onboarding/finalize',{account_id:acct}); log(`Finalized tier ${r.tier} token=${r.token.token_id}`,'ok'); }
+
+  // -------- Panel vote (jurors)
+  async function vote(approve){
+    if(!S.roomId) return alert('Join the room first.');
+    const juror = ($('#accountId').value||'').trim(); if(!juror) return alert('Enter your Account ID (juror).');
+    const info = await postJSON('/weall/onboarding/panel/for_room',{room_id:S.roomId});
+    const res  = await postJSON('/weall/onboarding/panel/vote',{panel_id:info.panel_id,juror_id:juror,approve:!!approve});
+    alert(`Vote recorded. YES=${res.tallies.yes} NO=${res.tallies.no} / required=${res.tallies.required}`);
+  }
+
+  // -------- UI bindings
+  $('#btnCreateRoom').onclick = ()=>createRoom().catch(e=>log(e.message,'err'));
+  $('#btnJoinRoom').onclick   = ()=>joinRoom().catch(e=>log(e.message,'err'));
+  $('#btnLeaveRoom').onclick  = ()=>leaveRoom().catch(e=>log(e.message,'err'));
+
+  $('#btnPublishOn').onclick  = ()=>publish(true).catch(e=>log(e.message,'err'));
+  $('#btnPublishOff').onclick = ()=>publish(false).catch(e=>log(e.message,'err'));
+
+  $('#btnMediaOn').onclick  = ()=>startMedia().catch(e=>log(e.message,'err'));
+  $('#btnMediaOff').onclick = ()=>stopMedia();
+
+  $('#btnStartT3').onclick     = ()=>startT3().catch(e=>log(e.message,'err'));
+  $('#btnSchedulePanel').onclick = ()=>schedulePanel().catch(e=>log(e.message,'err'));
+  $('#btnFinalize').onclick    = ()=>finalize().catch(e=>log(e.message,'err'));
+
+  $('#btnVoteYes').onclick = ()=>vote(true);
+  $('#btnVoteNo').onclick  = ()=>vote(false);
+
+  // init
+  (function init(){
+    const cid = (crypto.randomUUID?crypto.randomUUID():Math.random().toString(16).slice(2)).replace(/-/g,'').slice(0,12);
+    $('#clientId').value = cid; S.clientId = cid; updateBadges();
+  })();
+})();
 </script>
-<script src="footer.js"></script>
+
+<footer class="weall-footer">
+  <span>© WeAll</span>
+  &nbsp;•&nbsp;<a href="/frontend/privacy.html">Privacy</a>
+  &nbsp;•&nbsp;<a href="/frontend/terms.html">Terms</a>
+</footer>
+
 </body>
 </html>

@@ -1,18 +1,236 @@
-<!DOCTYPE html>
-<html lang="en">
+<!doctype html>
+<html lang=\"en\">
 <head>
-    <meta charset="UTF-8">
-    <title>WeAll Governance</title>
-    <link rel="stylesheet" href="style.css">
-</head>
+  <meta charset=\"utf-8\">
+  <title>WeAll Governance</title>
+  <meta name=\"viewport\" content=\"width=device-width, initial-scale=1\">
+  <style>
+    body { font-family: system-ui, -apple-system, BlinkMacSystemFont, \"Segoe UI\", sans-serif; margin: 1.5rem; background: #05070b; color: #f5f5f5; }
+    h1 { font-size: 1.8rem; margin-bottom: 0.5rem; }
+    h2 { font-size: 1.3rem; margin-top: 1.5rem; }
+    .meta { font-size: 0.9rem; opacity: 0.8; margin-bottom: 1rem; }
+    label { display: block; margin-top: 0.75rem; font-weight: 600; font-size: 0.95rem; }
+    input, textarea { width: 100%; padding: 0.5rem; margin-top: 0.25rem; box-sizing: border-box; border-radius: 4px; border: 1px solid #333; background: #0b0f18; color: #f5f5f5; }
+    textarea { min-height: 80px; }
+    button { margin-top: 0.75rem; padding: 0.4rem 0.8rem; border-radius: 4px; border: none; background: #2563eb; color: white; font-weight: 600; cursor: pointer; }
+    button.small { font-size: 0.85rem; padding: 0.25rem 0.6rem; margin-right: 0.25rem; }
+    button[disabled] { background: #444; cursor: default; }
+    .card { background: #0b0f18; border-radius: 8px; padding: 0.9rem; margin-top: 0.9rem; border: 1px solid #1f2937; }
+    .row { display: flex; justify-content: space-between; gap: 0.5rem; flex-wrap: wrap; }
+    .chip { display: inline-block; padding: 0.1rem 0.5rem; border-radius: 999px; background: #111827; font-size: 0.8rem; margin-right: 0.3rem; }
+    .error { color: #f87171; margin-top: 0.5rem; font-size: 0.9rem; }
+    .success { color: #4ade80; margin-top: 0.5rem; font-size: 0.9rem; }
+    .tallies { font-size: 0.85rem; margin-top: 0.4rem; }
+  </style>
+  <script src="/frontend/session.js"></script>
+  <script src="/frontend/governance.js"></script> 
+ </head>
 <body>
-    <header>
-        <h1>Governance</h1>
-    </header>
-    <main id="proposals">
-        <button onclick="loadProposals()">Load Proposals</button>
-        <div id="proposal-list"></div>
-    </main>
-    <script src="main.js"></script>
+  <h1>WeAll Governance</h1>
+  <div class=\"meta\">
+    Current user: <span id=\"currentUser\">loading…</span>
+  </div>
+
+  <section class=\"card\">
+    <h2>Create proposal</h2>
+    <form id=\"createForm\">
+      <label>
+        Title
+        <input type=\"text\" id=\"title\" required maxlength=\"200\">
+      </label>
+
+      <label>
+        Description
+        <textarea id=\"description\" maxlength=\"4000\" placeholder=\"What is this proposal about?\"></textarea>
+      </label>
+
+      <label>
+        Options (comma-separated, leave blank for yes / no / abstain)
+        <input type=\"text\" id=\"options\" placeholder=\"yes,no,abstain\">
+      </label>
+
+      <label>
+        Duration (days)
+        <input type=\"number\" id=\"duration\" min=\"1\" max=\"365\" value=\"7\">
+      </label>
+
+      <button type=\"submit\">Submit proposal</button>
+      <div class=\"error\" id=\"createError\"></div>
+      <div class=\"success\" id=\"createSuccess\"></div>
+    </form>
+  </section>
+
+  <section>
+    <h2>Open & recent proposals</h2>
+    <div id=\"proposalList\">Loading…</div>
+  </section>
+
+  <script>
+    function userId() {
+      if (typeof CurrentUser === 'function') {
+        return CurrentUser();
+      }
+      return 'unknown';
+    }
+
+    document.getElementById('currentUser').textContent = userId();
+
+    async function fetchJSON(url, opts) {
+      const res = await fetch(url, opts || {});
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok) {
+        const detail = data.detail || data.error || res.statusText;
+        throw new Error(detail);
+      }
+      return data;
+    }
+
+    async function loadProposals() {
+      const listEl = document.getElementById('proposalList');
+      listEl.textContent = 'Loading…';
+
+      try {
+        const data = await fetchJSON('/governance/proposals');
+        const proposals = data.proposals || [];
+        if (!proposals.length) {
+          listEl.textContent = 'No proposals yet.';
+          return;
+        }
+
+        listEl.innerHTML = '';
+        const me = userId();
+
+        proposals.sort((a, b) => (b.created_at || 0) - (a.created_at || 0));
+
+        for (const p of proposals) {
+          const card = document.createElement('div');
+          card.className = 'card';
+
+          const title = document.createElement('div');
+          title.innerHTML = '<strong>' + (p.title || '(untitled)') + '</strong>';
+          card.appendChild(title);
+
+          const meta = document.createElement('div');
+          meta.className = 'meta';
+          const created = p.created_at ? new Date(p.created_at * 1000).toLocaleString() : 'unknown time';
+          meta.textContent = 'by ' + (p.created_by || 'unknown') +
+            ' • ' + (p.type || 'signal') +
+            ' • ' + (p.status || 'open') +
+            ' • ' + created;
+          card.appendChild(meta);
+
+          if (p.description) {
+            const desc = document.createElement('div');
+            desc.style.fontSize = '0.9rem';
+            desc.style.marginTop = '0.3rem';
+            desc.textContent = p.description;
+            card.appendChild(desc);
+          }
+
+          const talliesDiv = document.createElement('div');
+          talliesDiv.className = 'tallies';
+          const tallies = p.tallies || {};
+          const opts = p.options || [];
+          let tText = 'Votes: ';
+          if (!opts.length) {
+            tText += 'none yet';
+          } else {
+            tText += opts.map(o => o + ' = ' + (tallies[o] || 0)).join(' • ');
+          }
+          talliesDiv.textContent = tText;
+          card.appendChild(talliesDiv);
+
+          const myChoice = (p.votes && p.votes[me]) || null;
+          if (p.status === 'open' && opts.length) {
+            const btnRow = document.createElement('div');
+            btnRow.style.marginTop = '0.4rem';
+
+            const msg = document.createElement('div');
+            msg.className = 'error';
+            msg.style.marginTop = '0.2rem';
+            msg.style.minHeight = '1.1rem';
+
+            for (const opt of opts) {
+              const btn = document.createElement('button');
+              btn.type = 'button';
+              btn.className = 'small';
+              btn.textContent = (myChoice === opt ? '✓ ' : '') + opt;
+              btn.addEventListener('click', async () => {
+                msg.textContent = '';
+                try {
+                  const body = { voter_id: me, choice: opt };
+                  const res = await fetchJSON('/governance/proposals/' + encodeURIComponent(p.id) + '/vote', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify(body),
+                  });
+                  await loadProposals();
+                } catch (err) {
+                  msg.textContent = 'Vote failed: ' + err.message;
+                }
+              });
+              btnRow.appendChild(btn);
+            }
+
+            card.appendChild(btnRow);
+            card.appendChild(msg);
+          }
+
+          listEl.appendChild(card);
+        }
+      } catch (err) {
+        listEl.textContent = 'Error loading proposals: ' + err.message;
+      }
+    }
+
+    document.getElementById('createForm').addEventListener('submit', async (e) => {
+      e.preventDefault();
+      const errEl = document.getElementById('createError');
+      const okEl = document.getElementById('createSuccess');
+      errEl.textContent = '';
+      okEl.textContent = '';
+
+      const title = document.getElementById('title').value.trim();
+      const desc = document.getElementById('description').value.trim();
+      const optsRaw = document.getElementById('options').value.trim();
+      const durDays = parseInt(document.getElementById('duration').value || '7', 10);
+
+      if (!title) {
+        errEl.textContent = 'Title is required.';
+        return;
+      }
+
+      let options = null;
+      if (optsRaw) {
+        options = optsRaw.split(',').map(s => s.trim()).filter(Boolean);
+      }
+
+      const payload = {
+        title,
+        description: desc,
+        created_by: userId(),
+        type: 'signal',
+        options,
+        duration_sec: durDays * 24 * 3600,
+      };
+
+      try {
+        await fetchJSON('/governance/proposals', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(payload),
+        });
+        okEl.textContent = 'Proposal created.';
+        document.getElementById('title').value = '';
+        document.getElementById('description').value = '';
+        document.getElementById('options').value = '';
+        loadProposals();
+      } catch (err) {
+        errEl.textContent = 'Failed to create proposal: ' + err.message;
+      }
+    });
+
+    loadProposals();
+  </script>
 </body>
 </html>

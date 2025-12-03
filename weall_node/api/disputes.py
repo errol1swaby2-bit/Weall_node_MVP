@@ -9,13 +9,15 @@ Future versions will sync with on-chain governance.
 import logging, time
 from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel
-from weall_node.app_state import chain, ledger
+from ..weall_executor import executor
 
 router = APIRouter(prefix="/disputes", tags=["disputes"])
 logger = logging.getLogger("disputes")
 
 if not logger.handlers:
-    logging.basicConfig(level=logging.INFO, format="%(asctime)s [%(levelname)s] %(message)s")
+    logging.basicConfig(
+        level=logging.INFO, format="%(asctime)s [%(levelname)s] %(message)s"
+    )
 
 # In-memory MVP state (temporary)
 DISPUTES = {}
@@ -111,7 +113,12 @@ def resolve_dispute(req: DisputeResolve):
     }
     try:
         block = chain.add_block([tx])
-        logger.info("Dispute %s resolved by %s -> %s", req.dispute_id, req.resolver_id, req.decision)
+        logger.info(
+            "Dispute %s resolved by %s -> %s",
+            req.dispute_id,
+            req.resolver_id,
+            req.decision,
+        )
         d["block_hash"] = block["hash"]
     except Exception as e:
         logger.warning("Failed to record DISPUTE_RESOLVE on-chain: %s", e)

@@ -1,784 +1,710 @@
-#!/usr/bin/env python3
-# -*- coding: utf-8 -*-
+# weall_node/weall_executor.py
 """
-WeAll Executor — Production-ready core (locks + optional SQLite) while remaining test-friendly.
+WeAll Executor — unified runtime with quorum finalization + dev mining (PBFT-lite)
 
-Main capabilities
-- Users & PoH (Tier 1–3 scaffolding) + Hybrid Tier-3 promotion (Founder → Jurors)
-- Posts & comments
-- Encrypted messaging (RSA OAEP)
-- Governance lifecycle: propose → vote → close → enact (safe no-op enact by default)
-- Chain integration: mempool + deterministic Tier-3 validator selection + block finalization
-- Epoch management + simple rewards via ledger pools
-- Persistence:
-    * JSON files by default (test-friendly)
-    * Optional SQLite backend via weall_config.yaml
-- Safe autosave thread + explicit reset_state() for tests
+This merges the “toy finality” flow and the production-leaning quorum flow:
+- DEV MINE (legacy): executor.mine_block([optional_payload]) → propose→self-vote→finalize
+- QUORUM: propose_block(proposer_id) + vote_block(validator_id, proposal_id) → finalize on quorum
+- Legacy/alias: attest_block(validator_id, proposal_id) == vote_block(...)
+
+Back-compat: keeps prior method names & attribute access used by API modules (PoH, ledger, etc.).
 """
 
+from __future__ import annotations
+
+import json
+import hashlib
+import logging
 import os
 import time
-import json
-import pathlib
-import hashlib
-import threading
-import logging
-from typing import Dict, Any, Optional, List
-from collections import defaultdict
+import uuid
+from dataclasses import dataclass, field
+from typing import Any, Dict, List, Optional, Set
 
-from weall_node.config import load_config
-from weall_node.app_state.chain import ChainState
-from weall_node.app_state.ledger import WeCoinLedger  # alias to LedgerState in app_state/ledger.py
-from weall_node.app_state.governance import GovernanceRuntime  # alias to GovernanceState
-
-# -----------------------------
-# Founder (Phase A authority)
-# -----------------------------
-FOUNDER_UID = "bitcoinwasjustthebeginning@gmail.com"
-
-# -----------------------------
-# Logging bootstrap
-# -----------------------------
-def _setup_logging(cfg):
-    level_str = (cfg.get("logging", {}).get("level", "INFO") or "INFO").upper()
-    lvl = getattr(logging, level_str, logging.INFO)
-    logging.basicConfig(level=lvl, format="%(message)s")
-    return logging.getLogger("weall")
-
-log = logging.getLogger("weall")  # will be set in __init__
-
-# -----------------------------
-# Proof-of-Humanity action requirements (baseline)
-# -----------------------------
-POH_REQUIREMENTS = {
-    # Identity / PoH flow
-    "register": 0,
-    "poh_tier1_request": 0,
-    "poh_tier1_verify": 0,
-    "poh_tier2_verify": 1,
-    "poh_tier3_verify": 2,
-
-    # Ledger / Treasury
-    "ledger_create": 1,
-    "ledger_deposit": 1,
-    "ledger_transfer": 1,
-    "treasury_deposit": 2,
-    "treasury_withdraw": 3,
-
-    # Content
-    "post_create": 1,
-    "comment_create": 1,
-    "dispute_create": 2,
-    "dispute_resolve": 3,
-
-    # Messaging
-    "message_send": 1,
-    "message_read": 1,
-
-    # Governance
-    "propose": 3,
-    "vote": 2,
-    "enact": 3,
-    "amend_dsl": 3,
-    "amend_code": 3,
-
-    # Validator / consensus / epochs
-    "juror": 3,
-    "validator_finalize": 3,
-    "epoch_advance": 3,
-
-    # System
-    "backup_state": 2,
-    "restore_state": 3,
-}
-
-# -----------------------------
-# Crypto (messaging + signatures)
-# -----------------------------
-try:
-    import ipfshttpclient
-except Exception:
-    ipfshttpclient = None
-
-from cryptography.hazmat.primitives.asymmetric import rsa, padding, ed25519
-from cryptography.hazmat.primitives import hashes, serialization as ser
+log = logging.getLogger("weall.executor")
 
 
-def generate_keypair():
-    """RSA keypair for messaging encryption."""
-    priv = rsa.generate_private_key(public_exponent=65537, key_size=2048)
-    return priv, priv.public_key()
+# ------------------------------------------------------------
+# Helpers / persistence
+# ------------------------------------------------------------
+def _repo_root() -> str:
+    # this file lives in weall_node/ ; repo root = parent
+    return os.path.abspath(os.path.join(os.path.dirname(__file__), ".."))
 
 
-def encrypt_message(pub_key, message: str) -> bytes:
-    return pub_key.encrypt(
-        message.encode(),
-        padding.OAEP(
-            mgf=padding.MGF1(algorithm=hashes.SHA256()),
-            algorithm=hashes.SHA256(),
-            label=None,
-        ),
-    )
+def _state_path() -> str:
+    return os.path.join(_repo_root(), "weall_state.json")
 
 
-def decrypt_message(priv_key, ciphertext: bytes) -> str:
-    return priv_key.decrypt(
-        ciphertext,
-        padding.OAEP(
-            mgf=padding.MGF1(algorithm=hashes.SHA256()),
-            algorithm=hashes.SHA256(),
-            label=None,
-        ),
-    ).decode()
+def _now() -> int:
+    return int(time.time())
 
 
-# ===================================================
-# Executor
-# ===================================================
+def _block_hash(header: dict) -> str:
+    """Return a deterministic SHA-256 block id from a block header."""
+    # ensure deterministic JSON payload across nodes
+    payload = json.dumps(header, sort_keys=True, separators=(",", ":")).encode("utf-8")
+    return hashlib.sha256(payload).hexdigest()
+
+
+# ------------------------------------------------------------
+# Minimal P2P manager (keeps API working)
+# ------------------------------------------------------------
+class P2PManager:
+    def __init__(self) -> None:
+        self._peers: Set[str] = set()
+
+    def add_peer(self, peer_id: str) -> None:
+        if peer_id:
+            self._peers.add(str(peer_id))
+
+    def get_peer_list(self) -> List[str]:
+        return sorted(self._peers)
+
+
+# ------------------------------------------------------------
+# Governance placeholder
+# ------------------------------------------------------------
+@dataclass
+class GovernanceState:
+    proposals: List[Dict[str, Any]] = field(default_factory=list)
+
+
+# ------------------------------------------------------------
+# Consensus state (PBFT-lite / PoA-lite)
+# ------------------------------------------------------------
+class ConsensusState:
+    def __init__(self) -> None:
+        self.validators: Set[str] = set()
+        self.quorum_fraction: float = 0.67
+        # proposal_id -> {txs, proposer, votes:set, ts, status}
+        self.proposals: Dict[str, dict] = {}
+        # simple rewards ledger
+        self.rewards: Dict[str, float] = {}
+
+    def has_quorum(self, votes: Set[str]) -> bool:
+        n = max(1, len(self.validators))
+        return len(votes) / n >= self.quorum_fraction
+
+
+# ------------------------------------------------------------
+# Core executor
+# ------------------------------------------------------------
 class WeAllExecutor:
-    STATE_FILE = "executor_state.json"
-    LEDGER_FILE = "ledger.json"
+    def mine_block(self, payload: Optional[dict] = None) -> Dict[str, Any]:
+        """
+        DEV helper: mine a single block in a single-node environment.
 
-    def __init__(self, dsl_file: str, poh_requirements: Optional[dict] = None):
-        self.start_ts = time.time()
-        self.dsl_file = dsl_file
-        self.repo_root = str(pathlib.Path(__file__).resolve().parents[1])
+        Keeps older API calls like `executor.mine_block()` working by:
+        - Optionally enqueuing `payload` into the mempool
+        - Ensuring the local node_id is a validator
+        - Proposing a block
+        - Self-voting to reach quorum and finalize
+        """
+        # Optionally push a tx into the mempool
+        if payload:
+            try:
+                self.add_tx(payload)
+            except Exception:
+                # Extremely defensive: fall back to raw mempool access
+                self.ledger.setdefault("mempool", []).append(payload)
 
-        # Load runtime config
-        self.cfg = load_config(self.repo_root)
-        global log
-        log = _setup_logging(self.cfg)
-
-        # Re-entrant lock for state safety
-        self.lock = threading.RLock()
-
-        self.poh_requirements = poh_requirements or POH_REQUIREMENTS
-
-        # Core subsystems
-        self.ledger = WeCoinLedger()
-        self.chain = ChainState()
-        self.governance = GovernanceRuntime()
-
-        # Epochs
-        self.current_epoch = 0
-        self.epoch_duration = 24 * 3600
-        self.last_epoch_time = 0.0
-
-        # In-memory state
-        self.state: Dict[str, Any] = {
-            "users": {},                 # uid -> {poh_level, private_key, public_key, ed25519_priv, ed25519_pub(bytes)}
-            "posts": {},                 # pid -> {...}
-            "comments": {},              # cid -> {...}
-            "disputes": {},              # reserved for future
-            "treasury": defaultdict(float),
-            "messages": defaultdict(list),  # uid -> list of {"from","encrypted","ts"}
-            "proposals": {},             # pid -> {...}
-            "code_versions": defaultdict(list),
-            "governance_log": [],
-            # Hybrid PoH promotion state
-            "poh_promotions": {},        # target_uid -> {status, required, votes{juror:vote}}
-            "nfts": {},                  # uid -> {tier,cid,issued_at}
-            # Optional groups (if used by API/front-end)
-            "groups": {},
-        }
-        self.next_post_id = 1
-        self.next_comment_id = 1
-        self.next_proposal_id = 1
-
-        # Policy from config, with sensible defaults
-        self.config = {
-            "tier3_quorum_fraction": float(self.cfg["governance"]["tier3_quorum_fraction"]),
-            "tier3_yes_fraction": float(self.cfg["governance"]["tier3_yes_fraction"]),
-            "editable_roots": self.cfg["runtime"]["editable_roots"],
-            "backup_dir": self.cfg["runtime"]["backup_dir"],
-            "require_ipfs": bool(self.cfg["ipfs"]["require_ipfs"]),
-        }
-        pathlib.Path(self.repo_root, self.config["backup_dir"]).mkdir(exist_ok=True)
-
-        # Optional SQLite store (atomic writes)
-        self._store = None
-        if self.cfg["persistence"]["driver"] == "sqlite":
-            from weall_node.storage.sqlite_store import SQLiteStore
-            self._store = SQLiteStore(os.path.join(self.repo_root, self.cfg["persistence"]["sqlite_path"]))
-
-        # Optional IPFS (dev fallback always available)
-        self.ipfs = None
+        # Ensure this node is treated as a validator for local dev
+        node_id = getattr(self, "node_id", "local")
         try:
-            if ipfshttpclient and self.config["require_ipfs"]:
-                self.ipfs = ipfshttpclient.connect()
-        except Exception as e:
-            log.warning(f"[IPFS] connection failed: {e}")
+            self.cons.validators.add(node_id)
+        except Exception:
+            return {"ok": False, "error": "consensus_unavailable"}
 
-        # Dev IPFS content store for tests
-        self._dev_ipfs: Dict[str, bytes] = {}
+        # Propose a block with pending txs
+        res = self.propose_block(node_id)
+        if not res.get("ok"):
+            return res
 
-        # Load persisted chain and state
-        self.chain.load(os.path.join(self.repo_root, "chain.json"))
-        self.load_state()
+        proposal_id = res.get("proposal_id")
+        if not proposal_id:
+            return {"ok": False, "error": "no_proposal_id"}
 
-        # Autosave thread
-        self._stop = threading.Event()
-        self._autosave = threading.Thread(target=self._autosave_loop, daemon=True)
-        self._autosave.start()
+        # Self-vote to finalize in a single-node context
+        vres = self.vote_block(node_id, proposal_id)
+        if not vres.get("ok"):
+            return vres
 
-    # -----------------------------
-    # Utility
-    # -----------------------------
-    @staticmethod
-    def sha256_hex(b: bytes) -> str:
-        return hashlib.sha256(b).hexdigest()
-
-    def get_required_poh(self, action: str) -> int:
-        return int(self.poh_requirements.get(action, 3))
-
-    def _user_level(self, uid: str) -> int:
-        u = self.state["users"].get(uid)
-        return int(u.get("poh_level", 0)) if u else 0
-
-    def _whitelisted(self, relpath: str) -> bool:
-        if relpath.startswith("/") or ".." in pathlib.PurePosixPath(relpath).parts:
-            return False
-        p = pathlib.Path(relpath)
-        return any(str(p).startswith(root + "/") or str(p) == root for root in self.config["editable_roots"])
-
-    def _abs(self, relpath: str) -> str:
-        return str(pathlib.Path(self.repo_root, relpath).resolve())
-
-    def _ensure_account(self, uid: str):
-        """Ensure a ledger account exists for user (compatible with LedgerState)."""
-        if hasattr(self.ledger, "accounts"):
-            self.ledger.accounts.setdefault(uid, 0.0)
-
-    # -----------------------------
-    # Persistence
-    # -----------------------------
-    def _serializable_state(self) -> Dict[str, Any]:
-        # Strip un-serializable keys; keep Ed25519 pub for signatures
-        safe_users = {}
-        for uid, meta in self.state["users"].items():
-            ed_pub = meta.get("ed25519_pub")
-            safe_users[uid] = {
-                "poh_level": int(meta.get("poh_level", 0)),
-                "ed25519_pub": ed_pub.hex() if isinstance(ed_pub, (bytes, bytearray)) else None,
-            }
+        chain = self.ledger.get("chain") or []
+        block = chain[-1] if chain else None
         return {
-            "users": safe_users,
-            "posts": self.state["posts"],
-            "comments": self.state["comments"],
-            "disputes": self.state["disputes"],
-            "treasury": dict(self.state["treasury"]),
-            "messages": {u: [{"from": m["from"], "encrypted": None, "ts": m["ts"]} for m in msgs]
-                         for u, msgs in self.state["messages"].items()},
-            "proposals": self.state["proposals"],
-            "code_versions": self.state["code_versions"],
-            "governance_log": self.state["governance_log"],
-            "epoch": self.current_epoch,
-            "last_epoch_time": self.last_epoch_time,
-            "poh_promotions": self.state.get("poh_promotions", {}),
-            "nfts": self.state.get("nfts", {}),
-            "groups": self.state.get("groups", {}),
+            "ok": True,
+            "block": block,
+            "proposal_id": proposal_id,
+            "votes": vres.get("votes"),
         }
 
-    def save_state(self):
-        with self.lock:
-            state = self._serializable_state()
-            if self._store:
-                self._store.set_json("executor_state", state)
-            else:
-                try:
-                    with open(os.path.join(self.repo_root, self.STATE_FILE), "w") as f:
-                        json.dump(state, f, indent=2)
-                except Exception as e:
-                    log.error(f"[save_state] {e}")
-            # Always persist chain json for tests
-            self.chain.save(os.path.join(self.repo_root, "chain.json"))
+    def __init__(self) -> None:
+        self.path = _state_path()
+        self.ledger: Dict[str, Any] = self._load_or_init_ledger()
+        self.node_id: str = self._ensure_node_id()
+        self.p2p = P2PManager()
+        self.governance = GovernanceState()
+        self.pool_split = {
+            "validators": 0.25,
+            "jurors": 0.25,
+            "creators": 0.25,
+            "storage": 0.10,
+            "treasury": 0.15,
+        }
+        self.blocks_per_epoch = 100
+        self.halving_interval_epochs = max(1, 210000 // self.blocks_per_epoch)
 
-    def load_state(self):
-        with self.lock:
-            if self._store:
-                data = self._store.get_json("executor_state", {})
-            else:
-                path = os.path.join(self.repo_root, self.STATE_FILE)
-                if not os.path.exists(path):
-                    return
-                try:
-                    with open(path, "r") as f:
-                        data = json.load(f)
-                except Exception as e:
-                    log.error(f"[load_state] {e}")
-                    return
+        self.cons = ConsensusState()
+        self._bootstrap_consensus_from_config()
 
-            s = data or {}
-            # basic structures
-            self.state["posts"] = s.get("posts", {})
-            self.state["comments"] = s.get("comments", {})
-            self.state["disputes"] = s.get("disputes", {})
-            self.state["proposals"] = s.get("proposals", {})
-            self.state["governance_log"] = s.get("governance_log", [])
-            self.state["code_versions"] = defaultdict(list, s.get("code_versions", {}))
-            self.state["messages"] = defaultdict(list, self.state["messages"])
-            self.state["treasury"] = defaultdict(float, s.get("treasury", {}))
-            self.state["poh_promotions"] = s.get("poh_promotions", {})
-            self.state["nfts"] = s.get("nfts", {})
-            self.state["groups"] = s.get("groups", {})
+        # Epoch / tokenomics runtime (WeCoin) + genesis / GSM params
+        self.current_epoch: int = 0
+        # Will be overridden by genesis if present
+        self.bootstrap_mode: bool = False
+        self.min_validators: int = 0
 
-            # Users: restore PoH level + ed25519 pub only; RSA keys remain ephemeral
-            for uid, meta in s.get("users", {}).items():
-                if uid not in self.state["users"]:
-                    ed_pub_hex = meta.get("ed25519_pub")
-                    ed_pub = bytes.fromhex(ed_pub_hex) if ed_pub_hex else None
-                    self.state["users"][uid] = {
-                        "poh_level": int(meta.get("poh_level", 0)),
-                        "private_key": None,
-                        "public_key": None,
-                        "ed25519_priv": None,
-                        "ed25519_pub": ed_pub,
-                    }
-
-            self.current_epoch = int(s.get("epoch", 0))
-            self.last_epoch_time = float(s.get("last_epoch_time", 0.0))
-
-    def reset_state(self):
-        with self.lock:
-            self.state = {
-                "users": {},
-                "posts": {},
-                "comments": {},
-                "disputes": {},
-                "treasury": defaultdict(float),
-                "messages": defaultdict(list),
-                "proposals": {},
-                "code_versions": defaultdict(list),
-                "governance_log": [],
-                "poh_promotions": {},
-                "nfts": {},
-                "groups": {},
-            }
-            self.ledger = WeCoinLedger()
-            self.chain = ChainState()
-            self.governance = GovernanceRuntime()
-            self.current_epoch = 0
-            self.last_epoch_time = 0.0
-            self.start_ts = time.time()
-            self.save_state()
-
-    def _autosave_loop(self):
-        while not self._stop.is_set():
-            time.sleep(120)
-            self.save_state()
-
-    def stop(self):
-        """Preferred graceful stop (compatible with API)."""
-        self._stop.set()
         try:
-            self._autosave.join(timeout=2.0)
+            from weall_node.weall_runtime.ledger import WeCoinLedger
+            self.wecoin = WeCoinLedger()
+        except Exception:
+            # Soft-fail: keep node running even if tokenomics runtime is missing
+            self.wecoin = None  # type: ignore[assignment]
+
+        # Load genesis / GSM settings if available
+        try:
+            from weall_node.consensus.params import load_genesis_params
+            self.genesis = load_genesis_params()
+        except Exception:
+            self.genesis = {}
+
+        g = self.genesis or {}
+        # GSM / bootstrap mode
+        self.bootstrap_mode = bool(g.get("gsm_active", False))
+        self.min_validators = int(g.get("min_validators", 0) or 0)
+
+        # Allow genesis to override blocks_per_epoch
+        g_bpe = g.get("blocks_per_epoch")
+        if g_bpe:
+            try:
+                self.blocks_per_epoch = int(g_bpe)
+            except Exception:
+                pass
+
+        # Apply pool split to WeCoin runtime, if configured
+        g_split = g.get("pool_split") or {}
+        if g_split:
+            try:
+                self.set_pool_split(g_split)
+            except Exception:
+                pass
+
+        self.current_block_height = len(self.ledger.get("chain", []))
+
+    # ----------------------- persistence -----------------------
+    def _load_or_init_ledger(self) -> Dict[str, Any]:
+        try:
+            if os.path.exists(self._state_path_local()):
+                with open(self._state_path_local(), "r") as f:
+                    data = json.load(f)
+                    if isinstance(data, dict):
+                        data.setdefault("chain", [])
+                        data.setdefault("mempool", [])
+                        data.setdefault("events", [])
+                        data.setdefault("balances", {})
+                        data.setdefault("users", {})
+                        data.setdefault("messages", {})
+                        return data
+        except Exception as e:
+            log.warning(f"State load failed, fresh start: {e}")
+        return {
+            "chain": [],
+            "mempool": [],
+            "events": [],
+            "balances": {},
+            "users": {},
+            "messages": {},
+        }
+
+    def _state_path_local(self) -> str:
+        # indirection for easier testing
+        return self.path
+
+    def save_state(self) -> Dict[str, Any]:
+        try:
+            with open(self._state_path_local(), "w") as f:
+                json.dump(self.ledger, f, indent=2, sort_keys=False)
+        except Exception as e:
+            log.error(f"Failed to save state: {e}")
+        return {"ok": True}
+
+    def load_state(self) -> Dict[str, Any]:
+        self.ledger = self._load_or_init_ledger()
+        self.current_block_height = len(self.ledger.get("chain", []))
+        return {"ok": True, "height": self.current_block_height}
+
+    # ----------------------- identity --------------------------
+    def _ensure_node_id(self) -> str:
+        nid = self.ledger.get("node_id")
+        if not nid:
+            nid = "node:" + uuid.uuid4().hex[:12]
+            self.ledger["node_id"] = nid
+            self.save_state()
+        return nid
+
+    # ----------------------- config / consensus bootstrap -------
+    def _bootstrap_consensus_from_config(self) -> None:
+        """
+        Load validators & quorum from weall_config.yaml when available.
+        Fallback: single-validator (this node) with quorum=1.0 (dev-friendly).
+        """
+        try:
+            from weall_node.config import load_config
+        except Exception:
+            load_config = None
+
+        if not load_config:
+            self.cons.validators.add(self.node_id)
+            self.cons.quorum_fraction = 1.0
+            return
+
+        try:
+            cfg = load_config(repo_root=_repo_root()) or {}
+            c = cfg.get("consensus", {})
+            qf = c.get("quorum_fraction", 1.0)
+            vals = c.get("validators") or []
+            self.cons.quorum_fraction = float(qf)
+            for v in vals:
+                if isinstance(v, str) and v:
+                    self.cons.validators.add(v)
+            if not self.cons.validators:
+                # default to self only if none set
+                self.cons.validators.add(self.node_id)
+            log.info(
+                f"[consensus] validators={len(self.cons.validators)} quorum={self.cons.quorum_fraction}"
+            )
+        except Exception as e:
+            log.warning(
+                f"[consensus] config load failed ({e}); falling back to single-validator dev mode"
+            )
+            self.cons.validators.add(self.node_id)
+            self.cons.quorum_fraction = 1.0
+
+    # ----------------------- tx intake -------------------------
+    def add_tx(self, payload: dict) -> Dict[str, Any]:
+        self.ledger.setdefault("mempool", []).append(payload)
+        return {"ok": True, "mempool_len": len(self.ledger["mempool"])}
+
+    # ----------------------- consensus: propose/vote/finalize ---
+    def propose_block(self, proposer_id: str) -> Dict[str, Any]:
+        mem = self.ledger.setdefault("mempool", [])
+        if not mem:
+            return {"ok": False, "error": "mempool_empty"}
+        txs = mem[:]
+        mem.clear()
+        pid = str(uuid.uuid4())
+        votes: Set[str] = set()
+        if proposer_id in self.cons.validators:
+            votes.add(proposer_id)
+        self.cons.proposals[pid] = {
+            "txs": txs,
+            "proposer": proposer_id,
+            "votes": votes,
+            "ts": _now(),
+            "status": "proposed",
+        }
+        log.info(
+            f"[consensus] proposed pid={pid} txs={len(txs)} proposer={proposer_id} votes={len(votes)}"
+        )
+        if self.cons.has_quorum(votes):
+            self._finalize_block(pid)
+        return {"ok": True, "proposal_id": pid, "tx_count": len(txs)}
+
+    def vote_block(self, validator_id: str, proposal_id: str) -> Dict[str, Any]:
+        if validator_id not in self.cons.validators:
+            return {"ok": False, "error": "not_a_validator"}
+        prop = self.cons.proposals.get(proposal_id)
+        if not prop or prop.get("status") != "proposed":
+            return {"ok": False, "error": "bad_proposal"}
+        prop["votes"].add(validator_id)
+        log.info(
+            f"[consensus] vote pid={proposal_id} voter={validator_id} votes={len(prop['votes'])}"
+        )
+        if self.cons.has_quorum(prop["votes"]):
+            self._finalize_block(proposal_id)
+        return {"ok": True, "votes": len(prop["votes"])}
+
+    # Back-compat alias
+    def attest_block(self, validator_id: str, proposal_id: str) -> Dict[str, Any]:
+        return self.vote_block(validator_id, proposal_id)
+
+    def list_proposals(self) -> Dict[str, Any]:
+        out: Dict[str, Any] = {}
+        for pid, p in self.cons.proposals.items():
+            out[pid] = {
+                "status": p.get("status"),
+                "tx_count": len(p.get("txs", [])),
+                "proposer": p.get("proposer"),
+                "votes": sorted(list(p.get("votes", []))),
+                "ts": p.get("ts"),
+            }
+        return out
+
+    def _finalize_block(self, proposal_id: str) -> None:
+        prop = self.cons.proposals.get(proposal_id)
+        if not prop or prop.get("status") != "proposed":
+            return
+        chain = self.ledger.setdefault("chain", [])
+        prev_block_id = (
+            chain[-1].get("block_id")
+            if chain and isinstance(chain[-1], dict)
+            else None
+        )
+        height = len(chain)
+        votes = sorted(list(prop["votes"]))
+        header = {
+            "height": height,
+            "time": _now(),
+            "proposer": prop["proposer"],
+            "votes": votes,
+            "prev_block_id": prev_block_id,
+        }
+        block_id = _block_hash(header)
+        block = {
+            "block_id": block_id,
+            **header,
+            "txs": prop["txs"],
+        }
+        self._apply_block(block)
+        chain.append(block)
+        prop["status"] = "committed"
+        self._reward(block)
+        self.save_state()
+        self.current_block_height = len(chain)
+
+        # Epoch advancement + WeCoin rewards (if configured)
+        try:
+            blocks_per_epoch = int(getattr(self, "blocks_per_epoch", 0) or 0)
+        except Exception:
+            blocks_per_epoch = 0
+        if blocks_per_epoch > 0:
+            # heights are zero-based; use height+1 when checking epoch boundary
+            if (block["height"] + 1) % blocks_per_epoch == 0:
+                # Initialize for older state files if missing
+                if not hasattr(self, "current_epoch"):
+                    self.current_epoch = 0  # type: ignore[attr-defined]
+                self.current_epoch += 1  # type: ignore[attr-defined]
+
+                winners = {}
+                epoch_reward = None
+                wecoin = getattr(self, "wecoin", None)
+                if wecoin is not None and hasattr(wecoin, "distribute_epoch_rewards"):
+                    try:
+                        bootstrap_mode = bool(getattr(self, "bootstrap_mode", False))
+                        winners = wecoin.distribute_epoch_rewards(  # type: ignore[call-arg]
+                            int(self.current_epoch),
+                            bootstrap_mode=bootstrap_mode,
+                        )
+                        if hasattr(wecoin, "current_epoch_reward"):
+                            epoch_reward = wecoin.current_epoch_reward()
+                    except Exception as e:
+                        log.warning("Epoch reward distribution failed: %s", e)
+
+                events = self.ledger.setdefault("events", [])
+                events.append(
+                    {
+                        "type": "epoch",
+                        "epoch": int(getattr(self, "current_epoch", 0)),
+                        "block_height": int(block["height"]),
+                        "winners": winners,
+                        "epoch_reward": epoch_reward,
+                        "ts": _now(),
+                    }
+                )
+
+        # Check whether GSM (bootstrap mode) should expire
+        try:
+            self._check_gsm_expiry(block)
+        except Exception as e:
+            log.warning("Failed GSM expiry check: %s", e)
+
+        # Apply WeCoin block rewards (per-block lottery across all pools)
+        core = getattr(self, "exec", self)
+        wecoin = getattr(core, "wecoin", None)
+        if wecoin is not None and hasattr(wecoin, "distribute_block_rewards"):
+            try:
+                height = int(block.get("height", 0))
+                genesis = getattr(self, "genesis", {}) or {}
+                blocks_per_epoch = int(genesis.get("blocks_per_epoch") or 100)
+                epoch = height // max(1, blocks_per_epoch)
+                wecoin.distribute_block_rewards(
+                    block_height=height,
+                    epoch=epoch,
+                    blocks_per_epoch=blocks_per_epoch,
+                    bootstrap_mode=getattr(self, "bootstrap_mode", False),
+                )
+            except Exception as e:
+                log.warning("WeCoin block reward distribution failed: %s", e)
+
+        log.info(
+            f"[consensus] committed height={block['height']} txs={len(block['txs'])} id={block_id}"
+        )
+
+    def _apply_block(self, block: dict) -> None:
+        for tx in block.get("txs", []):
+            try:
+                self._apply_tx(tx)
+            except Exception as e:
+                log.exception(f"[apply] tx failed: {e}")
+
+    def _apply_tx(self, tx: dict) -> None:
+        """
+        Minimal dispatcher that keeps API routes functional.
+        If you have a richer runtime (process_tx), call it here.
+        """
+        # Hook to richer runtime if present
+        if hasattr(self, "process_tx") and callable(getattr(self, "process_tx")):
+            self.process_tx(tx)
+            return
+
+        # PoH events (used by poh.py)
+        if "poh" in tx:
+            poh = tx["poh"]
+            tier = int(poh.get("tier", 0))
+            tname = f"POH_TIER{tier}_VERIFY" if tier else "POH_EVENT"
+            evt = {
+                "type": tname,
+                "user": poh.get("user"),
+                "approved": True,
+                "ts": _now(),
+            }
+            self.ledger.setdefault("events", []).append(evt)
+            return
+
+        # Transfers
+        if "transfer" in tx:
+            t = tx["transfer"]
+            self._transfer_internal(t["sender"], t["recipient"], float(t["amount"]))
+            return
+
+        # Default generic event
+        self.ledger.setdefault("events", []).append(
+            {"type": "TX", "tx": tx, "ts": _now()}
+        )
+
+    # ------------------------------------------------------------
+    # WEC balance + transfer helpers
+    # ------------------------------------------------------------
+    def _ensure_balance_map(self) -> dict:
+        """
+        Ensure self.ledger has a 'balances' dict and return it.
+
+        This is our canonical per-user WEC balance store at the executor
+        level, with optional compatibility for older 'accounts' maps.
+        """
+        led = getattr(self, "ledger", None)
+        if led is None:
+            led = {}
+            self.ledger = led
+
+        balances = led.get("balances")
+        if not isinstance(balances, dict):
+            balances = {}
+            led["balances"] = balances
+
+        return balances
+
+    def get_balance(self, user_id: str) -> float:
+        """
+        Return the current WEC balance for a user.
+
+        Falls back to legacy ledger['accounts'] if 'balances' doesn't
+        have an entry yet.
+        """
+        user_id = (user_id or "").strip()
+        if not user_id:
+            return 0.0
+
+        balances = self._ensure_balance_map()
+        bal = balances.get(user_id, None)
+
+        # Back-compat with older 'accounts' dict, if present
+        if bal is None:
+            try:
+                accounts = self.ledger.get("accounts") or {}
+                bal = accounts.get(user_id, 0.0)
+            except Exception:
+                bal = 0.0
+
+        try:
+            return float(bal)
+        except Exception:
+            return 0.0
+
+    def _set_balance(self, user_id: str, amount: float) -> None:
+        """
+        Internal helper: set a user's WEC balance.
+
+        Writes into ledger['balances'] only; if you later add a dedicated
+        WeCoin runtime, you can mirror into that here as well.
+        """
+        user_id = (user_id or "").strip()
+        if not user_id:
+            return
+
+        balances = self._ensure_balance_map()
+        try:
+            balances[user_id] = float(amount)
+        except Exception:
+            balances[user_id] = 0.0
+
+    def credit(self, user_id: str, amount: float) -> float:
+        """
+        Increase a user's balance by `amount`. Returns the new balance.
+
+        This is a trusted dev-only "mint" at the moment.
+        """
+        user_id = (user_id or "").strip()
+        if not user_id:
+            return 0.0
+
+        try:
+            amount = float(amount)
+        except Exception:
+            return self.get_balance(user_id)
+
+        if amount <= 0:
+            return self.get_balance(user_id)
+
+        new_balance = self.get_balance(user_id) + amount
+        self._set_balance(user_id, new_balance)
+
+        try:
+            self.save_state()
         except Exception:
             pass
-        self.save_state()
 
-    # Compatibility helpers for older API code that referenced autosave_start/stop
-    def autosave_start(self):  # no-op: started in __init__
-        return True
+        return new_balance
 
-    def autosave_stop(self):
-        self.stop()
-
-    # -----------------------------
-    # Dev IPFS helpers (always available)
-    # -----------------------------
-    def _ipfs_add_str(self, content: str) -> str:
-        if not self.ipfs or not self.config.get("require_ipfs"):
-            b = content.encode()
-            cid = f"dev-{self.sha256_hex(b)}"
-            self._dev_ipfs[cid] = b
-            return cid
-        return self.ipfs.add_str(content)
-
-    def _ipfs_cat(self, cid: str) -> bytes:
-        if (not self.ipfs) or (not self.config.get("require_ipfs")):
-            if cid in self._dev_ipfs:
-                return self._dev_ipfs[cid]
-            raise RuntimeError("Dev IPFS: content not found")
-        data = self.ipfs.cat(cid)
-        return data if isinstance(data, (bytes, bytearray)) else bytes(data)
-
-    # -----------------------------
-    # Users & PoH (Tier 1 convenience)
-    # -----------------------------
-    def register_user(self, uid: str, poh_level=1):
-        with self.lock:
-            if uid in self.state["users"]:
-                return {"ok": False, "error": "user_already_exists"}
-            priv, pub = generate_keypair()
-            ed_priv = ed25519.Ed25519PrivateKey.generate()
-            ed_pub = ed_priv.public_key().public_bytes(
-                encoding=ser.Encoding.Raw, format=ser.PublicFormat.Raw
-            )
-            self.state["users"][uid] = {
-                "poh_level": int(poh_level),
-                "private_key": priv,
-                "public_key": pub,
-                "ed25519_priv": ed_priv,
-                "ed25519_pub": ed_pub,
-            }
-            self._ensure_account(uid)
-            self.save_state()
-            return {"ok": True}
-
-    def request_tier1(self, user: str, email: str):
-        """Minimal Tier1 request endpoint used by API tests. Marks/ensures tier1."""
-        with self.lock:
-            if user not in self.state["users"]:
-                # Create user shell with Tier1 but no keys (API flow may promote later)
-                self.state["users"][user] = {
-                    "poh_level": 1,
-                    "private_key": None,
-                    "public_key": None,
-                    "ed25519_priv": None,
-                    "ed25519_pub": None,
-                }
-            else:
-                # Ensure at least Tier1
-                if int(self.state["users"][user].get("poh_level", 0)) < 1:
-                    self.state["users"][user]["poh_level"] = 1
-            self._ensure_account(user)
-            self.save_state()
-            # return mock code-like response (kept simple)
-            return {"ok": True, "tier": 1, "user": user, "message": f"Tier1 requested for {user}"}
-
-    # -----------------------------
-    # Messaging
-    # -----------------------------
-    def send_message(self, from_user: str, to_user: str, msg: str):
-        with self.lock:
-            if from_user not in self.state["users"] or to_user not in self.state["users"]:
-                return {"ok": False, "error": "user_not_registered"}
-            to_pub = self.state["users"][to_user].get("public_key")
-            if not to_pub:
-                return {"ok": False, "error": "no_public_key"}
-            cipher = encrypt_message(to_pub, msg)
-            self.state["messages"][to_user].append(
-                {"from": from_user, "encrypted": cipher, "ts": time.time()}
-            )
-            self.save_state()
-            return {"ok": True}
-
-    def read_messages(self, user_id: str) -> List[dict]:
-        with self.lock:
-            if user_id not in self.state["users"]:
-                return []
-            priv = self.state["users"][user_id].get("private_key")
-            inbox = []
-            for m in self.state["messages"].get(user_id, []):
-                try:
-                    plain = decrypt_message(priv, m["encrypted"]) if priv else "<no_private_key>"
-                except Exception:
-                    plain = "<decryption failed>"
-                inbox.append({"from": m["from"], "text": plain, "ts": m["ts"]})
-            return inbox
-
-    # -----------------------------
-    # Content
-    # -----------------------------
-    def create_post(self, user: str, content: str, tags=None, ipfs_cid: str | None = None):
-        """Create a post with optional IPFS CID/media attachment."""
-        with self.lock:
-            if user not in self.state["users"]:
-                return {"ok": False, "error": "user_not_found"}
-
-            pid = self.next_post_id
-            self.next_post_id += 1
-
-            post = {
-                "user": user,
-                "content": content,
-                "tags": tags or [],
-                "likes": 0,
-            }
-
-            # allow attached IPFS content if provided
-            if ipfs_cid:
-                post["ipfs_cid"] = ipfs_cid
-
-            self.state["posts"][pid] = post
-            self.save_state()
-            return {"ok": True, "post_id": pid}
-
-    def create_comment(self, user: str, post_id: int, content: str):
-        with self.lock:
-            if user not in self.state["users"]:
-                return {"ok": False, "error": "user_not_found"}
-            if post_id not in self.state["posts"]:
-                return {"ok": False, "error": "post_not_found"}
-            cid = self.next_comment_id
-            self.next_comment_id += 1
-            self.state["comments"][cid] = {"user": user, "post_id": post_id, "content": content}
-            self.save_state()
-            return {"ok": True, "comment_id": cid}
-
-    # -----------------------------
-    # Chain / mempool / validator / blocks
-    # -----------------------------
-    def record_to_mempool(self, event: dict):
-        with self.lock:
-            self.chain.record_to_mempool(event)
-            self.save_state()
-            return {"ok": True, "size": len(self.chain.get_mempool())}
-
-    def select_validator(self, seed: int = 0) -> str:
-        with self.lock:
-            tier3 = [u for u, meta in self.state["users"].items() if int(meta.get("poh_level", 0)) >= 3]
-            if not tier3:
-                return "x"
-            idx = seed % len(tier3)
-            return tier3[idx]
-
-    def finalize_block(self, validator_id: Optional[str] = None) -> dict:
-        with self.lock:
-            author = validator_id or self.select_validator(seed=int(time.time()))
-            block = self.chain.finalize_block(author)
-            self.save_state()
-            return block
-
-    # -----------------------------
-    # Epochs
-    # -----------------------------
-    def advance_epoch(self, force: bool = False):
-        with self.lock:
-            now = time.time()
-            if not force and (now - self.last_epoch_time) < self.epoch_duration:
-                return {"ok": False, "error": "epoch_not_elapsed"}
-            self.current_epoch += 1
-            self.last_epoch_time = now
-            # Distribute simple rewards based on epoch number (if implemented)
-            if hasattr(self.ledger, "distribute_epoch_rewards"):
-                self.ledger.distribute_epoch_rewards(int(self.current_epoch))
-            self.save_state()
-            return {"ok": True, "epoch": self.current_epoch}
-
-    # -----------------------------
-    # Governance
-    # -----------------------------
-    def propose_code_update(self, user: str, module_path: str, cid: str, checksum: str):
-        with self.lock:
-            pid = self.next_proposal_id
-            self.next_proposal_id += 1
-            self.state["proposals"][pid] = {
-                "proposer": user,
-                "module": module_path,
-                "cid": cid,
-                "checksum": checksum,
-                "status": "open",
-                "votes": {},  # user -> yes/no/abstain
-            }
-            self.save_state()
-            return {"ok": True, "proposal_id": pid}
-
-    def vote_on_proposal(self, user: str, pid: int, vote: str, signature: Optional[bytes] = None):
+    def debit(self, user_id: str, amount: float) -> float:
         """
-        Production supports signed votes; tests may omit signature.
-        Policy: If security.require_signed_votes == True and signature is provided, verify it.
-                If signature is None, accept for backward compatibility (tests).
+        Decrease a user's balance by `amount`.
+
+        Raises ValueError on insufficient funds. Returns new balance.
         """
-        with self.lock:
-            p = self.state["proposals"].get(pid)
-            if not p:
-                return {"ok": False, "error": "proposal_not_found"}
-            require_sig = bool(self.cfg["security"].get("require_signed_votes", False))
-            if require_sig and signature is not None:
-                u = self.state["users"].get(user)
-                if not u or not u.get("ed25519_pub"):
-                    return {"ok": False, "error": "no_signing_key"}
-                try:
-                    pub = ed25519.Ed25519PublicKey.from_public_bytes(u["ed25519_pub"])
-                    pub.verify(signature, f"vote:{pid}:{vote}".encode())
-                except Exception:
-                    return {"ok": False, "error": "invalid_signature"}
-            p["votes"][user] = vote
-            self.save_state()
-            return {"ok": True}
+        user_id = (user_id or "").strip()
+        if not user_id:
+            return 0.0
 
-    def close_proposal(self, pid: int):
-        with self.lock:
-            p = self.state["proposals"].get(pid)
-            if not p:
-                return {"ok": False, "error": "proposal_not_found"}
-            yes = sum(1 for v in p["votes"].values() if v == "yes")
-            total = sum(1 for v in p["votes"].values() if v in ("yes", "no"))
-            status = "failed"
-            if total > 0 and (yes / max(1, total)) >= self.config["tier3_yes_fraction"]:
-                status = "passed"
-            p["status"] = status
-            self.save_state()
-            return {"ok": True, "status": status}
-
-    def try_enact_proposal(self, user: str, pid: int):
-        with self.lock:
-            p = self.state["proposals"].get(pid)
-            if not p or p.get("status") != "passed":
-                return {"ok": False}
-            # Safe enactment (no-op by default): just record the event
-            self.state["governance_log"].append({
-                "pid": pid,
-                "module": p["module"],
-                "cid": p["cid"],
-                "checksum": p["checksum"],
-                "ts": time.time(),
-                "enacted_by": user,
-            })
-            self.save_state()
-            return {"ok": True}
-
-    # Convenience (used by API)
-    def list_proposals(self) -> List[dict]:
-        with self.lock:
-            out = []
-            for pid, p in sorted(self.state["proposals"].items()):
-                q = dict(p)
-                q["id"] = pid
-                out.append(q)
-            return out
-
-    # ============================================================
-    # Hybrid PoH Promotion (Founder-controlled Phase A → Jurors)
-    # ============================================================
-    def total_users(self) -> int:
-        return len(self.state.get("users", {}))
-
-    def required_jurors_for_tier3(self, total: int, requester: str) -> int:
-        """
-        Phase A (<20 users): only founder can approve; requester need == -1 means 'await founder'.
-        Founder requester always has need == 0 (can self-promote exactly once at bootstrap).
-        Phase B (20-99): 3 jurors
-        Phase C (100-249): 6 jurors
-        Phase D (>=250): 10 jurors
-        """
-        if requester == FOUNDER_UID:
-            return 0
-        if total < 20:
-            return -1  # founder-only approval
-        if total < 100:
-            return 3
-        if total < 250:
-            return 6
-        return 10
-
-    def request_tier3(self, user: str) -> dict:
-        with self.lock:
-            users = self.state.setdefault("users", {})
-            if user not in users:
-                return {"ok": False, "error": "user_not_registered"}
-            if int(users[user].get("poh_level", 0)) >= 3:
-                return {"ok": True, "message": "already_tier3"}
-
-            total = self.total_users()
-            need = self.required_jurors_for_tier3(total, user)
-
-            # Founder self-promotion at bootstrap (first time)
-            if user == FOUNDER_UID and need == 0 and total == 1:
-                users[user]["poh_level"] = 3
-                nft = self._mint_tier3_nft(user)
-                self.save_state()
-                return {"ok": True, "message": "founder_self_promoted", "nft": nft}
-
-            # Non-founders before 20 users → wait for founder approval
-            if need == -1:
-                req = self.state.setdefault("poh_promotions", {})
-                req[user] = {"status": "pending_founder", "required": 1, "votes": {}}
-                self.save_state()
-                return {"ok": True, "message": "awaiting_founder_video_verification"}
-
-            # Normal juror-based phases with zero needed (rare), immediate promote
-            if need == 0:
-                users[user]["poh_level"] = 3
-                nft = self._mint_tier3_nft(user)
-                self.save_state()
-                return {"ok": True, "message": "promoted_self_bootstrap", "nft": nft}
-
-            # Open a juror-based promotion case
-            req = self.state.setdefault("poh_promotions", {})
-            req[user] = {"status": "pending", "required": need, "votes": {}}
-            self.save_state()
-            return {"ok": True, "message": "promotion_opened", "required": need}
-
-    def founder_approve_tier3(self, founder: str, target: str) -> dict:
-        with self.lock:
-            if founder != FOUNDER_UID:
-                return {"ok": False, "error": "not_founder"}
-            users = self.state["users"]
-            if target not in users:
-                return {"ok": False, "error": "user_not_found"}
-            case = self.state.setdefault("poh_promotions", {}).get(target)
-            if not case or case.get("status") != "pending_founder":
-                return {"ok": False, "error": "no_pending_founder_request"}
-
-            users[target]["poh_level"] = 3
-            case["status"] = "approved_by_founder"
-            nft = self._mint_tier3_nft(target)
-            self.save_state()
-            return {"ok": True, "message": "founder_approved", "nft": nft}
-
-    def juror_vote_tier3(self, juror: str, target: str, vote: str) -> dict:
-        with self.lock:
-            if juror == target:
-                return {"ok": False, "error": "self_vote_not_allowed"}
-            if int(self.state["users"].get(juror, {}).get("poh_level", 0)) < 3:
-                return {"ok": False, "error": "juror_not_tier3"}
-
-            case = self.state.setdefault("poh_promotions", {}).get(target)
-            if not case or case.get("status") != "pending":
-                return {"ok": False, "error": "no_pending_request"}
-
-            if vote not in ("approve", "reject"):
-                return {"ok": False, "error": "invalid_vote"}
-
-            case["votes"][juror] = vote
-            approvals = sum(1 for v in case["votes"].values() if v == "approve")
-            required = int(case.get("required", 0))
-            if approvals >= required:
-                self.state["users"][target]["poh_level"] = 3
-                case["status"] = "approved"
-                nft = self._mint_tier3_nft(target)
-                self.save_state()
-                return {"ok": True, "status": "approved", "nft": nft}
-            self.save_state()
-            rejections = sum(1 for v in case["votes"].values() if v == "reject")
-            return {"ok": True, "status": "pending", "approvals": approvals, "rejections": rejections, "required": required}
-
-    def get_promotion_status(self, target: str) -> dict:
-        with self.lock:
-            case = self.state.setdefault("poh_promotions", {}).get(target)
-            level = int(self.state["users"].get(target, {}).get("poh_level", 0))
-            return {
-                "user": target,
-                "tier": level,
-                "case": case or None,
-                "required_now": self.required_jurors_for_tier3(self.total_users(), target),
-                "total_users": self.total_users(),
-            }
-
-    def _mint_tier3_nft(self, user: str) -> dict:
-        """
-        Creates a minimal Tier-3 attestation record and stores it via IPFS (or dev store).
-        Returns {"cid": "...", "tier": 3, "issued_at": ts}
-        """
-        payload = {
-            "type": "weall-tier3-attestation",
-            "user": user,
-            "tier": 3,
-            "issued_at": time.time(),
-            "chain_epoch": self.current_epoch,
-            "node": self.repo_root,
-        }
         try:
-            content = json.dumps(payload, separators=(",", ":"))
-            cid = self._ipfs_add_str(content)
+            amount = float(amount)
         except Exception:
-            cid = f"dev-nft-{int(time.time())}"
-        nft = {"cid": cid, "tier": 3, "issued_at": payload["issued_at"]}
-        nfts = self.state.setdefault("nfts", {})
-        nfts[user] = nft
-        return nft
+            return self.get_balance(user_id)
+
+        if amount <= 0:
+            return self.get_balance(user_id)
+
+        bal = self.get_balance(user_id)
+        if bal < amount:
+            raise ValueError("insufficient_funds")
+
+        new_balance = bal - amount
+        self._set_balance(user_id, new_balance)
+
+        try:
+            self.save_state()
+        except Exception:
+            pass
+
+        return new_balance
+
+    def transfer_wec(self, from_id: str, to_id: str, amount: float) -> dict:
+        """
+        Simple single-node WEC transfer.
+
+        This is a trusted executor call for now (no signatures). Later we
+        can upgrade it to build a tx and push it into the mempool.
+        """
+        from_id = (from_id or "").strip()
+        to_id = (to_id or "").strip()
+
+        # Basic parameter validation
+        if not from_id or not to_id:
+            return {"ok": False, "error": "invalid_transfer_params"}
+        if from_id == to_id:
+            return {"ok": False, "error": "cannot_send_to_self"}
+
+        try:
+            amount = float(amount)
+        except Exception:
+            return {"ok": False, "error": "invalid_amount"}
+
+        if amount <= 0:
+            return {"ok": False, "error": "amount_must_be_positive"}
+
+        # Debit then credit
+        try:
+            self.debit(from_id, amount)
+        except ValueError:
+            return {"ok": False, "error": "insufficient_funds"}
+        except Exception as e:
+            return {"ok": False, "error": f"debit_failed:{e!s}"}
+
+        try:
+            self.credit(to_id, amount)
+        except Exception as e:
+            # Best-effort rollback: put funds back on sender
+            try:
+                self.credit(from_id, amount)
+            except Exception:
+                pass
+            return {"ok": False, "error": f"credit_failed:{e!s}"}
+
+        return {
+            "ok": True,
+            "from": from_id,
+            "to": to_id,
+            "amount": float(amount),
+            "from_balance": self.get_balance(from_id),
+            "to_balance": self.get_balance(to_id),
+        }
+
+    def _reward(self, block: dict) -> None:
+        prop = block.get("proposer")
+        if prop:
+            self.cons.rewards[prop] = self.cons.rewards.get(prop, 0.0) + 1.0
+        for v in block.get("votes", []):
+            self.cons.rewards[v] = self.cons.rewards.get(v, 0.0) + 0.25
+
+        # Mirror consensus rewards into WeCoin validator tickets
+        wecoin = getattr(self, "wecoin", None)
+        if wecoin is not None and hasattr(wecoin, "add_ticket"):
+            try:
+                if prop:
+                    wecoin.add_ticket("validators", prop, weight=1.0)
+                for v in block.get("votes", []):
+                    wecoin.add_ticket("validators", v, weight=0.25)
+            except Exception as e:
+                log.warning("Failed to record validator tickets for epoch rewards: %s", e)
+
+    # ----------------- dev helper / legacy mining --------------
 
 
-__all__ = ["WeAllExecutor", "POH_REQUIREMENTS"]
+class _ExecFacade:
+    """
+    Lightweight facade around a WeAllExecutor instance.
+
+    - Exposes the core executor as .exec
+    - Delegates attribute access to the underlying executor so existing
+      code can use either executor.<attr> or executor.exec.<attr>.
+    """
+
+    def __init__(self, core):
+        self.exec = core
+
+    def __getattr__(self, name):
+        return getattr(self.exec, name)
+
+
+# Global singleton used everywhere
+executor = _ExecFacade(WeAllExecutor())

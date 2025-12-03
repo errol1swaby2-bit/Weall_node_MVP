@@ -40,6 +40,8 @@ class BlockTimeScheduler:
             time.sleep(self.interval)
             try:
                 winners = self.executor.advance_epoch()
-                print(f"[BlockTimeScheduler] Advanced epoch {self.executor.current_epoch}, winners={winners}")
+                print(
+                    f"[BlockTimeScheduler] Advanced epoch {self.executor.current_epoch}, winners={winners}"
+                )
             except Exception as e:
                 print(f"[BlockTimeScheduler] Error: {e}")

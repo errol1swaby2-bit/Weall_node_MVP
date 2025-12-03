@@ -11,15 +11,18 @@ from weall_node.weall_runtime.wallet import has_nft
 
 router = APIRouter(prefix="/operators", tags=["operators"])
 
+
 # ---------------------------------------------------------------
 # Helper: lazy-load executor_instance
 # ---------------------------------------------------------------
 def _get_executor():
     try:
         from weall_node.weall_api import executor_instance
+
         return executor_instance
     except Exception as e:
         raise RuntimeError(f"Executor not available: {e}")
+
 
 # ---------------------------------------------------------------
 # Routes
@@ -30,12 +33,16 @@ def opt_in_operator(user_id: str = Query(...)):
     Opt a user into the operator pool (requires PoH Tier-3).
     """
     if not has_nft(user_id, "PoH", min_level=3):
-        raise HTTPException(status_code=401, detail="PoH Tier-3 required to become operator")
+        raise HTTPException(
+            status_code=401, detail="PoH Tier-3 required to become operator"
+        )
 
     executor = _get_executor()
     result = executor.opt_in_operator(user_id)
     if not result.get("ok"):
-        raise HTTPException(status_code=400, detail=result.get("error", "Opt-in failed"))
+        raise HTTPException(
+            status_code=400, detail=result.get("error", "Opt-in failed")
+        )
     return {"ok": True, "message": "User added to operator pool"}
 
 
@@ -47,7 +54,9 @@ def opt_out_operator(user_id: str = Query(...)):
     executor = _get_executor()
     result = executor.opt_out_operator(user_id)
     if not result.get("ok"):
-        raise HTTPException(status_code=400, detail=result.get("error", "Opt-out failed"))
+        raise HTTPException(
+            status_code=400, detail=result.get("error", "Opt-out failed")
+        )
     return {"ok": True, "message": "User removed from operator pool"}
 
 
@@ -76,10 +85,12 @@ def operator_health():
             uid: {
                 "ok": stats.get("ok", 0),
                 "fail": stats.get("fail", 0),
-                "last_seen": stats.get("last", 0)
+                "last_seen": stats.get("last", 0),
             }
             for uid, stats in uptime.items()
         }
         return {"ok": True, "operators": report, "count": len(report)}
     except Exception as e:
-        raise HTTPException(status_code=500, detail=f"Failed to get operator health: {e}")
+        raise HTTPException(
+            status_code=500, detail=f"Failed to get operator health: {e}"
+        )

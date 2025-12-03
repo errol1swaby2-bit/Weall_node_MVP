@@ -10,13 +10,15 @@ import logging
 from fastapi import APIRouter, HTTPException, Query
 from pydantic import BaseModel, Field
 from weall_node.weall_runtime.storage import get_client
-from weall_node.weall_runtime.wallet import has_nft
+from ..weall_executor import executor
 
 router = APIRouter(prefix="/pin", tags=["pinning"])
 logger = logging.getLogger("pinning")
 
 if not logger.handlers:
-    logging.basicConfig(level=logging.INFO, format="%(asctime)s [%(levelname)s] %(message)s")
+    logging.basicConfig(
+        level=logging.INFO, format="%(asctime)s [%(levelname)s] %(message)s"
+    )
 
 
 # -------------------------------
@@ -63,7 +65,7 @@ async def pin_add(req: PinRequest):
 @router.delete("/remove")
 async def pin_remove(
     cid: str = Query(..., description="CID to unpin"),
-    user_id: str = Query(..., description="User performing unpin")
+    user_id: str = Query(..., description="User performing unpin"),
 ):
     """Unpin a CID from the local IPFS node."""
     _require_tier2(user_id)
@@ -88,3 +90,36 @@ def list_pins():
     except Exception as e:
         logger.exception("Failed to list pins: %s", e)
         raise HTTPException(status_code=500, detail=f"Failed to list pins: {e}")
+
+
+# --- local compatibility shim: has_nft(user_id, min_level=1) ---
+def has_nft(user_id: str, min_level: int = 1) -> bool:
+    """Check PoH/NFT level for a user using executor's state.
+    Tries executor.nfts first; then executor.ledger.get("nfts", {})."""
+    # Prefer an explicit accessor if your executor exposes one
+    fn = getattr(executor, "has_nft", None)
+    if callable(fn):
+        try:
+            return bool(fn(user_id, min_level))
+        except TypeError:
+            # maybe signature is has_nft(user_id) only
+            return bool(fn(user_id))
+
+    nfts = getattr(executor, "nfts", None)
+    if isinstance(nfts, dict):
+        try:
+            lvl = int(nfts.get(user_id, 0))
+            return lvl >= int(min_level)
+        except Exception:
+            pass
+
+    led = getattr(executor, "ledger", {})
+    if isinstance(led, dict):
+        n = led.get("nfts")
+        if isinstance(n, dict):
+            try:
+                lvl = int(n.get(user_id, 0))
+                return lvl >= int(min_level)
+            except Exception:
+                pass
+    return False
