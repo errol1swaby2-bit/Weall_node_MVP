@@ -1,246 +1,278 @@
-<!DOCTYPE html>
+<!doctype html>
 <html lang="en">
 <head>
-  <meta charset="UTF-8">
-  <title>WeAll — Profile</title>
+  <meta charset="utf-8">
+  <title>WeAll - User Profile</title>
   <meta name="viewport" content="width=device-width, initial-scale=1">
-  <link rel="stylesheet" href="/frontend/style.css?v=1762461479">
   <style>
     body {
-      background:#000;
-      color:#fff;
-      font-family:Arial, sans-serif;
-      margin:0;
-      padding:0;
+      margin: 0;
+      padding: 1.2rem;
+      font-family: system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+      background: #020617;
+      color: #f9fafb;
     }
-    header {
-      background:#111;
-      padding:12px 16px;
-      display:flex;
-      align-items:center;
-      justify-content:space-between;
-    }
-    header h2 { margin:0; font-size:1.2em; }
-    header a {
-      color:#2ecc71;
-      text-decoration:none;
-      font-weight:bold;
-      font-size:0.9em;
-    }
-    .container {
-      max-width:800px;
-      margin:auto;
-      padding:20px;
-    }
+    a { color: #22c55e; text-decoration: none; }
+    a:hover { text-decoration: underline; }
+    header { margin-bottom: 1rem; display: flex; align-items: center; gap: 0.5rem; }
+    header h1 { font-size: 1.6rem; margin: 0; }
+    .back-link { font-size: 0.9rem; }
+    .cards { display: flex; flex-direction: column; gap: 1rem; }
     .card {
-      background:#111;
-      border-radius:12px;
-      padding:16px;
-      margin-bottom:18px;
-      box-shadow:0 0 5px #222;
+      background: #020617;
+      border-radius: 12px;
+      padding: 1rem;
+      border: 1px solid #1f2937;
+      box-shadow: 0 8px 20px rgba(0,0,0,0.35);
     }
-    h3 { color:#2ecc71; margin-top:0; }
-    .stat { display:flex; justify-content:space-between; margin-bottom:8px; }
-    input {
-      width:100%;
-      background:#000;
-      border:1px solid #333;
-      border-radius:8px;
-      padding:8px;
-      color:#fff;
-      margin-top:6px;
+    .card h2 {
+      margin: 0 0 0.4rem;
+      font-size: 1.1rem;
     }
+    .card.poh h2,
+    .card.wallet h2,
+    .card.rep h2 { color: #22c55e; }
+    .label { font-weight: 600; font-size: 0.9rem; }
+    .value { font-size: 0.95rem; }
+    .row { margin-top: 0.3rem; }
     button {
-      background:#2ecc71;
-      border:none;
-      color:#000;
-      border-radius:8px;
-      padding:8px 12px;
-      font-weight:bold;
-      cursor:pointer;
-      margin-top:8px;
+      border: none;
+      border-radius: 999px;
+      padding: 0.45rem 0.9rem;
+      background: #22c55e;
+      color: #022c22;
+      font-weight: 600;
+      margin-top: 0.6rem;
     }
-    button:hover { background:#27ae60; }
-    .msg { color:#aaa; font-size:0.85em; margin-top:8px; }
-    .badge {
-      display:inline-block;
-      background:#2ecc71;
-      color:#000;
-      border-radius:20px;
-      padding:4px 10px;
-      font-weight:bold;
-      margin-right:6px;
-      font-size:0.9em;
+    button:active { transform: scale(0.97); }
+    input {
+      width: 100%;
+      padding: 0.45rem 0.6rem;
+      margin-top: 0.25rem;
+      border-radius: 8px;
+      border: 1px solid #374151;
+      background: #020617;
+      color: #f9fafb;
+      box-sizing: border-box;
     }
+    .muted { font-size: 0.85rem; opacity: 0.8; }
+    .error { color: #f97373; font-size: 0.85rem; margin-top: 0.4rem; }
+    .success { color: #4ade80; font-size: 0.85rem; margin-top: 0.4rem; }
   </style>
-  <script src="env.js"></script>
-  <script src="api_shim.js"></script>
 </head>
 <body>
-<div id="toast" role="status" aria-live="polite"></div>
   <header>
-    <h2>User Profile</h2>
-    <a href="index.html">← Back to Feed</a>
+    <div class="back-link"><a href="/frontend/index.html">← Back to Feed</a></div>
+    <h1>User Profile</h1>
   </header>
 
-  <div class="container">
-    <!-- Identity & PoH Tier -->
-    <div class="card">
-      <h3>Proof of Humanity</h3>
-      <div class="stat"><strong>User ID:</strong> <span id="userId">Loading...</span></div>
-      <div class="stat"><strong>Tier:</strong> <span id="tier">Loading...</span></div>
-      <div id="badges" class="msg">Loading badges...</div>
-      <button onclick="refreshPoH()">Refresh Status</button>
-    </div>
+  <div class="muted" id="userIdLine">User: loading…</div>
+
+  <div class="cards">
+
+    <!-- Proof of Humanity -->
+    <section class="card poh">
+      <h2>Proof of Humanity</h2>
+      <div class="row">
+        <span class="label">User ID:</span>
+        <span class="value" id="pohUserId">loading…</span>
+      </div>
+      <div class="row">
+        <span class="label">Tier:</span>
+        <span class="value" id="pohTier">Loading…</span>
+      </div>
+      <div class="row muted" id="pohStatusMsg"></div>
+      <button id="pohRefreshBtn">Refresh Status</button>
+      <div class="error" id="pohError"></div>
+    </section>
 
     <!-- Wallet -->
-    <div class="card">
-      <h3>Wallet</h3>
-      <div class="stat"><strong>Balance:</strong> <span id="balance">Loading...</span></div>
-      <input id="recipient" placeholder="Recipient User ID">
-      <input id="amount" placeholder="Amount (WEC)" type="number" min="0">
-      <button onclick="transfer()">Send WEC</button>
-      <div class="msg" id="walletMsg"></div>
-    </div>
+    <section class="card wallet">
+      <h2>Wallet</h2>
+      <div class="row">
+        <span class="label">Address:</span>
+        <span class="value" id="walletAddress">(loading…)</span>
+      </div>
+      <div class="row">
+        <span class="label">Balance:</span>
+        <span class="value" id="walletBalance">0 WEC</span>
+      </div>
+
+      <div class="row" style="margin-top:0.7rem;">
+        <span class="label">Recipient User ID</span>
+        <input id="sendRecipient" placeholder="@friend">
+      </div>
+      <div class="row">
+        <span class="label">Amount (WEC)</span>
+        <input id="sendAmount" placeholder="0.0" inputmode="decimal">
+      </div>
+      <button id="sendBtn">Send WEC</button>
+      <div class="error" id="walletError"></div>
+      <div class="success" id="walletSuccess"></div>
+    </section>
 
     <!-- Reputation -->
-    <div class="card">
-      <h3>Reputation</h3>
-      <div class="stat"><strong>Score:</strong> <span id="reputation">Loading...</span></div>
-      <button onclick="refreshReputation()">Refresh</button>
-      <div class="msg" id="repMsg"></div>
-    </div>
+    <section class="card rep">
+      <h2>Reputation</h2>
+      <div class="row">
+        <span class="label">Score:</span>
+        <span class="value" id="repScore">Loading…</span>
+      </div>
+      <button id="repRefreshBtn">Refresh</button>
+      <div class="error" id="repError"></div>
+    </section>
 
-    <!-- Security -->
-    <div class="card">
-      <h3>Security</h3>
-      <button onclick="exportKeys()">Export Keys</button>
-      <button onclick="window.location.href='recover.html'">Recover Account</button>
-      <div class="msg" id="keyMsg">Keep your key backup safe!</div>
-    </div>
+    <!-- Governance -->
+    <section class="card">
+      <h2>Governance</h2>
+      <div class="muted">Create and vote on proposals.</div>
+      <button onclick="window.location.href='/frontend/governance.html'">Open Governance</button>
+    </section>
+
   </div>
 
-  <script>
-    const keys = JSON.parse(localStorage.getItem('weall_keys') || '{}');
-    const userId = keys.public || 'unknown';
-
-    async function refreshPoH() {
-      const uid = document.getElementById('userId');
-      const t = document.getElementById('tier');
-      const b = document.getElementById('badges');
-      uid.textContent = userId;
-      try {
-        const res = await fetch(`/poh/status/${encodeURIComponent(userId)}`);
-        if (!res.ok) throw new Error(data.detail || 'Error');
-        t.textContent = data.tier_name || 'Unverified';
-        if (data.badges && data.badges.length) {
-          b.innerHTML = data.badges.map(v => `<span class="badge">${v}</span>`).join('');
-        } else b.textContent = 'No badges earned yet.';
-      } catch (err) {
-        b.textContent = '⚠️ ' + err.message;
-      }
-    }
-
-    async function refreshBalance() {
-      const el = document.getElementById('balance');
-      const msg = document.getElementById('walletMsg');
-      el.textContent = '...';
-      try {
-        const res = await fetch('/ledger/balance/' + userId);
-        const data = await res.json();
-        (function(){var e=document.getElementById("pfNft"); if(e){e.textContent=(data.nft_minted?"Yes":"No");}})();
-if (!res.ok) throw new Error(data.detail || 'Error fetching balance');
-        el.textContent = data.balance + ' WEC';
-      } catch (err) {
-        el.textContent = '⚠️';
-        msg.textContent = err.message;
-      }
-    }
-
-    async function refreshReputation() {
-      const el = document.getElementById('reputation');
-      const msg = document.getElementById('repMsg');
-      el.textContent = '...';
-      try {
-        const res = await fetch('/reputation/' + userId);
-        const data = await res.json();
-        if (!res.ok) throw new Error(data.detail || 'Error fetching reputation');
-        el.textContent = data.score;
-      } catch (err) {
-        el.textContent = '⚠️';
-        msg.textContent = err.message;
-      }
-    }
-
-    async function transfer() {
-      const recipient = document.getElementById('recipient').value.trim();
-      const amount = parseFloat(document.getElementById('amount').value);
-      const msg = document.getElementById('walletMsg');
-      msg.textContent = '';
-      if (!recipient || isNaN(amount)) return msg.textContent = 'Enter recipient and amount.';
-      try {
-        const res = await fetch('/wallet/transfer', {
-          method:'POST',
-          headers:{'Content-Type':'application/json'},
-          body:JSON.stringify({ from:userId, to:recipient, amount })
-        });
-        const data = await res.json();
-        if (!res.ok) throw new Error(data.detail || data.message);
-        msg.textContent = '✅ Transfer complete.';
-        refreshBalance();
-      } catch (err) {
-        msg.textContent = '⚠️ ' + err.message;
-      }
-    }
-
-    function exportKeys() {
-      const keysStr = localStorage.getItem('weall_keys');
-      if (!keysStr) return alert('No keys found in local storage.');
-      const blob = new Blob([keysStr], {type:'application/json'});
-      const a = document.createElement('a');
-      a.href = URL.createObjectURL(blob);
-      a.download = 'weall_keys_backup.json';
-      a.click();
-      document.getElementById('keyMsg').textContent = '✅ Keys exported.';
-    }
-
-    // Auto-init
-    refreshPoH();
-    refreshBalance();
-    refreshReputation();
-  </script>
-  <script src="/static/footer.js"></script>
-<!-- CLIENT-ERROR-LISTENER -->
 <script>
-window.addEventListener('error', e => {
-  try { fetch('/content/client-log', {method:'POST', headers:{'content-type':'application/json'}, body: JSON.stringify({ msg:String(e.message||''), file:e.filename, line:e.lineno, col:e.colno })}); } catch(_) {}
-});
-window.addEventListener('unhandledrejection', e => {
-  try { fetch('/content/client-log', {method:'POST', headers:{'content-type':'application/json'}, body: JSON.stringify({ promise:true, reason:String(e.reason||'') })}); } catch(_) {}
-});
-</script>
-
-
-<footer class="weall-footer">
-  <span>© WeAll</span>
-  &nbsp;•&nbsp;<a href="/frontend/privacy.html">Privacy</a>
-  &nbsp;•&nbsp;<a href="/frontend/terms.html">Terms</a>
-</footer>
-
-
-<script>
-  // Gate onboarding only when coming from a user-initiated Tier request
-  function goToOnboarding() {
-    try { sessionStorage.setItem('weall_go_onboarding','1'); } catch(e){}
-    /* patched out: no auto-redirect to advanced login */
+  // -------------------------
+  // User identity
+  // -------------------------
+  function getCurrentUserId() {
+    let v = localStorage.getItem("weall.account") ||
+            localStorage.getItem("weall_user") ||
+            "";
+    v = (v || "").trim().toLowerCase();
+    if (!v) return "unknown";
+    if (v.includes("@") && !v.startsWith("@")) {
+      return "@" + v.split("@", 1)[0];
+    }
+    return v;
   }
-  // Wire up any existing buttons with data-go-onboarding
-  document.addEventListener('DOMContentLoaded', function(){
-    document.querySelectorAll('[data-go-onboarding]').forEach(function(btn){
-      btn.addEventListener('click', function(e){ e.preventDefault(); goToOnboarding(); });
-    });
-  });
-</script>
 
+  const userId = getCurrentUserId();
+  document.getElementById("userIdLine").textContent = "User: " + userId;
+  document.getElementById("pohUserId").textContent = userId;
+
+  async function fetchJSON(url, opts) {
+    const res = await fetch(url, opts || {});
+    let data = {};
+    try { data = await res.json(); } catch {}
+    if (!res.ok) throw new Error(data.detail || data.error || "Request failed");
+    return data;
+  }
+
+  // -------------------------
+  // PoH Section
+  // -------------------------
+  async function refreshPoh() {
+    const tEl = document.getElementById("pohTier");
+    const sEl = document.getElementById("pohStatusMsg");
+    const eEl = document.getElementById("pohError");
+
+    tEl.textContent = "Loading…";
+    sEl.textContent = "";
+    eEl.textContent = "";
+
+    try {
+      const data = await fetchJSON("/poh/status/" + encodeURIComponent(userId));
+      tEl.textContent = data.tier ?? "None";
+      sEl.textContent = data.status || (data.tier ? "Verified" : "Not verified");
+    } catch (err) {
+      eEl.textContent = "PoH error: " + err.message;
+      tEl.textContent = "Unknown";
+    }
+  }
+
+  document.getElementById("pohRefreshBtn").onclick = refreshPoh;
+
+  // -------------------------
+  // Wallet Section
+  // -------------------------
+  async function refreshWallet() {
+    const balEl = document.getElementById("walletBalance");
+    const addrEl = document.getElementById("walletAddress");
+    const errEl = document.getElementById("walletError");
+
+    balEl.textContent = "Loading…";
+    errEl.textContent = "";
+
+    try {
+      const data = await fetchJSON("/ledger/balance/" + encodeURIComponent(userId));
+      balEl.textContent = (data.balance || 0) + " WEC";
+      addrEl.textContent = (data.wallet && data.wallet.address) || "(not set)";
+    } catch (err) {
+      errEl.textContent = "Wallet error: " + err.message;
+      balEl.textContent = "0 WEC";
+    }
+  }
+
+  async function sendWEC() {
+    const recip = document.getElementById("sendRecipient").value.trim().toLowerCase();
+    const amt = parseFloat(document.getElementById("sendAmount").value);
+    const errEl = document.getElementById("walletError");
+    const okEl = document.getElementById("walletSuccess");
+
+    errEl.textContent = "";
+    okEl.textContent = "";
+
+    if (!recip) {
+      errEl.textContent = "Recipient required.";
+      return;
+    }
+    let cleanRecip = recip;
+    if (recip.includes("@") && !recip.startsWith("@")) {
+      cleanRecip = "@" + recip.split("@", 1)[0];
+    }
+
+    if (!amt || amt <= 0) {
+      errEl.textContent = "Enter a positive amount.";
+      return;
+    }
+
+    try {
+      await fetchJSON("/wallet/transfer", {
+        method: "POST",
+        headers: { "Content-Type":"application/json" },
+        body: JSON.stringify({
+          sender: userId,
+          recipient: cleanRecip,
+          amount: amt
+        })
+      });
+      okEl.textContent = "Transfer complete.";
+      refreshWallet();
+    } catch (err) {
+      errEl.textContent = "Transfer failed: " + err.message;
+    }
+  }
+
+  document.getElementById("sendBtn").onclick = sendWEC;
+
+  // -------------------------
+  // Reputation Section
+  // -------------------------
+  async function refreshRep() {
+    const scoreEl = document.getElementById("repScore");
+    const errEl = document.getElementById("repError");
+
+    scoreEl.textContent = "Loading…";
+    errEl.textContent = "";
+
+    try {
+      const data = await fetchJSON("/reputation/" + encodeURIComponent(userId));
+      scoreEl.textContent = data.score ?? data.reputation ?? 0;
+    } catch (err) {
+      errEl.textContent = "Reputation error: " + err.message;
+      scoreEl.textContent = "0";
+    }
+  }
+
+  document.getElementById("repRefreshBtn").onclick = refreshRep;
+
+  // -------------------------
+  // Initial Load
+  // -------------------------
+  refreshPoh();
+  refreshWallet();
+  refreshRep();
+</script>
 </body>
 </html>

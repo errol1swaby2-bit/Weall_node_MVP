@@ -1,0 +1,383 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <title>WeAll – TikTok Feed</title>
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <style>
+    :root {
+      --bg: #05060a;
+      --card-bg: #101218;
+      --accent: #00ff7f;
+      --accent-soft: rgba(0,255,127,0.18);
+      --text-main: #ffffff;
+      --text-muted: #a0a4b8;
+      --danger-soft: rgba(255, 77, 77, 0.16);
+    }
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+    body {
+      font-family: system-ui, -apple-system, BlinkMacSystemFont, "SF Pro Text", sans-serif;
+      background: radial-gradient(circle at top, #171b29 0, #05060a 40%);
+      color: var(--text-main);
+      overflow: hidden;
+      height: 100vh;
+    }
+    .wa-shell {
+      display: flex;
+      flex-direction: column;
+      height: 100vh;
+    }
+    .wa-topbar {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      padding: 0.6rem 0.9rem;
+      background: linear-gradient(to right, #05060a, #070b14);
+      border-bottom: 1px solid rgba(255,255,255,0.04);
+      font-size: 0.9rem;
+    }
+    .wa-brand {
+      display: flex;
+      align-items: center;
+      gap: 0.4rem;
+      font-weight: 700;
+    }
+    .wa-brand-pill {
+      padding: 0.1rem 0.45rem;
+      border-radius: 999px;
+      background: linear-gradient(120deg,#4f46e5,#06b6d4);
+      font-size: 0.8rem;
+    }
+    .wa-topbar-right {
+      display: flex;
+      align-items: center;
+      gap: 0.5rem;
+      font-size: 0.8rem;
+    }
+    .wa-poh-chip {
+      padding: 0.1rem 0.45rem;
+      border-radius: 999px;
+      background: rgba(0,255,127,0.12);
+      font-size: 0.75rem;
+    }
+
+    .wa-main {
+      flex: 1;
+      position: relative;
+      overflow: hidden;
+    }
+    .wa-feed {
+      position: absolute;
+      inset: 0;
+      overflow-y: auto;
+      scroll-snap-type: y mandatory;
+      -webkit-overflow-scrolling: touch;
+    }
+    .wa-slide {
+      scroll-snap-align: start;
+      min-height: 100%;
+      padding: 0.8rem 0.6rem 1.2rem;
+      display: flex;
+      flex-direction: column;
+      justify-content: flex-end;
+      position: relative;
+    }
+    .wa-slide-inner {
+      background: linear-gradient(to top, rgba(0,0,0,0.65), rgba(0,0,0,0.2));
+      border-radius: 1rem;
+      padding: 0.9rem 0.85rem;
+      box-shadow: 0 18px 35px rgba(0,0,0,0.55);
+      border: 1px solid rgba(255,255,255,0.04);
+      max-height: 82vh;
+      display: flex;
+      flex-direction: column;
+      justify-content: space-between;
+    }
+    .wa-author-row {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      margin-bottom: 0.4rem;
+    }
+    .wa-author {
+      display: flex;
+      align-items: center;
+      gap: 0.4rem;
+      font-size: 0.85rem;
+    }
+    .wa-author-avatar {
+      width: 26px;
+      height: 26px;
+      border-radius: 999px;
+      background: radial-gradient(circle at 30% 0,#4ade80,#22c55e);
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      font-size: 0.7rem;
+      font-weight: 600;
+    }
+    .wa-poh-pill {
+      padding: 0.1rem 0.45rem;
+      border-radius: 999px;
+      font-size: 0.7rem;
+      background: rgba(148,163,184,0.18);
+    }
+    .wa-poh-pill.tier2 { background: rgba(56,189,248,0.22); }
+    .wa-poh-pill.tier3 { background: rgba(250,204,21,0.22); }
+
+    .wa-content {
+      margin: 0.3rem 0 0.5rem;
+      font-size: 1rem;
+      line-height: 1.4;
+      white-space: pre-wrap;
+      word-wrap: break-word;
+    }
+    .wa-ts-row {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      font-size: 0.75rem;
+      color: var(--text-muted);
+    }
+
+    /* Video container */
+    .wa-video-shell {
+      position: relative;
+      border-radius: 1rem;
+      overflow: hidden;
+      background: #000;
+      margin-bottom: 0.5rem;
+      max-height: 60vh;
+    }
+    .wa-video-shell video {
+      width: 100%;
+      max-height: 60vh;
+      display: block;
+    }
+    .wa-video-label {
+      position: absolute;
+      bottom: 0.4rem;
+      left: 0.5rem;
+      background: rgba(0,0,0,0.55);
+      padding: 0.1rem 0.4rem;
+      border-radius: 999px;
+      font-size: 0.7rem;
+    }
+
+    /* Right-side controls column  */
+    .wa-side-controls {
+      position: absolute;
+      right: 0.7rem;
+      bottom: 2.6rem;
+      display: flex;
+      flex-direction: column;
+      gap: 0.8rem;
+      align-items: center;
+      font-size: 0.75rem;
+    }
+    .wa-side-btn {
+      width: 44px;
+      height: 44px;
+      border-radius: 999px;
+      border: none;
+      background: linear-gradient(135deg, #22c55e, #14b8a6);
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      font-size: 1.4rem;
+      color: #020617;
+      box-shadow: 0 12px 25px rgba(22,163,74,0.65);
+      cursor: pointer;
+    }
+    .wa-side-label {
+      margin-top: 0.1rem;
+      color: var(--text-muted);
+    }
+    .wa-side-mini-btn {
+      width: 36px;
+      height: 36px;
+      border-radius: 999px;
+      border: 1px solid rgba(148,163,184,0.35);
+      background: rgba(15,23,42,0.8);
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      cursor: pointer;
+      font-size: 0.9rem;
+    }
+
+    /* Bottom navbar */
+    .wa-bottom-nav {
+      display: flex;
+      justify-content: space-around;
+      align-items: center;
+      padding: 0.4rem 0.6rem 0.6rem;
+      background: rgba(3,7,18,0.94);
+      border-top: 1px solid rgba(148,163,184,0.18);
+      font-size: 0.8rem;
+    }
+    .wa-nav-btn {
+      border: none;
+      background: none;
+      color: var(--text-muted);
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      gap: 0.1rem;
+      cursor: pointer;
+    }
+    .wa-nav-btn span {
+      font-size: 0.7rem;
+    }
+    .wa-nav-btn-active {
+      color: #e5e7eb;
+      font-weight: 600;
+    }
+
+    /* Upload sheet */
+    .wa-sheet-backdrop {
+      position: fixed;
+      inset: 0;
+      background: rgba(15,23,42,0.75);
+      backdrop-filter: blur(12px);
+      display: none;
+      align-items: flex-end;
+      justify-content: center;
+      z-index: 20;
+    }
+    .wa-sheet {
+      width: 100%;
+      max-width: 480px;
+      background: #020617;
+      border-radius: 1.25rem 1.25rem 0 0;
+      border-top: 1px solid rgba(148,163,184,0.26);
+      padding: 0.9rem 0.9rem 1.1rem;
+      box-shadow: 0 -18px 35px rgba(0,0,0,0.9);
+    }
+    .wa-sheet-header {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      margin-bottom: 0.6rem;
+    }
+    .wa-sheet-header h2 {
+      font-size: 0.95rem;
+    }
+    .wa-sheet-close {
+      border: none;
+      background: none;
+      color: var(--text-muted);
+      font-size: 1.2rem;
+      cursor: pointer;
+    }
+    .wa-sheet-options {
+      display: flex;
+      flex-direction: column;
+      gap: 0.7rem;
+    }
+    .wa-sheet-option {
+      padding: 0.5rem 0.55rem;
+      border-radius: 0.75rem;
+      background: rgba(15,23,42,0.9);
+      border: 1px solid rgba(148,163,184,0.25);
+      cursor: pointer;
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      font-size: 0.85rem;
+    }
+    .wa-sheet-option-main {
+      display: flex;
+      flex-direction: column;
+      gap: 0.08rem;
+    }
+    .wa-pill {
+      padding: 0.1rem 0.4rem;
+      border-radius: 999px;
+      background: rgba(34,197,94,0.18);
+      font-size: 0.7rem;
+    }
+    .wa-error {
+      margin-top: 0.4rem;
+      padding: 0.45rem 0.55rem;
+      border-radius: 0.7rem;
+      background: var(--danger-soft);
+      font-size: 0.78rem;
+    }
+  </style>
+</head>
+<body>
+<div class="wa-shell">
+  <header class="wa-topbar">
+    <div class="wa-brand">
+      <span class="wa-brand-pill">WeAll</span>
+      <span id="waTopUser" style="opacity:.85;"></span>
+    </div>
+    <div class="wa-topbar-right">
+      <span class="wa-poh-chip" id="waTopPoh">PoH: ?</span>
+    </div>
+  </header>
+
+  <main class="wa-main">
+    <div id="waFeed" class="wa-feed">
+      <!-- Slides injected by tiktok.js -->
+    </div>
+
+    <div class="wa-side-controls">
+      <button id="waFab" class="wa-side-btn">+</button>
+      <div class="wa-side-label">Upload</div>
+      <button id="waProfileBtn" class="wa-side-mini-btn">👤</button>
+      <button id="waHomeBtn" class="wa-side-mini-btn">⌂</button>
+    </div>
+  </main>
+
+  <nav class="wa-bottom-nav">
+    <button class="wa-nav-btn wa-nav-btn-active">
+      ⬆︎
+      <span>Feed</span>
+    </button>
+    <button class="wa-nav-btn" id="waNavGovernance">
+      ⚖️
+      <span>Govern</span>
+    </button>
+    <button class="wa-nav-btn" id="waNavProfile">
+      👤
+      <span>Profile</span>
+    </button>
+  </nav>
+</div>
+
+<!-- Upload sheet -->
+<div id="waSheetBackdrop" class="wa-sheet-backdrop">
+  <div class="wa-sheet">
+    <div class="wa-sheet-header">
+      <h2>Create</h2>
+      <button class="wa-sheet-close" id="waSheetClose">&times;</button>
+    </div>
+    <div class="wa-sheet-options">
+      <button class="wa-sheet-option" id="waOptText">
+        <div class="wa-sheet-option-main">
+          <strong>Text post</strong>
+          <span>Share a short thought with the network.</span>
+        </div>
+        <span class="wa-pill">Quick</span>
+      </button>
+      <button class="wa-sheet-option" id="waOptVideo">
+        <div class="wa-sheet-option-main">
+          <strong>Record / upload video</strong>
+          <span>Use your camera to record a short clip.</span>
+        </div>
+        <span class="wa-pill">Beta</span>
+      </button>
+    </div>
+    <div id="waSheetError" class="wa-error" style="display:none;"></div>
+  </div>
+</div>
+
+<!-- Hidden video input -->
+<input type="file" id="waVideoInput" accept="video/*" capture="user" style="display:none;" />
+
+<script src="/frontend/session.js"></script>
+<script src="/frontend/tiktok.js"></script>
+</body>
+</html>

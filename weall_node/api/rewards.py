@@ -10,7 +10,7 @@ from __future__ import annotations
 import random
 from typing import Dict, Any, List
 
-from fastapi import APIRouter
+from fastapi import APIRouter, HTTPException
 
 # Executor façade (ledger, rewards, block mining, etc.)
 from ..weall_executor import executor
@@ -21,7 +21,7 @@ try:
 except Exception:  # pragma: no cover
     REWARD_POOLS: Dict[str, float] = {}
 
-router = APIRouter()
+router = APIRouter(prefix="/rewards", tags=["rewards"])
 
 
 def _qualified_users(pool: str) -> List[str]:
@@ -107,3 +107,102 @@ def ledger_snapshot():
 def reset():
     executor.reset_state()
     return {"ok": True}
+
+@router.post("/juror_ticket/dev")
+def add_juror_ticket_dev(account_id: str, weight: float = 1.0):
+    """
+    DEV-ONLY: Add a juror ticket to the WeCoin 'jurors' pool.
+
+    This lets us test juror pool rewards independently of the full
+    dispute resolution pipeline. Later, dispute resolution code can
+    call the same logic directly instead of this dev endpoint.
+    """
+    try:
+        core = getattr(executor, "exec", executor)
+        wecoin = getattr(core, "wecoin", None)
+    except Exception:
+        wecoin = None
+
+    if wecoin is None or not hasattr(wecoin, "add_ticket"):
+        raise HTTPException(status_code=503, detail="WeCoin runtime not available")
+
+    try:
+        wecoin.add_ticket("jurors", account_id, weight=float(weight))
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Failed to add juror ticket: {e}")
+
+    pool_tickets = getattr(wecoin, "tickets", {}).get("jurors", {})
+    return {
+        "ok": True,
+        "pool": "jurors",
+        "account_id": account_id,
+        "weight": float(weight),
+        "current_tickets": pool_tickets,
+    }
+
+@router.post("/creator_ticket/dev")
+def add_creator_ticket_dev(account_id: str, weight: float = 1.0):
+    """
+    DEV-ONLY: Add a creator ticket to the WeCoin 'creators' pool.
+
+    Later, content creation / engagement flows can call the same logic
+    directly instead of this dev endpoint.
+    """
+    from ..weall_executor import executor  # local import to avoid cycles
+
+    try:
+        core = getattr(executor, "exec", executor)
+        wecoin = getattr(core, "wecoin", None)
+    except Exception:
+        wecoin = None
+
+    if wecoin is None or not hasattr(wecoin, "add_ticket"):
+        raise HTTPException(status_code=503, detail="WeCoin runtime not available")
+
+    try:
+        wecoin.add_ticket("creators", account_id, weight=float(weight))
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Failed to add creator ticket: {e}")
+
+    pool_tickets = getattr(wecoin, "tickets", {}).get("creators", {})
+    return {
+        "ok": True,
+        "pool": "creators",
+        "account_id": account_id,
+        "weight": float(weight),
+        "current_tickets": pool_tickets,
+    }
+
+@router.post("/operator_ticket/dev")
+def add_operator_ticket_dev(account_id: str, weight: float = 1.0):
+    """
+    DEV-ONLY: Add an operator ticket to the WeCoin 'operators' pool.
+
+    Later, IPFS / uptime / compute heartbeat flows can call the same
+    logic directly instead of this dev endpoint.
+    """
+    from ..weall_executor import executor  # local import to avoid cycles
+
+    try:
+        core = getattr(executor, "exec", executor)
+        wecoin = getattr(core, "wecoin", None)
+    except Exception:
+        wecoin = None
+
+    if wecoin is None or not hasattr(wecoin, "add_ticket"):
+        raise HTTPException(status_code=503, detail="WeCoin runtime not available")
+
+    try:
+        wecoin.add_ticket("operators", account_id, weight=float(weight))
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Failed to add operator ticket: {e}")
+
+    pool_tickets = getattr(wecoin, "tickets", {}).get("operators", {})
+    return {
+        "ok": True,
+        "pool": "operators",
+        "account_id": account_id,
+        "weight": float(weight),
+        "current_tickets": pool_tickets,
+    }
+

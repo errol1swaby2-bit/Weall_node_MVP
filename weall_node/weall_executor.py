@@ -13,6 +13,7 @@ Back-compat: keeps prior method names & attribute access used by API modules (Po
 from __future__ import annotations
 
 import json
+import hashlib
 import logging
 import os
 import time
@@ -37,6 +38,13 @@ def _state_path() -> str:
 
 def _now() -> int:
     return int(time.time())
+
+
+def _block_hash(header: dict) -> str:
+    """Return a deterministic SHA-256 block id from a block header."""
+    # ensure deterministic JSON payload across nodes
+    payload = json.dumps(header, sort_keys=True, separators=(",", ":")).encode("utf-8")
+    return hashlib.sha256(payload).hexdigest()
 
 
 # ------------------------------------------------------------
@@ -83,6 +91,54 @@ class ConsensusState:
 # Core executor
 # ------------------------------------------------------------
 class WeAllExecutor:
+    def mine_block(self, payload: Optional[dict] = None) -> Dict[str, Any]:
+        """
+        DEV helper: mine a single block in a single-node environment.
+
+        Keeps older API calls like `executor.mine_block()` working by:
+        - Optionally enqueuing `payload` into the mempool
+        - Ensuring the local node_id is a validator
+        - Proposing a block
+        - Self-voting to reach quorum and finalize
+        """
+        # Optionally push a tx into the mempool
+        if payload:
+            try:
+                self.add_tx(payload)
+            except Exception:
+                # Extremely defensive: fall back to raw mempool access
+                self.ledger.setdefault("mempool", []).append(payload)
+
+        # Ensure this node is treated as a validator for local dev
+        node_id = getattr(self, "node_id", "local")
+        try:
+            self.cons.validators.add(node_id)
+        except Exception:
+            return {"ok": False, "error": "consensus_unavailable"}
+
+        # Propose a block with pending txs
+        res = self.propose_block(node_id)
+        if not res.get("ok"):
+            return res
+
+        proposal_id = res.get("proposal_id")
+        if not proposal_id:
+            return {"ok": False, "error": "no_proposal_id"}
+
+        # Self-vote to finalize in a single-node context
+        vres = self.vote_block(node_id, proposal_id)
+        if not vres.get("ok"):
+            return vres
+
+        chain = self.ledger.get("chain") or []
+        block = chain[-1] if chain else None
+        return {
+            "ok": True,
+            "block": block,
+            "proposal_id": proposal_id,
+            "votes": vres.get("votes"),
+        }
+
     def __init__(self) -> None:
         self.path = _state_path()
         self.ledger: Dict[str, Any] = self._load_or_init_ledger()
@@ -101,6 +157,47 @@ class WeAllExecutor:
 
         self.cons = ConsensusState()
         self._bootstrap_consensus_from_config()
+
+        # Epoch / tokenomics runtime (WeCoin) + genesis / GSM params
+        self.current_epoch: int = 0
+        # Will be overridden by genesis if present
+        self.bootstrap_mode: bool = False
+        self.min_validators: int = 0
+
+        try:
+            from weall_node.weall_runtime.ledger import WeCoinLedger
+            self.wecoin = WeCoinLedger()
+        except Exception:
+            # Soft-fail: keep node running even if tokenomics runtime is missing
+            self.wecoin = None  # type: ignore[assignment]
+
+        # Load genesis / GSM settings if available
+        try:
+            from weall_node.consensus.params import load_genesis_params
+            self.genesis = load_genesis_params()
+        except Exception:
+            self.genesis = {}
+
+        g = self.genesis or {}
+        # GSM / bootstrap mode
+        self.bootstrap_mode = bool(g.get("gsm_active", False))
+        self.min_validators = int(g.get("min_validators", 0) or 0)
+
+        # Allow genesis to override blocks_per_epoch
+        g_bpe = g.get("blocks_per_epoch")
+        if g_bpe:
+            try:
+                self.blocks_per_epoch = int(g_bpe)
+            except Exception:
+                pass
+
+        # Apply pool split to WeCoin runtime, if configured
+        g_split = g.get("pool_split") or {}
+        if g_split:
+            try:
+                self.set_pool_split(g_split)
+            except Exception:
+                pass
 
         self.current_block_height = len(self.ledger.get("chain", []))
 
@@ -258,12 +355,25 @@ class WeAllExecutor:
         if not prop or prop.get("status") != "proposed":
             return
         chain = self.ledger.setdefault("chain", [])
-        block = {
-            "height": len(chain),
+        prev_block_id = (
+            chain[-1].get("block_id")
+            if chain and isinstance(chain[-1], dict)
+            else None
+        )
+        height = len(chain)
+        votes = sorted(list(prop["votes"]))
+        header = {
+            "height": height,
             "time": _now(),
-            "txs": prop["txs"],
             "proposer": prop["proposer"],
-            "votes": sorted(list(prop["votes"])),
+            "votes": votes,
+            "prev_block_id": prev_block_id,
+        }
+        block_id = _block_hash(header)
+        block = {
+            "block_id": block_id,
+            **header,
+            "txs": prop["txs"],
         }
         self._apply_block(block)
         chain.append(block)
@@ -271,8 +381,73 @@ class WeAllExecutor:
         self._reward(block)
         self.save_state()
         self.current_block_height = len(chain)
+
+        # Epoch advancement + WeCoin rewards (if configured)
+        try:
+            blocks_per_epoch = int(getattr(self, "blocks_per_epoch", 0) or 0)
+        except Exception:
+            blocks_per_epoch = 0
+        if blocks_per_epoch > 0:
+            # heights are zero-based; use height+1 when checking epoch boundary
+            if (block["height"] + 1) % blocks_per_epoch == 0:
+                # Initialize for older state files if missing
+                if not hasattr(self, "current_epoch"):
+                    self.current_epoch = 0  # type: ignore[attr-defined]
+                self.current_epoch += 1  # type: ignore[attr-defined]
+
+                winners = {}
+                epoch_reward = None
+                wecoin = getattr(self, "wecoin", None)
+                if wecoin is not None and hasattr(wecoin, "distribute_epoch_rewards"):
+                    try:
+                        bootstrap_mode = bool(getattr(self, "bootstrap_mode", False))
+                        winners = wecoin.distribute_epoch_rewards(  # type: ignore[call-arg]
+                            int(self.current_epoch),
+                            bootstrap_mode=bootstrap_mode,
+                        )
+                        if hasattr(wecoin, "current_epoch_reward"):
+                            epoch_reward = wecoin.current_epoch_reward()
+                    except Exception as e:
+                        log.warning("Epoch reward distribution failed: %s", e)
+
+                events = self.ledger.setdefault("events", [])
+                events.append(
+                    {
+                        "type": "epoch",
+                        "epoch": int(getattr(self, "current_epoch", 0)),
+                        "block_height": int(block["height"]),
+                        "winners": winners,
+                        "epoch_reward": epoch_reward,
+                        "ts": _now(),
+                    }
+                )
+
+        # Check whether GSM (bootstrap mode) should expire
+        try:
+            self._check_gsm_expiry(block)
+        except Exception as e:
+            log.warning("Failed GSM expiry check: %s", e)
+
+        # Apply WeCoin block rewards (per-block lottery across all pools)
+        core = getattr(self, "exec", self)
+        wecoin = getattr(core, "wecoin", None)
+        if wecoin is not None and hasattr(wecoin, "distribute_block_rewards"):
+            try:
+                height = int(block.get("height", 0))
+                genesis = getattr(self, "genesis", {}) or {}
+                blocks_per_epoch = int(genesis.get("blocks_per_epoch") or 100)
+                epoch = height // max(1, blocks_per_epoch)
+                wecoin.distribute_block_rewards(
+                    block_height=height,
+                    epoch=epoch,
+                    blocks_per_epoch=blocks_per_epoch,
+                    bootstrap_mode=getattr(self, "bootstrap_mode", False),
+                )
+            except Exception as e:
+                log.warning("WeCoin block reward distribution failed: %s", e)
+
         log.info(
-            f"[consensus] committed height={block['height']} txs={len(block['txs'])}"
+            f"[consensus] committed height={block['height']} txs={len(block['txs'])} id={block_id}"
         )
 
     def _apply_block(self, block: dict) -> None:
@@ -317,6 +492,183 @@ class WeAllExecutor:
             {"type": "TX", "tx": tx, "ts": _now()}
         )
 
+    # ------------------------------------------------------------
+    # WEC balance + transfer helpers
+    # ------------------------------------------------------------
+    def _ensure_balance_map(self) -> dict:
+        """
+        Ensure self.ledger has a 'balances' dict and return it.
+
+        This is our canonical per-user WEC balance store at the executor
+        level, with optional compatibility for older 'accounts' maps.
+        """
+        led = getattr(self, "ledger", None)
+        if led is None:
+            led = {}
+            self.ledger = led
+
+        balances = led.get("balances")
+        if not isinstance(balances, dict):
+            balances = {}
+            led["balances"] = balances
+
+        return balances
+
+    def get_balance(self, user_id: str) -> float:
+        """
+        Return the current WEC balance for a user.
+
+        Falls back to legacy ledger['accounts'] if 'balances' doesn't
+        have an entry yet.
+        """
+        user_id = (user_id or "").strip()
+        if not user_id:
+            return 0.0
+
+        balances = self._ensure_balance_map()
+        bal = balances.get(user_id, None)
+
+        # Back-compat with older 'accounts' dict, if present
+        if bal is None:
+            try:
+                accounts = self.ledger.get("accounts") or {}
+                bal = accounts.get(user_id, 0.0)
+            except Exception:
+                bal = 0.0
+
+        try:
+            return float(bal)
+        except Exception:
+            return 0.0
+
+    def _set_balance(self, user_id: str, amount: float) -> None:
+        """
+        Internal helper: set a user's WEC balance.
+
+        Writes into ledger['balances'] only; if you later add a dedicated
+        WeCoin runtime, you can mirror into that here as well.
+        """
+        user_id = (user_id or "").strip()
+        if not user_id:
+            return
+
+        balances = self._ensure_balance_map()
+        try:
+            balances[user_id] = float(amount)
+        except Exception:
+            balances[user_id] = 0.0
+
+    def credit(self, user_id: str, amount: float) -> float:
+        """
+        Increase a user's balance by `amount`. Returns the new balance.
+
+        This is a trusted dev-only "mint" at the moment.
+        """
+        user_id = (user_id or "").strip()
+        if not user_id:
+            return 0.0
+
+        try:
+            amount = float(amount)
+        except Exception:
+            return self.get_balance(user_id)
+
+        if amount <= 0:
+            return self.get_balance(user_id)
+
+        new_balance = self.get_balance(user_id) + amount
+        self._set_balance(user_id, new_balance)
+
+        try:
+            self.save_state()
+        except Exception:
+            pass
+
+        return new_balance
+
+    def debit(self, user_id: str, amount: float) -> float:
+        """
+        Decrease a user's balance by `amount`.
+
+        Raises ValueError on insufficient funds. Returns new balance.
+        """
+        user_id = (user_id or "").strip()
+        if not user_id:
+            return 0.0
+
+        try:
+            amount = float(amount)
+        except Exception:
+            return self.get_balance(user_id)
+
+        if amount <= 0:
+            return self.get_balance(user_id)
+
+        bal = self.get_balance(user_id)
+        if bal < amount:
+            raise ValueError("insufficient_funds")
+
+        new_balance = bal - amount
+        self._set_balance(user_id, new_balance)
+
+        try:
+            self.save_state()
+        except Exception:
+            pass
+
+        return new_balance
+
+    def transfer_wec(self, from_id: str, to_id: str, amount: float) -> dict:
+        """
+        Simple single-node WEC transfer.
+
+        This is a trusted executor call for now (no signatures). Later we
+        can upgrade it to build a tx and push it into the mempool.
+        """
+        from_id = (from_id or "").strip()
+        to_id = (to_id or "").strip()
+
+        # Basic parameter validation
+        if not from_id or not to_id:
+            return {"ok": False, "error": "invalid_transfer_params"}
+        if from_id == to_id:
+            return {"ok": False, "error": "cannot_send_to_self"}
+
+        try:
+            amount = float(amount)
+        except Exception:
+            return {"ok": False, "error": "invalid_amount"}
+
+        if amount <= 0:
+            return {"ok": False, "error": "amount_must_be_positive"}
+
+        # Debit then credit
+        try:
+            self.debit(from_id, amount)
+        except ValueError:
+            return {"ok": False, "error": "insufficient_funds"}
+        except Exception as e:
+            return {"ok": False, "error": f"debit_failed:{e!s}"}
+
+        try:
+            self.credit(to_id, amount)
+        except Exception as e:
+            # Best-effort rollback: put funds back on sender
+            try:
+                self.credit(from_id, amount)
+            except Exception:
+                pass
+            return {"ok": False, "error": f"credit_failed:{e!s}"}
+
+        return {
+            "ok": True,
+            "from": from_id,
+            "to": to_id,
+            "amount": float(amount),
+            "from_balance": self.get_balance(from_id),
+            "to_balance": self.get_balance(to_id),
+        }
+
     def _reward(self, block: dict) -> None:
         prop = block.get("proposer")
         if prop:
@@ -324,341 +676,35 @@ class WeAllExecutor:
         for v in block.get("votes", []):
             self.cons.rewards[v] = self.cons.rewards.get(v, 0.0) + 0.25
 
+        # Mirror consensus rewards into WeCoin validator tickets
+        wecoin = getattr(self, "wecoin", None)
+        if wecoin is not None and hasattr(wecoin, "add_ticket"):
+            try:
+                if prop:
+                    wecoin.add_ticket("validators", prop, weight=1.0)
+                for v in block.get("votes", []):
+                    wecoin.add_ticket("validators", v, weight=0.25)
+            except Exception as e:
+                log.warning("Failed to record validator tickets for epoch rewards: %s", e)
+
     # ----------------- dev helper / legacy mining --------------
-    def mine_block_dev(self) -> Dict[str, Any]:
-        """
-        Development convenience: propose → self-vote → finalize if this node is a validator.
-        """
-        res = self.propose_block(self.node_id)
-        if not res.get("ok"):
-            return res
-        pid = res["proposal_id"]
-        if self.node_id in self.cons.validators:
-            self.vote_block(self.node_id, pid)
-        return {"ok": True, "proposal_id": pid}
-
-    def mine_block(self, *args, **kwargs) -> Dict[str, Any]:
-        """
-        LEGACY entrypoint: older code may call mine_block() (no args) or mine_block(payload).
-        - If a payload dict is passed, enqueue it first, then dev-mine.
-        """
-        # Accept optional payload for backwards compatibility
-        if args and isinstance(args[0], dict):
-            self.add_tx(args[0])
-        return self.mine_block_dev()
-
-    def on_new_block(self, producer_id: str) -> Dict[str, Any]:
-        """
-        Compatibility for /block/new/{producer_id}: propose and self-vote if validator.
-        """
-        res = self.propose_block(producer_id)
-        if res.get("ok") and producer_id in self.cons.validators:
-            self.vote_block(producer_id, res["proposal_id"])
-        return {"ok": True, "height": len(self.ledger.get("chain", []))}
-
-    def simulate_blocks(self, n: int) -> Dict[str, Any]:
-        """
-        Compatibility: simulate n dev-mined blocks.
-        """
-        for _ in range(max(0, int(n))):
-            self.mine_block_dev()
-        return {"ok": True, "height": len(self.ledger.get("chain", []))}
-
-    # ----------------------- balances --------------------------
-    def balance(self, user: str) -> float:
-        try:
-            return float(self.ledger.setdefault("balances", {}).get(user, 0.0))
-        except Exception:
-            return 0.0
-
-    def _transfer_internal(self, sender: str, recipient: str, amount: float) -> None:
-        if amount <= 0:
-            raise ValueError("amount_must_be_positive")
-        bal = self.ledger.setdefault("balances", {})
-        if sender != "treasury" and bal.get(sender, 0.0) < amount:
-            raise ValueError("insufficient_funds")
-        if sender != "treasury":
-            bal[sender] = bal.get(sender, 0.0) - amount
-        bal[recipient] = bal.get(recipient, 0.0) + amount
-
-    def transfer(self, sender: str, recipient: str, amount: float) -> Dict[str, Any]:
-        self.add_tx(
-            {
-                "transfer": {
-                    "sender": sender,
-                    "recipient": recipient,
-                    "amount": float(amount),
-                }
-            }
-        )
-        return {"ok": True}
-
-    def treasury_transfer(self, recipient: str, amount: float) -> Dict[str, Any]:
-        self.add_tx(
-            {
-                "transfer": {
-                    "sender": "treasury",
-                    "recipient": recipient,
-                    "amount": float(amount),
-                }
-            }
-        )
-        return {"ok": True}
-
-    # ----------------------- users/messages --------------------
-    def register_user(self, user_id: str, poh_level: int = 1) -> Dict[str, Any]:
-        u = self.ledger.setdefault("users", {}).setdefault(user_id, {})
-        u["poh_level"] = max(int(poh_level), int(u.get("poh_level", 0)))
-        return {"ok": True, "user": user_id, "poh_level": u["poh_level"]}
-
-    def add_friend(self, user_id: str, friend_id: str) -> Dict[str, Any]:
-        u = self.ledger.setdefault("users", {}).setdefault(user_id, {})
-        friends = u.setdefault("friends", [])
-        if friend_id not in friends:
-            friends.append(friend_id)
-        return {"ok": True, "user": user_id, "friends": friends}
-
-    def send_message(self, from_user: str, to_user: str, text: str) -> Dict[str, Any]:
-        inbox = self.ledger.setdefault("messages", {}).setdefault(to_user, [])
-        msg = {"from": from_user, "to": to_user, "text": str(text), "ts": _now()}
-        inbox.append(msg)
-        return {"ok": True, "message": msg}
-
-    def read_messages(self, user: str) -> Dict[str, Any]:
-        msgs = self.ledger.setdefault("messages", {}).get(user, [])
-        return {"ok": True, "messages": msgs}
-
-    # ----------------------- posts/comments --------------------
-    def create_post(
-        self, user_id: str, content: str, tags: List[str]
-    ) -> Dict[str, Any]:
-        posts = self.ledger.setdefault("posts", [])
-        post = {
-            "id": len(posts) + 1,
-            "user": user_id,
-            "content": content,
-            "tags": tags,
-            "ts": _now(),
-        }
-        posts.append(post)
-        return {"ok": True, "post": post}
-
-    def create_comment(
-        self, user_id: str, post_id: int, content: str, tags: List[str]
-    ) -> Dict[str, Any]:
-        comments = self.ledger.setdefault("comments", [])
-        com = {
-            "id": len(comments) + 1,
-            "user": user_id,
-            "post_id": int(post_id),
-            "content": content,
-            "tags": tags,
-            "ts": _now(),
-        }
-        comments.append(com)
-        return {"ok": True, "comment": com}
-
-    # ----------------------- governance ------------------------
-    def create_proposal(
-        self, title: str, description: str, amount: float
-    ) -> Dict[str, Any]:
-        p = {
-            "id": len(self.governance.proposals),
-            "title": title,
-            "description": description,
-            "amount": float(amount),
-            "ts": _now(),
-        }
-        self.governance.proposals.append(p)
-        return {"ok": True, "proposal": p}
-
-    def cast_vote(self, user: str, proposal_id: int, vote: str) -> Dict[str, Any]:
-        votes = self.ledger.setdefault("votes", {})
-        pv = votes.setdefault(str(proposal_id), {})
-        pv[str(user)] = str(vote)
-        return {"ok": True, "proposal_id": proposal_id, "vote": vote}
-
-    # ----------------------- admin knobs -----------------------
-    def set_pool_split(self, split: Dict[str, float]) -> Dict[str, Any]:
-        total = sum(float(v) for v in split.values())
-        if abs(total - 1.0) > 1e-6:
-            raise ValueError("split_must_sum_to_1")
-        self.pool_split = {k: float(v) for k, v in split.items()}
-        return {"ok": True, "pool_split": self.pool_split}
-
-    def set_blocks_per_epoch(self, bpe: int) -> Dict[str, Any]:
-        self.blocks_per_epoch = max(1, int(bpe))
-        return {"ok": True}
-
-    def set_halving_interval_epochs(self, epochs: int) -> Dict[str, Any]:
-        self.halving_interval_epochs = max(1, int(epochs))
-        return {"ok": True}
-
-    # ----------------------- health/metrics --------------------
-    def get_health(self) -> Dict[str, Any]:
-        return {
-            "ok": True,
-            "height": len(self.ledger.get("chain", [])),
-            "mempool": len(self.ledger.get("mempool", [])),
-            "validators": len(self.cons.validators),
-        }
-
-    def get_metrics(self) -> Dict[str, Any]:
-        return {
-            "height": len(self.ledger.get("chain", [])),
-            "mempool_len": len(self.ledger.get("mempool", [])),
-            "balances_count": len(self.ledger.get("balances", {})),
-            "messages_count": sum(
-                len(v) for v in self.ledger.get("messages", {}).values()
-            ),
-            "events_count": len(self.ledger.get("events", [])),
-            "validator_count": len(self.cons.validators),
-            "rewards": self.cons.rewards,
-        }
 
 
-# ------------------------------------------------------------
-# Facade for API modules (keeps surface stable)
-# ------------------------------------------------------------
 class _ExecFacade:
-    def __init__(self, impl: WeAllExecutor) -> None:
-        self.exec = impl
+    """
+    Lightweight facade around a WeAllExecutor instance.
 
-    # attribute passthroughs used directly
-    @property
-    def ledger(self):
-        return self.exec.ledger
+    - Exposes the core executor as .exec
+    - Delegates attribute access to the underlying executor so existing
+      code can use either executor.<attr> or executor.exec.<attr>.
+    """
 
-    @property
-    def node_id(self):
-        return self.exec.node_id
+    def __init__(self, core):
+        self.exec = core
 
-    @property
-    def p2p(self):
-        return self.exec.p2p
-
-    # persistence
-    def save_state(self):
-        return self.exec.save_state()
-
-    def load_state(self):
-        return self.exec.load_state()
-
-    # consensus (new + legacy)
-    def add_tx(self, payload: dict):
-        return self.exec.add_tx(payload)
-
-    def propose_block(self, proposer_id: str):
-        return self.exec.propose_block(proposer_id)
-
-    def vote_block(self, validator_id: str, proposal_id: str):
-        return self.exec.vote_block(validator_id, proposal_id)
-
-    def attest_block(self, validator_id: str, proposal_id: str):
-        return self.exec.attest_block(validator_id, proposal_id)  # alias
-
-    def list_proposals(self):
-        return self.exec.list_proposals()
-
-    def mine_block(self, *args, **kwargs):
-        return self.exec.mine_block(*args, **kwargs)
-
-    def mine_block_dev(self):
-        return self.exec.mine_block_dev()
-
-    def on_new_block(self, producer_id: str):
-        return self.exec.on_new_block(producer_id)
-
-    def simulate_blocks(self, n: int):
-        return self.exec.simulate_blocks(n)
-
-    # functional APIs used by routes
-    def balance(self, user_id: str) -> float:
-        return self.exec.balance(user_id)
-
-    def transfer(self, sender: str, recipient: str, amount: float):
-        return self.exec.transfer(sender, recipient, amount)
-
-    def treasury_transfer(self, recipient: str, amount: float):
-        return self.exec.treasury_transfer(recipient, amount)
-
-    def register_user(self, user_id: str, poh_level: int = 1):
-        return self.exec.register_user(user_id, poh_level)
-
-    def add_friend(self, user_id: str, friend_id: str):
-        return self.exec.add_friend(user_id, friend_id)
-
-    def send_message(self, from_user: str, to_user: str, text: str):
-        return self.exec.send_message(from_user, to_user, text)
-
-    def read_messages(self, user: str):
-        return self.exec.read_messages(user)
-
-    def create_post(self, user_id: str, content: str, tags: List[str]):
-        return self.exec.create_post(user_id, content, tags)
-
-    def create_comment(self, user_id: str, post_id: int, content: str, tags: List[str]):
-        return self.exec.create_comment(user_id, post_id, content, tags)
-
-    def create_proposal(self, title: str, description: str, amount: float):
-        return self.exec.create_proposal(title, description, amount)
-
-    def cast_vote(self, user: str, proposal_id: int, vote: str):
-        return self.exec.cast_vote(user, proposal_id, vote)
-
-    def set_pool_split(self, split: Dict[str, float]):
-        return self.exec.set_pool_split(split)
-
-    def set_blocks_per_epoch(self, bpe: int):
-        return self.exec.set_blocks_per_epoch(bpe)
-
-    def set_halving_interval_epochs(self, epochs: int):
-        return self.exec.set_halving_interval_epochs(epochs)
-
-    def get_health(self):
-        return self.exec.get_health()
-
-    def get_metrics(self):
-        return self.exec.get_metrics()
+    def __getattr__(self, name):
+        return getattr(self.exec, name)
 
 
-# ------------------------------------------------------------
-# Module-level singleton facade (what API modules import)
-# ------------------------------------------------------------
-_EXEC_INSTANCE = WeAllExecutor()
-executor = _ExecFacade(_EXEC_INSTANCE)
-
-# --- WeAll Genesis: minimal persistent ledger binding -----------------------
-# Non-invasive helper:
-# - Uses existing `executor` if present.
-# - Adds `executor.ledger` (dict) if missing.
-# - Adds `executor.save_state()` if missing.
-# - Never raises on import if executor isn't defined or store fails.
-
-try:
-    from weall_node.storage.state_store import JSONStateStore
-except Exception:
-    JSONStateStore = None  # type: ignore[assignment]
-else:
-    _state_store = JSONStateStore() if JSONStateStore is not None else None  # type: ignore[call-arg]
-
-_executor = globals().get("executor", None)
-
-if _executor is not None and JSONStateStore is not None and _state_store is not None:
-    # Ensure ledger exists
-    current_ledger = getattr(_executor, "ledger", None)
-    if not isinstance(current_ledger, dict):
-        loaded = _state_store.load()
-        if isinstance(loaded, dict):
-            _executor.ledger = loaded
-        else:
-            _executor.ledger = {}
-
-    # Ensure save_state exists
-    if not hasattr(_executor, "save_state") or not callable(getattr(_executor, "save_state")):
-        def _save_state() -> None:
-            _state_store.save(_executor.ledger)  # type: ignore[attr-defined]
-
-        _executor.save_state = _save_state  # type: ignore[assignment]
-# If there's no global executor yet, or storage isn't available,
-# we intentionally do nothing. This keeps the original executor behavior intact.
+# Global singleton used everywhere
+executor = _ExecFacade(WeAllExecutor())

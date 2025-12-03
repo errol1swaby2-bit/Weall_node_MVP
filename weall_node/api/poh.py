@@ -1,444 +1,340 @@
 """
-Proof of Humanity (PoH) API + runtime-backed state management (v1.2)
+weall_node/api/poh.py
+----------------------------------
+FastAPI router for Proof-of-Humanity operations.
 
-Integrated with wallet.ensure_poh_badge()
-to automatically mint tier NFTs recognized by validators.
+Goals for this version:
+- Persist all PoH state in executor.ledger["poh"] (no in-memory STATE dicts)
+- Provide Tier-2 async verification endpoints used by the web SDK
+- Expose a simple /poh/status endpoint for frontends & auth gates
+
+Spec alignment
+--------------
+- Section 3.2 / 3.3 / 3.4: Tier flows
+- Section 3.5: Revocation & recovery (via ledger-backed records)
+- Section 8.3: Juror votes on Tier-2 applications
 """
 
 from __future__ import annotations
-import random, string, time, logging
-from typing import Dict, List
-from fastapi import APIRouter, HTTPException, BackgroundTasks
-from pydantic import BaseModel
+
+import logging
+from typing import Any, Dict, List, Optional
+
+from fastapi import APIRouter, HTTPException
+from pydantic import BaseModel, Field
+
 from ..weall_executor import executor
-from weall_node.weall_runtime.wallet import ensure_poh_badge  # ✅ integration
+from weall_node.weall_runtime.poh import (
+    poh_runtime,
+    get_poh_record,
+    set_poh_tier,
+    get_t2_config,
+    update_t2_config,
+    get_t2_queue,
+    upsert_t2_application,
+    register_t2_vote,
+)
+from weall_node.weall_runtime.wallet import ensure_poh_badge  # type: ignore
 
-# -------------------------------
-# In-memory state
-# -------------------------------
-STATE: Dict[str, dict] = {}  # user_id -> {tier, status, badges}
-PENDING_EMAILS: Dict[str, dict] = {}  # user_id -> {email, code, timestamp}
-SESSIONS: Dict[str, dict] = {}  # session_id -> session data
 
-# -------------------------------
-# Config
-# -------------------------------
-CODE_EXPIRY = 15 * 60
-REQ_COOLDOWN = 60
 logger = logging.getLogger("poh")
+router = APIRouter(prefix="/poh", tags=["poh"])
 
-router = APIRouter(prefix="/poh", tags=["Proof of Humanity"])
 
+# ---------------------------------------------------------------------------
+# Pydantic models
+# ---------------------------------------------------------------------------
 
-# -------------------------------
-# Helpers
-# -------------------------------
-def _send_email(to_addr: str, code: str):
-    """Send real email if SMTP is configured; else log a mock."""
-    subject = "WeAll Tier-1 verification code"
-    body = f"""WeAll Tier-1 verification code
+class StatusReq(BaseModel):
+    account_id: str = Field(..., description="Logical account/user id")
 
-Your WeAll Tier-1 verification code is:
-{code}
 
-This code expires in {CODE_EXPIRY // 60} minutes.
-If you did not request this, you can ignore this email.
-"""
-    try:
-        from weall_node.utils.emailer import send_email
-
-        send_email(to_addr, subject, body)
-        logger.info("Sent Tier-1 code to %s", to_addr)
-    except Exception as e:
-        logger.warning(
-            "SMTP send failed or not configured (%s). Falling back to log.", e
-        )
-        logger.info("[MOCK EMAIL] Sending Tier-1 code to %s: %s", to_addr, code)
-
-
-def _generate_code(length=6) -> str:
-    return "".join(random.choices(string.digits, k=length))
-
-
-def _events() -> List[dict]:
-    return executor.ledger.setdefault("events", [])
-
-
-def _record_event(evt: dict):
-    evt = dict(evt)
-    evt.setdefault("ts", int(time.time()))
-    _events().append(evt)
-    executor.save_state()
-
-
-def _get_balance(user: str) -> float:
-    try:
-        return float(executor.ledger.get(user, 0.0))
-    except Exception:
-        return 0.0
-
-
-def jurors_required(total_users: int) -> int:
-    if total_users <= 1:
-        return 0
-    if total_users <= 2:
-        return 1
-    if total_users <= 6:
-        return 2
-    if total_users <= 20:
-        return 3
-    if total_users <= 40:
-        return 5
-    return 10
-
-
-def _enqueue_tx(payload: dict):
-    """Compatibility-safe way to stage a tx regardless of executor version."""
-    try:
-        executor.add_tx(payload)
-    except AttributeError:
-        executor.ledger.setdefault("mempool", []).append(payload)
-
-
-# -------------------------------
-# Chain replay
-# -------------------------------
-def rebuild_state_from_chain():
-    """Rebuild PoH state from the append-only ledger."""
-    global STATE
-    STATE = {}
-
-    for evt in _events():
-        etype = evt.get("type")
-        user = evt.get("user")
-        if not user or not etype:
-            continue
-        rec = STATE.setdefault(user, {"tier": 0, "status": "unknown", "badges": []})
-        if etype == "POH_TIER1":
-            rec["tier"] = max(rec["tier"], 1)
-            rec["status"] = "verified"
-            if "Tier-1 Verified" not in rec["badges"]:
-                rec["badges"].append("Tier-1 Verified")
-        elif etype == "POH_TIER2_VERIFY" and evt.get("approved"):
-            rec["tier"] = max(rec["tier"], 2)
-            rec["status"] = "verified"
-            if "Tier-2 Verified (NFT)" not in rec["badges"]:
-                rec["badges"].append("Tier-2 Verified (NFT)")
-        elif etype == "POH_TIER3_VERIFY" and evt.get("approved"):
-            rec["tier"] = max(rec["tier"], 3)
-            rec["status"] = "verified"
-            if "Tier-3 Verified (NFT)" not in rec["badges"]:
-                rec["badges"].append("Tier-3 Verified (NFT)")
-    for user, data in STATE.items():
-        data.setdefault("badges", [])
-
-
-# -------------------------------
-# Tier 1 Verification
-# -------------------------------
-def verify_tier1(user: str):
-    """Register Tier-1 verification (email) and mint badge."""
-    already = any(
-        e.get("type") == "POH_TIER1" and e.get("user") == user for e in _events()
-    )
-    if already:
-        return {"ok": True, "user": user, "tier": 1, "status": "already_registered"}
-
-    _enqueue_tx({"poh": {"user": user, "tier": 1, "action": "verify"}})
-    executor.mine_block()  # << takes no args
-    _record_event({"type": "POH_TIER1", "user": user})
-
-    # ✅ Mint badge via wallet
-    badge = ensure_poh_badge(user, 1)
-    logger.info(f"[PoH] Tier-1 badge minted for {user}: {badge['nft_id']}")
-
-    STATE[user] = {
-        "tier": 1,
-        "status": "verified",
-        "badges": ["Tier-1 Verified", badge["metadata"]["title"]],
-    }
-    return {"ok": True, "user": user, "tier": 1, "badge": badge}
-
-
-# -------------------------------
-# Tier 2 Verification
-# -------------------------------
-def apply_tier2(user: str, evidence: str):
-    """Auto or juror approval of Tier-2 verification."""
-    if STATE.get(user, {}).get("tier", 0) < 1:
-        return {"ok": False, "error": "Tier-1 required first"}
-
-    total_users = sum(isinstance(u, str) for u in STATE.keys())
-    required = jurors_required(total_users)
-
-    if required == 0:
-        _enqueue_tx({"poh": {"user": user, "tier": 2, "action": "auto-approve"}})
-        executor.mine_block()  # << fixed
-        _record_event(
-            {
-                "type": "POH_TIER2_VERIFY",
-                "user": user,
-                "approved": True,
-                "evidence": evidence,
-            }
-        )
-        badge = ensure_poh_badge(user, 2)
-        rebuild_state_from_chain()
-        logger.info(f"[PoH] Tier-2 badge minted for {user}")
-        return {"ok": True, "tier": 2, "status": "auto-approved", "badge": badge}
-
-    jurors = [u for u, d in STATE.items() if d.get("tier", 0) >= 3]
-    if len(jurors) < required:
-        return {
-            "ok": True,
-            "status": "waiting_for_jurors",
-            "available": len(jurors),
-            "required": required,
-        }
-
-    selected = random.sample(jurors, required)
-    session_id = f"{user}:tier2:{int(time.time())}"
-    SESSIONS[session_id] = {
-        "jurors": selected,
-        "votes": {},
-        "tier": 2,
-        "status": "pending",
-        "required": required,
-    }
-    return {"ok": True, "session": session_id, "jurors": selected, "required": required}
-
-
-def verify_tier2(user: str, approver: str, approve: bool):
-    if STATE.get(user, {}).get("tier", 0) < 1:
-        return {"approved": False, "error": "Tier-1 required first"}
-    if not approve:
-        return {"approved": False}
-
-    _enqueue_tx(
-        {
-            "poh": {
-                "user": user,
-                "tier": 2,
-                "action": "juror-approve",
-                "approver": approver,
-            }
-        }
-    )
-    executor.mine_block()  # << fixed
-    _record_event(
-        {
-            "type": "POH_TIER2_VERIFY",
-            "user": user,
-            "approved": True,
-            "approver": approver,
-        }
-    )
-    badge = ensure_poh_badge(user, 2)
-    rebuild_state_from_chain()
-    logger.info(f"[PoH] Tier-2 juror approval complete for {user}")
-    return {"approved": True, "badge": badge}
-
-
-# -------------------------------
-# Tier 3 Verification
-# -------------------------------
-def verify_tier3(user: str, video_proof: str):
-    """Tier-3 verification with juror or auto-approval."""
-    if STATE.get(user, {}).get("tier", 0) < 2:
-        return {"ok": False, "error": "Tier-2 required first"}
-
-    total_users = sum(isinstance(u, str) for u in STATE.keys())
-    required = jurors_required(total_users)
-
-    if required == 0:
-        _enqueue_tx({"poh": {"user": user, "tier": 3, "action": "auto-approve"}})
-        executor.mine_block()  # << fixed
-        _record_event(
-            {
-                "type": "POH_TIER3_VERIFY",
-                "user": user,
-                "approved": True,
-                "video_proof": video_proof,
-            }
-        )
-        badge = ensure_poh_badge(user, 3)
-        rebuild_state_from_chain()
-        logger.info(f"[PoH] Tier-3 badge minted for {user}")
-        return {"ok": True, "tier": 3, "status": "auto-approved", "badge": badge}
-
-    jurors = [u for u, d in STATE.items() if d.get("tier", 0) >= 3]
-    if len(jurors) < required:
-        return {
-            "ok": True,
-            "status": "waiting_for_jurors",
-            "available": len(jurors),
-            "required": required,
-        }
-
-    selected = random.sample(jurors, required)
-    session_id = f"{user}:tier3:{int(time.time())}"
-    SESSIONS[session_id] = {
-        "jurors": selected,
-        "attestations": [],
-        "tier": 3,
-        "status": "pending",
-        "required": required,
-        "video_proof": video_proof,
-        "user_id": user,
-    }
-    return {"ok": True, "session": session_id, "jurors": selected, "required": required}
-
-
-def finalize_tier3(session_id: str):
-    s = SESSIONS.get(session_id)
-    if not s or s.get("status") != "pending":
-        raise ValueError("Invalid or non-pending session.")
-    approvals = sum(1 for a in s["attestations"] if a["decision"])
-    s["status"] = "closed"
-    user = s.get("user_id")
-
-    if approvals >= s.get("required", 3):
-        _enqueue_tx(
-            {
-                "poh": {
-                    "user": user,
-                    "tier": 3,
-                    "action": "juror-approve",
-                    "session": session_id,
-                }
-            }
-        )
-        executor.mine_block()  # << fixed
-        _record_event(
-            {
-                "type": "POH_TIER3_VERIFY",
-                "user": user,
-                "approved": True,
-                "session": session_id,
-            }
-        )
-        badge = ensure_poh_badge(user, 3)
-        rebuild_state_from_chain()
-        logger.info(f"[PoH] Tier-3 juror approval complete for {user}")
-        return {"approved": True, "tier": 3, "approvals": approvals, "badge": badge}
-
-    return {"approved": False, "tier": 3, "approvals": approvals}
-
-
-# -------------------------------
-# Status
-# -------------------------------
-def status(user: str):
-    data = STATE.get(user)
-    if not data:
-        return {"ok": False, "error": "User not found"}
-    return {
-        "ok": True,
-        "user": user,
-        "tier": data.get("tier"),
-        "status": data.get("status", "unknown"),
-        "badges": data.get("badges", []),
-        "balance": _get_balance(user),
-    }
-
-
-# -------------------------------
-# Models + Routes
-# -------------------------------
-class Tier1Request(BaseModel):
-    user: str
-    email: str
-
-
-class Tier1Verify(BaseModel):
-    user: str
-    code: str
-
-
-class Tier2Request(BaseModel):
-    user: str
-    evidence: str
-
-
-class Tier3Request(BaseModel):
-    user: str
-    video_proof: str
-
-
-@router.post("/request-tier1")
-def api_request_tier1(req: Tier1Request, background: BackgroundTasks):
-    now = time.time()
-    if (p := PENDING_EMAILS.get(req.user)) and now - p["timestamp"] < REQ_COOLDOWN:
-        raise HTTPException(status_code=429, detail="Cooldown active — try again soon")
-    code = _generate_code()
-    PENDING_EMAILS[req.user] = {"email": req.email, "code": code, "timestamp": now}
-    background.add_task(_send_email, req.email, code)
-    return {
-        "ok": True,
-        "message": f"Verification code sent to {req.email} (via SMTP/log)",
-    }
-
-
-@router.post("/verify-tier1")
-def api_verify_tier1(req: Tier1Verify):
-    p = PENDING_EMAILS.get(req.user)
-    if not p:
-        raise HTTPException(status_code=400, detail="No pending verification")
-    if time.time() - p["timestamp"] > CODE_EXPIRY:
-        del PENDING_EMAILS[req.user]
-        raise HTTPException(status_code=400, detail="Code expired")
-    if req.code != p["code"]:
-        raise HTTPException(status_code=400, detail="Invalid code")
-    del PENDING_EMAILS[req.user]
-    return verify_tier1(req.user)
-
-
-@router.post("/tier2")
-def api_apply_tier2(req: Tier2Request):
-    return apply_tier2(req.user, req.evidence)
-
-
-@router.post("/tier3")
-def api_verify_tier3(req: Tier3Request):
-    return verify_tier3(req.user, req.video_proof)
-
-
-@router.get("/status/{user}")
-def api_status(user: str):
-    return status(user)
-
-
-@router.on_event("startup")
-def init_state():
-    rebuild_state_from_chain()
-
-# --- WeAll Genesis: PoH tier registry helper endpoint -----------------------
-# Additive helper to sync PoH tiers into the canonical executor ledger.
-
-from pydantic import BaseModel
-from weall_node.security.permissions import set_poh_tier
-from weall_node.weall_executor import executor as _exec
-
-
-class PohTierSet(BaseModel):
-    user_id: str
+class StatusResp(BaseModel):
+    ok: bool
+    account_id: str
     tier: int
-    source: str | None = "manual"
+    revoked: bool
+    source: Optional[str] = None
+    updated_at: Optional[int] = None
+    revocation_reason: Optional[str] = None
 
 
-@router.post("/tier/set", tags=["Proof of Humanity"])
-def set_poh_tier_endpoint(req: PohTierSet):
+class T2SubmitReq(BaseModel):
+    account_id: str
+    videos: List[str] = Field(default_factory=list)
+    title: str = ""
+    desc: str = ""
+
+
+class T2ListReq(BaseModel):
+    status: Optional[str] = Field(
+        default=None,
+        description="Optional filter: pending / approved / rejected",
+    )
+    limit: int = 50
+    offset: int = 0
+
+
+class T2VoteReq(BaseModel):
+    candidate_id: str
+    juror_id: str
+    approve: bool
+
+
+class T2ItemReq(BaseModel):
+    account_id: str
+
+
+class T2ConfigReq(BaseModel):
+    required_yes: Optional[int] = None
+    max_pending: Optional[int] = None
+
+
+# ---------------------------------------------------------------------------
+# Helpers
+# ---------------------------------------------------------------------------
+
+def _ensure_executor_ledger() -> Dict[str, Any]:
+    led = getattr(executor, "ledger", None)
+    if not isinstance(led, dict):
+        raise HTTPException(status_code=500, detail="Ledger not initialised")
+    return led
+
+
+def _persist() -> None:
+    try:
+        save_state = getattr(executor, "save_state", None)
+        if callable(save_state):
+            save_state()
+    except Exception as exc:  # pragma: no cover - logging only
+        logger.warning("Failed to save state after PoH update: %r", exc)
+
+
+# ---------------------------------------------------------------------------
+# Public endpoints
+# ---------------------------------------------------------------------------
+
+@router.post("/status", response_model=StatusResp)
+async def poh_status(body: StatusReq) -> StatusResp:
     """
-    Persist a user's PoH tier into executor.ledger["poh"].
+    Return the current PoH status for a given account.
 
-    Assumes upstream PoH verification has already confirmed identity.
-    In production, protect this endpoint with proper authentication/roles.
+    This is the endpoint used by:
+      - websdk.js → api.pohStatus()
+      - frontend/auth.js PoH gates
     """
-    rec = set_poh_tier(req.user_id, req.tier, req.source or "manual")
+    account_id = (body.account_id or "").strip()
+    if not account_id:
+        raise HTTPException(status_code=400, detail="account_id required")
 
-    save_state = getattr(_exec, "save_state", None)
-    if callable(save_state):
-        save_state()
+    _ensure_executor_ledger()
 
+    rec = get_poh_record(account_id) or {
+        "tier": 0,
+        "revoked": False,
+        "source": "unknown",
+        "updated_at": None,
+        "revocation_reason": None,
+    }
+
+    try:
+        # Best-effort: ensure an NFT badge exists for non-zero tiers
+        tier_val = int(rec.get("tier", 0))
+        if tier_val > 0:
+            ensure_poh_badge(account_id, tier=tier_val)
+    except Exception:
+        # Never fail the status call because of NFT minting issues.
+        pass
+
+    return StatusResp(
+        ok=True,
+        account_id=account_id,
+        tier=int(rec.get("tier", 0)),
+        revoked=bool(rec.get("revoked", False)),
+        source=rec.get("source"),
+        updated_at=rec.get("updated_at"),
+        revocation_reason=rec.get("revocation_reason"),
+    )
+
+
+# ----------- Tier-2 Async Verification -----------
+
+@router.post("/t2/submit")
+async def t2_submit(body: T2SubmitReq) -> Dict[str, Any]:
+    """
+    Submit or update a Tier-2 async verification request.
+
+    Called by:
+        websdk.t2Submit({ accountId, videos, title, desc })
+    """
+    acct = (body.account_id or "").strip()
+    if not acct:
+        raise HTTPException(status_code=400, detail="account_id required")
+
+    _ensure_executor_ledger()
+    cfg = get_t2_config()
+
+    # Soft guard: avoid unbounded growth of pending queue.
+    queue = get_t2_queue()
+    pending = [a for a in queue.values() if a.get("status") == "pending"]
+    if len(pending) >= int(cfg.get("max_pending", 128)):
+        raise HTTPException(status_code=429, detail="Too many pending Tier-2 applications")
+
+    app = upsert_t2_application(
+        account_id=acct,
+        videos=body.videos,
+        title=body.title,
+        desc=body.desc,
+    )
+
+    _persist()
+    return {
+        "ok": True,
+        "application": app,
+    }
+
+
+@router.post("/t2/list")
+async def t2_list(body: T2ListReq) -> Dict[str, Any]:
+    """
+    List Tier-2 applications, optionally filtered by status.
+    """
+    _ensure_executor_ledger()
+    queue = get_t2_queue()
+
+    items: List[Dict[str, Any]] = list(queue.values())
+    if body.status:
+        wanted = str(body.status).lower()
+        items = [a for a in items if str(a.get("status", "")).lower() == wanted]
+
+    total = len(items)
+    start = max(0, int(body.offset))
+    end = max(start, start + int(body.limit))
+    page = items[start:end]
+
+    return {
+        "ok": True,
+        "total": total,
+        "items": page,
+        "limit": body.limit,
+        "offset": body.offset,
+    }
+
+
+@router.post("/t2/item")
+async def t2_item(body: T2ItemReq) -> Dict[str, Any]:
+    """
+    Fetch a single Tier-2 application by account id.
+    """
+    acct = (body.account_id or "").strip()
+    if not acct:
+        raise HTTPException(status_code=400, detail="account_id required")
+
+    _ensure_executor_ledger()
+    queue = get_t2_queue()
+    app = queue.get(acct)
+    if not app:
+        raise HTTPException(status_code=404, detail="Tier-2 application not found")
+
+    return {
+        "ok": True,
+        "application": app,
+    }
+
+
+@router.post("/t2/vote")
+async def t2_vote(body: T2VoteReq) -> Dict[str, Any]:
+    """
+    Register a juror vote for a Tier-2 application.
+
+    Called by:
+        websdk.t2Vote({ candidateId, jurorId, approve })
+    """
+    candidate_id = (body.candidate_id or "").strip()
+    juror_id = (body.juror_id or "").strip()
+    if not candidate_id or not juror_id:
+        raise HTTPException(status_code=400, detail="candidate_id and juror_id required")
+
+    _ensure_executor_ledger()
+
+    try:
+        app = register_t2_vote(
+            candidate_id=candidate_id,
+            juror_id=juror_id,
+            approve=bool(body.approve),
+        )
+    except KeyError:
+        raise HTTPException(status_code=404, detail="Tier-2 application not found")
+
+    # When auto-approved, also mint/upgrade badge.
+    try:
+        if app.get("status") == "approved":
+            rec = get_poh_record(candidate_id)
+            if rec:
+                ensure_poh_badge(candidate_id, tier=int(rec.get("tier", 2)))
+    except Exception:
+        pass
+
+    _persist()
+
+    return {
+        "ok": True,
+        "application": app,
+    }
+
+
+@router.post("/t2/config")
+async def t2_config(body: T2ConfigReq) -> Dict[str, Any]:
+    """
+    Get or update Tier-2 configuration.
+
+    If both fields are None, this behaves as a pure "get" call.
+    """
+    _ensure_executor_ledger()
+    if body.required_yes is None and body.max_pending is None:
+        cfg = get_t2_config()
+    else:
+        cfg = update_t2_config(
+            required_yes=body.required_yes,
+            max_pending=body.max_pending,
+        )
+
+    _persist()
+
+    return {
+        "ok": True,
+        "config": cfg,
+    }
+
+
+# ---------------------------------------------------------------------------
+# Admin / manual PoH tier setting (optional)
+# ---------------------------------------------------------------------------
+
+class AdminSetTierReq(BaseModel):
+    user_id: str
+    tier: int = Field(..., ge=0, le=3)
+    source: Optional[str] = None
+
+
+@router.post("/admin/set-tier")
+async def admin_set_tier(body: AdminSetTierReq) -> Dict[str, Any]:
+    """
+    Minimal admin helper to directly set PoH tier from the backend.
+
+    This should be protected by higher-level auth/ACL in production.
+    """
+    uid = (body.user_id or "").strip()
+    if not uid:
+        raise HTTPException(status_code=400, detail="user_id required")
+
+    _ensure_executor_ledger()
+    rec = set_poh_tier(uid, body.tier, source=body.source or "admin_set")
+
+    try:
+        ensure_poh_badge(uid, tier=rec.get("tier", body.tier))
+    except Exception:
+        pass
+
+    _persist()
     return {"ok": True, "poh": rec}
-

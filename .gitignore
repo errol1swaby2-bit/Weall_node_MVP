@@ -25,3 +25,14 @@ build/
 # Local state / temp
 weall_state.json
 *.sqlite3
+.venv/
+
+# Local runtime artifacts (Termux / dev)
+*.log
+weall_state.json
+node_id.json
+weall_node_*.zip
+data/
+uploads/
+cert.pem
+key.pem

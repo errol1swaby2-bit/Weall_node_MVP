@@ -16,16 +16,20 @@ let refreshIntervals = { feed: null, gov: null, profile: null };
 document.addEventListener("DOMContentLoaded", () => {
   const keys = JSON.parse(localStorage.getItem("weall_keys") || "{}");
   const userId = keys.public || localStorage.getItem("user");
-  const page = window.location.pathname.split("/").pop();
+  const segments = window.location.pathname.split("/").filter(Boolean);
+  const page = segments.length ? segments[segments.length - 1] : "index.html";
 
-  // Redirects
-  if ((page === "" || page === "index.html") && !userId) {
-    window.location.href="frontend/login.html"; return;
-  }
-  if (page === "frontend/login.html" && userId) {
-    window.location.href = "index.html"; return;
+  // If NOT logged in, force them onto login for any protected page
+  if (!userId && !["login.html", "signup.html", "recover.html"].includes(page)) {
+    window.location.href = "/frontend/login.html";
+    return;
   }
 
+  // If already logged in and they open login/signup, push them to feed
+  if (userId && ["", "login.html", "signup.html"].includes(page)) {
+    window.location.href = "/frontend/index.html";
+    return;
+  }
   const welcome = document.getElementById("welcome-user");
   if (welcome && userId) welcome.textContent = `Welcome, ${userId}`;
 
@@ -229,5 +233,5 @@ function logout() {
   Object.values(refreshIntervals).forEach(clearInterval);
   localStorage.removeItem("user");
   localStorage.removeItem("weall_keys");
-  location.href="frontend/login.html";
+  location.href = "/frontend/login.html";
 }

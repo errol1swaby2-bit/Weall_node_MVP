@@ -1,557 +1,764 @@
 <!doctype html>
 <html lang="en">
 <head>
-<script>
-(function(){
-  var LOGIN = "/frontend/login.html";
-  function normalize(u){
-    try{
-      if(!u) return u;
-      if(u === "/" || u === window.location.origin || u === window.location.origin + "/") return LOGIN;
-      if(typeof u === "string" && u.trim() === "/") return LOGIN;
-    }catch(e){}
-    return u;
-  }
-  try{
-    var proto = (window.Location && Location.prototype) ? Location.prototype : null;
-    var L = window.location;
-    var rep = (proto && proto.replace) ? proto.replace : L.replace.bind(L);
-    var asn = (proto && proto.assign)  ? proto.assign  : L.assign.bind(L);
-    function safeReplace(u){ return rep.call(this, normalize(u)||u); }
-    function safeAssign(u){  return asn.call(this, normalize(u)||u); }
-    if(proto){
-      if(proto.replace !== safeReplace) proto.replace = safeReplace;
-      if(proto.assign  !== safeAssign ) proto.assign  = safeAssign;
-      try{
-        var hrefDesc = Object.getOwnPropertyDescriptor(Location.prototype, "href");
-        if(hrefDesc && hrefDesc.set){
-          var set0 = hrefDesc.set;
-          Object.defineProperty(Location.prototype, "href", {
-            configurable:true, enumerable:hrefDesc.enumerable, get:hrefDesc.get,
-            set: function(v){ set0.call(this, normalize(v)||v); }
-          });
-        }
-      }catch(_){}
-    }else{
-      window.location.replace = safeReplace;
-      window.location.assign  = safeAssign;
-    }
-    // history
-    try{
-      var p = history.pushState, r = history.replaceState;
-      history.pushState    = function(s,t,u){ return p.call(this, s,t, normalize(u)||u); };
-      history.replaceState = function(s,t,u){ return r.call(this, s,t, normalize(u)||u); };
-    }catch(_){}
-    // DOM attributes
-    function rewrite(root){
-      root = root||document;
-      root.querySelectorAll('[href="/"],[src="/"],[action="/"]').forEach(function(el){
-        if(el.hasAttribute("href"))   el.setAttribute("href",   LOGIN);
-        if(el.hasAttribute("src"))    el.setAttribute("src",    LOGIN);
-        if(el.hasAttribute("action")) el.setAttribute("action", LOGIN);
-      });
-    }
-    document.addEventListener("submit", function(e){
-      try{
-        var f=e.target;
-        if(f && (f.getAttribute("action")==="/" || f.action===window.location.origin+"/")){
-          e.preventDefault(); window.location.assign(LOGIN);
-        }
-      }catch(_){}
-    }, true);
-    if(document.readyState==="loading"){ document.addEventListener("DOMContentLoaded", function(){ rewrite(); }); }
-    else { rewrite(); }
-    try{
-      var obs=new MutationObserver(function(ms){
-        for (var m of ms){ for (var n of (m.addedNodes||[])){ if(n.nodeType===1) rewrite(n); } }
-      });
-      obs.observe(document.documentElement, {childList:true, subtree:true});
-    }catch(_){}
-    // Last resort: if path ever becomes "/", force to login.
-    try{
-      if (location.pathname === "/") { location.replace(LOGIN); }
-      setInterval(function(){ if(location.pathname === "/"){ location.replace(LOGIN); } }, 300);
-    }catch(_){}
-  }catch(_){}
-})();
-</script>
-
-  <base href="/frontend/">
-  <meta charset="utf-8"/>
-  <meta name="viewport" content="width=device-width,initial-scale=1"/>
-  <title>WeAll</title>
+  <meta charset="utf-8">
+  <title>WeAll – Home Feed</title>
+  <meta name="viewport" content="width=device-width, initial-scale=1">
   <style>
-    :root { --bg:#f7f7fa; --card:#fff; --text:#1f2937; --muted:#6b7280; --brand:#2563eb; --ok:#16a34a; }
-    *{box-sizing:border-box} body{margin:0;background:var(--bg);color:var(--text);font:16px/1.4 system-ui,Segoe UI,Roboto}
-    .wrap{max-width:960px;margin:0 auto;padding:20px}
-    .hero{display:flex;flex-direction:column;align-items:center;margin:56px 0 32px}
-    .title{font-size:52px;font-weight:800;color:var(--brand);letter-spacing:.3px;margin:0 0 8px}
-    .tag{color:var(--muted);margin:0 0 24px}
-    .row{display:flex;gap:12px;flex-wrap:wrap}
-    .btn{appearance:none;border:0;border-radius:10px;padding:12px 20px;font-weight:600;cursor:pointer}
-    .btn.blue{background:var(--brand);color:#fff}
-    .btn.green{background:var(--ok);color:#fff}
-    .btn.ghost{background:#e5e7eb;color:#111827}
-    .topbar{display:flex;justify-content:space-between;align-items:center;margin:10px 0 22px}
-    .pill{padding:8px 12px;border-radius:999px;background:#eef2ff;color:#4338ca;font-weight:600}
-    .card{background:var(--card);border-radius:16px;padding:18px 18px;box-shadow:0 6px 18px rgba(0,0,0,.05);margin:12px 0}
-    .card h2{margin:0 0 8px}
-    .muted{color:var(--muted)}
-    .input{width:100%;padding:12px 12px;border:1px solid #e5e7eb;border-radius:10px;outline:none}
-    .stack{display:flex;flex-direction:column;gap:12px}
-    .tabs{position:sticky;bottom:0;background:var(--bg);display:flex;gap:18px;justify-content:center;padding:12px}
-    .tab{padding:10px 18px;border-radius:12px}
-    .tab.active{background:#e5e7eb}
-    .right{display:flex;gap:10px;align-items:center}
-    .badge{font-weight:700}
-    .center{display:flex;justify-content:center}
-    .mono{font-family:ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", "Courier New", monospace}
-    textarea.input{resize:vertical}
+    :root {
+      --bg: #05060a;
+      --card-bg: #101218;
+      --accent: #00ff7f;
+      --accent-soft: rgba(0,255,127,0.18);
+      --text-main: #ffffff;
+      --text-muted: #a0a4b8;
+      --danger-soft: rgba(255, 77, 77, 0.16);
+    }
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+    body {
+      font-family: system-ui, -apple-system, BlinkMacSystemFont, "SF Pro Text", sans-serif;
+      background: radial-gradient(circle at top, #16192b 0, #05060a 45%);
+      color: var(--text-main);
+      min-height: 100vh;
+      display: flex;
+      flex-direction: column;
+      align-items: stretch;
+      justify-content: center;
+      -webkit-font-smoothing: antialiased;
+      overscroll-behavior-y: none;
+      touch-action: pan-y;
+    }
+    #waRoot {
+      width: 100%;
+      max-width: 520px;
+      margin: 0 auto;
+      padding: 8px 10px 16px;
+      display: flex;
+      flex-direction: column;
+      gap: 10px;
+    }
+    @media (min-width: 768px) {
+      #waRoot {
+        padding-top: 20px;
+      }
+    }
+
+    /* Top bar */
+    .wa-topbar {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 10px;
+    }
+    .wa-brand {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+    }
+    .wa-pill {
+      border-radius: 999px;
+      border: 1px solid var(--accent-soft);
+      padding: 2px 9px;
+      font-size: 11px;
+      color: var(--accent);
+      background: rgba(0, 0, 0, 0.4);
+      letter-spacing: 0.04em;
+      text-transform: uppercase;
+    }
+    .wa-logo {
+      width: 26px;
+      height: 26px;
+      border-radius: 50%;
+      background: conic-gradient(from 140deg, #00ff7f, #00bfff, #ff00ff, #ff8800, #00ff7f);
+      border: 2px solid #05060a;
+      box-shadow: 0 0 0 2px rgba(0,255,127,0.45);
+    }
+    .wa-title-block {
+      display: flex;
+      flex-direction: column;
+    }
+    .wa-title-main {
+      font-size: 18px;
+      letter-spacing: 0.04em;
+      text-transform: uppercase;
+      font-weight: 600;
+      color: #f9fafb;
+    }
+    .wa-title-sub {
+      font-size: 11px;
+      color: var(--text-muted);
+    }
+    .wa-top-actions {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+    }
+    .wa-icon-button {
+      width: 32px;
+      height: 32px;
+      border-radius: 999px;
+      border: 1px solid rgba(255,255,255,0.08);
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      font-size: 16px;
+      background: rgba(8, 9, 15, 0.85);
+      cursor: pointer;
+    }
+    .wa-icon-button span {
+      opacity: 0.75;
+    }
+
+    /* Card shell */
+    .wa-card-shell {
+      background: radial-gradient(circle at top, rgba(80,90,255,0.25) 0, rgba(14,18,38,0.98) 40%, #05060a 100%);
+      border-radius: 18px;
+      overflow: hidden;
+      border: 1px solid rgba(255,255,255,0.05);
+      box-shadow:
+        0 18px 40px rgba(0,0,0,0.75),
+        0 0 0 1px rgba(255,255,255,0.02);
+      min-height: min(720px, 100vh - 130px);
+      max-height: calc(100vh - 110px);
+      display: flex;
+      flex-direction: column;
+      position: relative;
+      isolation: isolate;
+    }
+
+    /* Glow blobs behind card */
+    .wa-blob {
+      position: absolute;
+      pointer-events: none;
+      filter: blur(30px);
+      opacity: 0.65;
+      mix-blend-mode: screen;
+    }
+    .wa-blob.a {
+      top: -30px;
+      left: -20px;
+      width: 160px;
+      height: 160px;
+      background: radial-gradient(circle, rgba(0,255,127,0.4), transparent 70%);
+    }
+    .wa-blob.b {
+      top: -50px;
+      right: -40px;
+      width: 240px;
+      height: 240px;
+      background: radial-gradient(circle, rgba(0,191,255,0.45), transparent 70%);
+    }
+    .wa-blob.c {
+      bottom: -60px;
+      right: 20%;
+      width: 220px;
+      height: 220px;
+      background: radial-gradient(circle, rgba(255,0,255,0.35), transparent 70%);
+    }
+
+    /* Video/feed zone */
+    .wa-main {
+      flex: 1;
+      position: relative;
+      overflow: hidden;
+      display: flex;
+      flex-direction: row;
+    }
+    .wa-feed {
+      flex: 1;
+      position: relative;
+      overflow-y: scroll;
+      scroll-snap-type: y mandatory;
+      -webkit-overflow-scrolling: touch;
+      padding: 10px 8px 14px 10px;
+      z-index: 2;
+    }
+    .wa-slide {
+      scroll-snap-align: start;
+      margin-bottom: 15px;
+      border-radius: 16px;
+      background: linear-gradient(145deg, rgba(7,10,27,0.98), rgba(10,12,30,0.98));
+      border: 1px solid rgba(255,255,255,0.04);
+      padding: 10px 10px 9px;
+      display: flex;
+      flex-direction: column;
+      gap: 8px;
+      position: relative;
+    }
+
+    .wa-slide-header {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 8px;
+    }
+    .wa-slide-author {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      min-width: 0;
+    }
+    .wa-avatar {
+      width: 30px;
+      height: 30px;
+      border-radius: 999px;
+      background: radial-gradient(circle at 30% 20%, #ffffff 0, #999 16%, #3a3a3a 45%, #101010 70%);
+      border: 1px solid rgba(255,255,255,0.15);
+      flex-shrink: 0;
+    }
+    .wa-author-text {
+      display: flex;
+      flex-direction: column;
+      min-width: 0;
+    }
+    .wa-author-name {
+      font-size: 14px;
+      font-weight: 500;
+      white-space: nowrap;
+      overflow: hidden;
+      text-overflow: ellipsis;
+    }
+    .wa-author-meta {
+      font-size: 11px;
+      color: var(--text-muted);
+      display: flex;
+      align-items: center;
+      gap: 6px;
+    }
+    .wa-poh {
+      font-size: 10px;
+      border-radius: 999px;
+      padding: 1px 7px 2px;
+      border: 1px solid rgba(0,255,127,0.6);
+      color: #bfffe0;
+      background: rgba(0,255,127,0.07);
+      letter-spacing: 0.04em;
+      text-transform: uppercase;
+    }
+    .wa-poh.tier1 {
+      border-color: rgba(0,255,127,0.45);
+      background: rgba(0,255,127,0.06);
+    }
+    .wa-poh.tier2 {
+      border-color: rgba(0,191,255,0.6);
+      background: rgba(0,191,255,0.07);
+      color: #c7ecff;
+    }
+    .wa-poh.tier3 {
+      border-color: rgba(255,215,0,0.7);
+      background: rgba(255,215,0,0.09);
+      color: #fff9c2;
+    }
+
+    .wa-slide-menu {
+      display: flex;
+      align-items: center;
+      gap: 4px;
+    }
+    .wa-badge-small {
+      font-size: 9px;
+      padding: 1px 6px 2px;
+      border-radius: 999px;
+      border: 1px solid rgba(255,255,255,0.10);
+      color: var(--text-muted);
+      text-transform: uppercase;
+      letter-spacing: 0.08em;
+    }
+    .wa-dot {
+      width: 3px;
+      height: 3px;
+      border-radius: 999px;
+      background: rgba(255,255,255,0.45);
+    }
+    .wa-dots {
+      width: 20px;
+      height: 20px;
+      border-radius: 999px;
+      border: 1px solid rgba(255,255,255,0.08);
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      font-size: 15px;
+      cursor: pointer;
+      background: rgba(7, 9, 20, 0.9);
+    }
+
+    .wa-slide-body {
+      display: flex;
+      flex-direction: column;
+      gap: 7px;
+    }
+    .wa-video-shell {
+      border-radius: 12px;
+      overflow: hidden;
+      background: #05060a;
+      border: 1px solid rgba(255,255,255,0.15);
+      position: relative;
+      max-height: min(420px, 60vh);
+    }
+    .wa-video-shell video {
+      width: 100%;
+      height: auto;
+      display: block;
+      background: #000;
+    }
+    .wa-video-label {
+      position: absolute;
+      bottom: 8px;
+      left: 8px;
+      padding: 2px 7px;
+      border-radius: 999px;
+      background: rgba(0,0,0,0.65);
+      font-size: 10px;
+      text-transform: uppercase;
+      letter-spacing: 0.08em;
+      color: #f1f5f9;
+    }
+
+    .wa-text {
+      font-size: 14px;
+      line-height: 1.4;
+      color: #e5e7eb;
+      max-height: 4.8em;
+      overflow: hidden;
+      position: relative;
+    }
+    .wa-text.more::after {
+      content: "… more";
+      position: absolute;
+      bottom: 0;
+      right: 0;
+      font-size: 11px;
+      padding-left: 6px;
+      background: linear-gradient(to right, transparent, #101218);
+      color: var(--accent);
+    }
+
+    .wa-slide-footer {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 10px;
+      margin-top: 3px;
+    }
+    .wa-footer-left {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+    }
+    .wa-footer-stat {
+      display: flex;
+      align-items: center;
+      gap: 4px;
+      font-size: 11px;
+      color: var(--text-muted);
+    }
+    .wa-footer-stat span {
+      font-size: 13px;
+    }
+    .wa-footer-right {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+    }
+    .wa-footer-button {
+      border-radius: 999px;
+      border: 1px solid rgba(255,255,255,0.12);
+      padding: 3px 9px 4px;
+      font-size: 11px;
+      text-transform: uppercase;
+      letter-spacing: 0.08em;
+      background: rgba(10, 13, 30, 0.95);
+      display: inline-flex;
+      align-items: center;
+      gap: 5px;
+      cursor: pointer;
+    }
+
+    /* Right rail: like/comment/share */
+    .wa-rail {
+      width: 58px;
+      border-left: 1px solid rgba(255,255,255,0.08);
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      justify-content: center;
+      gap: 14px;
+      padding: 12px 0;
+      background: linear-gradient(to bottom, rgba(8,11,26,0.9), rgba(3,4,10,0.98));
+      z-index: 2;
+    }
+    .wa-rail-btn {
+      width: 44px;
+      height: 44px;
+      border-radius: 999px;
+      border: 1px solid rgba(255,255,255,0.10);
+      background: rgba(6,9,20,0.98);
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      justify-content: center;
+      cursor: pointer;
+      gap: 2px;
+    }
+    .wa-rail-btn span:first-child {
+      font-size: 16px;
+    }
+    .wa-rail-btn-label {
+      font-size: 11px;
+      color: var(--text-muted);
+      line-height: 1.1;
+    }
+    .wa-rail-btn.primary {
+      border-color: rgba(0,255,127,0.65);
+      box-shadow: 0 0 0 1px rgba(0,255,127,0.25);
+    }
+    .wa-rail-btn.danger {
+      border-color: rgba(255,77,77,0.6);
+      box-shadow: 0 0 0 1px rgba(255,77,77,0.15);
+    }
+
+    /* Bottom nav */
+    .wa-bottom-nav {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      border-top: 1px solid rgba(255,255,255,0.12);
+      background: linear-gradient(to top, rgba(0,0,0,0.9), rgba(6,9,18,0.85));
+      padding: 7px 10px 4px;
+      z-index: 5;
+      position: relative;
+    }
+    .wa-nav-section {
+      display: flex;
+      align-items: center;
+      gap: 14px;
+    }
+    .wa-tab {
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      gap: 1px;
+      font-size: 11px;
+      color: var(--text-muted);
+      cursor: pointer;
+    }
+    .wa-tab span:first-child {
+      font-size: 17px;
+    }
+    .wa-tab-label {
+      font-size: 10px;
+      text-transform: uppercase;
+      letter-spacing: 0.12em;
+    }
+    .wa-tab.active .wa-tab-label {
+      color: var(--accent);
+    }
+    .wa-avatar-mini {
+      width: 22px;
+      height: 22px;
+      border-radius: 999px;
+      background: radial-gradient(circle at 30% 20%, #ffffff 0, #999 16%, #3a3a3a 45%, #101010 70%);
+      border: 1px solid rgba(255,255,255,0.26);
+    }
+
+    .wa-fab-shell {
+      position: absolute;
+      left: 50%;
+      transform: translateX(-50%);
+      top: -26px;
+    }
+    .wa-fab {
+      width: 56px;
+      height: 56px;
+      border-radius: 999px;
+      background: radial-gradient(circle at 30% 20%, #1fff9c 0, #00a86b 45%, #0f766e 85%);
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      border: 1px solid rgba(0,0,0,0.9);
+      box-shadow:
+        0 12px 25px rgba(0,0,0,0.6),
+        0 0 0 2px rgba(255,255,255,0.22);
+      cursor: pointer;
+      transform-origin: center;
+      transition: transform 0.12s ease-out;
+    }
+    .wa-fab span {
+      font-size: 24px;
+    }
+    .wa-fab:active {
+      transform: translateX(-50%) scale(0.94);
+    }
+
+    /* Sheet */
+    .wa-sheet-backdrop {
+      position: fixed;
+      inset: 0;
+      background: radial-gradient(circle at top, rgba(0,0,0,0.2), rgba(0,0,0,0.85));
+      display: none;
+      align-items: flex-end;
+      justify-content: center;
+      z-index: 999;
+    }
+    .wa-sheet-backdrop.open {
+      display: flex;
+    }
+    .wa-sheet {
+      width: 100%;
+      max-width: 520px;
+      background: linear-gradient(to top, #05060a, #090c19);
+      border-radius: 18px 18px 0 0;
+      border: 1px solid rgba(255,255,255,0.08);
+      box-shadow: 0 -20px 40px rgba(0,0,0,0.85);
+      padding: 10px 14px 16px;
+      display: flex;
+      flex-direction: column;
+      gap: 10px;
+    }
+    .wa-sheet-handle {
+      width: 42px;
+      height: 4px;
+      border-radius: 999px;
+      background: rgba(148, 163, 184, 0.55);
+      margin: 0 auto 6px;
+    }
+    .wa-sheet-header {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      margin-bottom: 4px;
+    }
+    .wa-sheet-title {
+      font-size: 14px;
+      font-weight: 500;
+    }
+    .wa-sheet-sub {
+      font-size: 11px;
+      color: var(--text-muted);
+      margin-top: 2px;
+    }
+    .wa-sheet-close {
+      width: 26px;
+      height: 26px;
+      border-radius: 999px;
+      border: 1px solid rgba(255,255,255,0.15);
+      background: rgba(15,23,42,0.95);
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      cursor: pointer;
+      font-size: 16px;
+    }
+
+    .wa-sheet-options {
+      display: flex;
+      flex-direction: column;
+      gap: 8px;
+      margin-top: 4px;
+    }
+    .wa-sheet-option {
+      width: 100%;
+      border-radius: 12px;
+      border: 1px solid rgba(148, 163, 184, 0.3);
+      background: rgba(15,23,42,0.96);
+      padding: 10px 11px 11px;
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 10px;
+      cursor: pointer;
+    }
+    .wa-sheet-option-main {
+      display: flex;
+      flex-direction: column;
+      gap: 1px;
+      font-size: 13px;
+    }
+    .wa-sheet-option-main span {
+      font-size: 11px;
+      color: var(--text-muted);
+    }
+    .wa-sheet-option .wa-pill {
+      font-size: 10px;
+      padding-inline: 8px;
+    }
+
+    .wa-error {
+      margin-top: 6px;
+      font-size: 11px;
+      color: #fecaca;
+      background: var(--danger-soft);
+      border-radius: 8px;
+      padding: 5px 8px;
+      display: none;
+    }
+
+    /* Toast */
+    #toast {
+      position: fixed;
+      left: 50%;
+      transform: translateX(-50%);
+      bottom: 80px;
+      z-index: 2000;
+      background: rgba(15,23,42,0.96);
+      border-radius: 999px;
+      padding: 7px 13px;
+      font-size: 12px;
+      color: #e5e7eb;
+      border: 1px solid rgba(148, 163, 184, 0.55);
+      opacity: 0;
+      transition: opacity 0.18s ease-out, transform 0.18s ease-out;
+      pointer-events: none;
+    }
+    #toast.show {
+      opacity: 1;
+      transform: translateX(-50%) translateY(-4px);
+    }
+    #toast.ok {
+      border-color: rgba(34,197,94,0.75);
+      color: #bbf7d0;
+    }
+    #toast.warn {
+      border-color: rgba(234,179,8,0.75);
+      color: #facc15;
+    }
+    #toast.err {
+      border-color: rgba(248,113,113,0.85);
+      color: #fecaca;
+    }
+
+    /* Scrollbar */
+    .wa-feed::-webkit-scrollbar {
+      width: 4px;
+    }
+    .wa-feed::-webkit-scrollbar-track {
+      background: transparent;
+    }
+    .wa-feed::-webkit-scrollbar-thumb {
+      background: rgba(148,163,184,0.55);
+      border-radius: 999px;
+    }
+
+    @media (max-height: 650px) {
+      .wa-card-shell {
+        max-height: calc(100vh - 80px);
+      }
+      .wa-feed {
+        padding-bottom: 10px;
+      }
+    }
   </style>
-  <script src="env.js"></script>
-  <script src="api_shim.js"></script>
-
-  <script>
-  // Minimal guard: if no session token, go to signup
-  (function(){
-    try{
-      var t = localStorage.getItem('weall_token') || sessionStorage.getItem('weall_token');
-      if(!t){ location.replace('/frontend/login.html'); }
-    }catch(e){}
-  })();
-  </script>
-
 </head>
 <body>
-<nav id="topbar" style="position:sticky;top:0;z-index:1000;background:#0b1020;color:#fff;padding:.5rem .75rem;display:flex;justify-content:space-between;align-items:center;border-bottom:1px solid #1f2a44">
-  <strong>WeAll</strong>
-  <a id="ctaSignupTop" href="/frontend/login.html" role="button" aria-label="Join WeAll"
-     style="background:#32d47a;padding:.5rem .9rem;border-radius:.6rem;text-decoration:none;color:#0b1020;font-weight:600">
-    Join WeAll
-  </a>
-</nav>
-
-<div id="toast" role="status" aria-live="polite"></div>
-  <div class="wrap" id="app">
-    <!-- Unauthed landing -->
-    <div id="landing">
-      <div class="hero">
-        <h1 class="title">WeAll</h1>
-        <p class="tag">Decentralized coordination, human-first.</p>
-        <div class="row">
-          <button class="btn blue" id="btnLogin">Login</button>
-          <button class="btn green" id="btnSignup">Sign Up</button>
-        </div>
-        <p class="muted mono">API: <span id="apiBase"></span></p>
-      </div>
-
-      <!-- Signup / Login panels -->
-      <div class="card" id="panelSignup" style="display:none">
-        <h2>Sign Up (Tier-1 Email)</h2>
-        <div class="stack">
-          <input class="input" id="suEmail" placeholder="your@email.com" inputmode="email" />
-          <div class="row">
-            <button class="btn green" id="btnRequestCode">Request Code</button>
-            <button class="btn ghost" id="btnBack1">Back</button>
-          </div>
-          <div id="codeArea" style="display:none" class="stack">
-            <input class="input" id="suCode" placeholder="6-digit code" inputmode="numeric" maxlength="6"/>
-            <div class="row">
-              <button class="btn blue" id="btnVerifyCode">Verify & Login</button>
-              <button class="btn ghost" id="btnResend">Resend</button>
-            </div>
-            <p class="muted">Code is sent from <span class="mono">WeAll &lt;weall.verify@gmail.com&gt;</span> (logged to server console in dev).</p>
-          </div>
-        </div>
-      </div>
-
-      <div class="card" id="panelLogin" style="display:none">
-        <h2>Login (existing ID)</h2>
-        <div class="stack">
-          <input class="input" id="liEmail" placeholder="user id (email)"/>
-          <div class="row">
-            <button class="btn blue" id="btnDoLogin">Login</button>
-            <button class="btn ghost" id="btnBack2">Back</button>
-          </div>
-        </div>
+<div id="waRoot">
+  <header class="wa-topbar">
+    <div class="wa-brand">
+      <div class="wa-logo"></div>
+      <div class="wa-title-block">
+        <div class="wa-title-main">WeAll</div>
+        <div class="wa-title-sub">Shared governance, human-first</div>
       </div>
     </div>
-
-    <!-- Authed app -->
-    <div id="authed" style="display:none">
-      <div class="topbar">
-        <div class="pill">WeAll</div>
-        <div class="right">
-          <span id="who" class="muted"></span>
-          <span class="badge" id="pohBadge"></span>
-          <button class="btn ghost" id="btnLogout">Logout</button>
-        </div>
-      </div>
-
-      <!-- FEED -->
-      <div id="viewFeed">
-        <div class="card">
-          <h2>Feed</h2>
-          <div class="stack">
-            <textarea class="input" rows="3" id="postText" placeholder="Share something…"></textarea>
-            <div class="row">
-              <button class="btn green" id="btnPost">Post</button>
-              <button class="btn ghost" id="btnRefreshFeed">Refresh</button>
-            </div>
-          </div>
-        </div>
-
-        <!-- Verification panel (Tier-2 / Tier-3) -->
-        <div class="card" id="verifyPanel" style="margin-top:12px">
-          <h2>Verification</h2>
-          <div class="stack">
-            <div class="row" style="flex-wrap:nowrap">
-              <input class="input" id="tier2Evidence" placeholder="Tier-2: link to selfie or doc (optional)"/>
-              <button class="btn blue" id="btnTier2">Apply Tier-2</button>
-            </div>
-            <div class="row" style="flex-wrap:nowrap">
-              <input class="input" id="tier3Video" placeholder="Tier-3: link to short video proof"/>
-              <button class="btn blue" id="btnTier3">Apply Tier-3</button>
-            </div>
-            <small class="muted">Auto-approve while user count is low; juror flow activates as the network grows.</small>
-          </div>
-        </div>
-
-        <div id="feedList"></div>
-      </div>
-
-      <!-- GOVERNANCE (placeholder) -->
-      <div id="viewGov" style="display:none">
-        <div class="card"><h2>Governance</h2>
-          <p class="muted">Tier-3 quorum ≥ 60%; Yes &gt; 50% among quorum (from config).</p>
-        </div>
-      </div>
-
-      <!-- PROFILE -->
-      <div id="viewProfile" style="display:none">
-        <div class="card"><h2>Profile</h2>
-          <p><strong>User:</strong> <span id="pfUser"></span></p>
-          <p><strong>PoH Level:</strong> <span id="pfPoh"></span></p>
-          <p><strong>NFT Minted:</strong> <span id="pfNft"></span></p>
-        </div>
-      </div>
-
-      <div class="tabs center">
-        <button class="tab active" data-tab="feed">Feed</button>
-        <button class="tab" data-tab="gov">Governance</button>
-        <button class="tab" data-tab="profile">Profile</button>
-      </div>
+    <div class="wa-top-actions">
+      <button class="wa-icon-button" id="waBtnGov" title="Governance">
+        <span>⚖</span>
+      </button>
+      <button class="wa-icon-button" id="waBtnInbox" title="Messages">
+        <span>✉</span>
+      </button>
     </div>
+  </header>
+
+  <section class="wa-card-shell">
+    <div class="wa-blob a"></div>
+    <div class="wa-blob b"></div>
+    <div class="wa-blob c"></div>
+
+    <div class="wa-main">
+      <div id="waFeed" class="wa-feed"></div>
+      <aside class="wa-rail">
+        <button class="wa-rail-btn primary" id="waLike">
+          <span>♡</span>
+          <div class="wa-rail-btn-label">Like</div>
+        </button>
+        <button class="wa-rail-btn" id="waComment">
+          <span>💬</span>
+          <div class="wa-rail-btn-label">Comment</div>
+        </button>
+        <button class="wa-rail-btn" id="waShare">
+          <span>⤴</span>
+          <div class="wa-rail-btn-label">Share</div>
+        </button>
+      </aside>
+    </div>
+
+    <footer class="wa-bottom-nav">
+      <div class="wa-nav-section">
+        <div class="wa-tab active" id="waTabHome">
+          <span>◎</span>
+          <div class="wa-tab-label">Home</div>
+        </div>
+        <div class="wa-tab" id="waTabGov">
+          <span>⚖</span>
+          <div class="wa-tab-label">Govern</div>
+        </div>
+      </div>
+      <div class="wa-fab-shell">
+        <button class="wa-fab" id="waFab">
+          <span>＋</span>
+        </button>
+      </div>
+      <div class="wa-nav-section">
+        <div class="wa-tab" id="waTabInbox">
+          <span>✉</span>
+          <div class="wa-tab-label">Inbox</div>
+        </div>
+        <div class="wa-tab" id="waTabProfile">
+          <div class="wa-avatar-mini" id="waMiniAvatar"></div>
+          <div class="wa-tab-label">Profile</div>
+        </div>
+      </div>
+    </footer>
+  </section>
+</div>
+
+<div id="waSheetBackdrop" class="wa-sheet-backdrop">
+  <div class="wa-sheet">
+    <div class="wa-sheet-handle"></div>
+    <div class="wa-sheet-header">
+      <div>
+        <div class="wa-sheet-title">Create new post</div>
+        <div class="wa-sheet-sub">Share something with the network.</div>
+      </div>
+      <button class="wa-sheet-close" id="waSheetClose">✕</button>
+    </div>
+    <div class="wa-sheet-options">
+      <button class="wa-sheet-option" id="waOptText">
+        <div class="wa-sheet-option-main">
+          <strong>Text post</strong>
+          <span>Share a short thought with the network.</span>
+        </div>
+        <span class="wa-pill">Quick</span>
+      </button>
+      <button class="wa-sheet-option" id="waOptVideo">
+        <div class="wa-sheet-option-main">
+          <strong>Record / upload video</strong>
+          <span>Use your camera to record a short clip.</span>
+        </div>
+        <span class="wa-pill">Beta</span>
+      </button>
+    </div>
+    <div id="waSheetError" class="wa-error" style="display:none;"></div>
   </div>
+</div>
 
-  <script>
-    // ----------- Config -----------
-    const API = location.origin;
-    document.getElementById("apiBase").textContent = API;
+<!-- Hidden video input -->
+<input type="file" id="waVideoInput" accept="video/*" capture="user" style="display:none;" />
 
-    // Prefer modern endpoints; fall back to legacy if 404
-    const PATHS = {
-      requestTier1: "/poh/request-tier1",
-      verifyTier1: "/poh/verify-tier1",
-      contentFeed: "/content/feed",
-      contentPost: "/content/post",
-      legacyFeed: "/show_posts",
-      legacyUserFeed: (uid) => `/list_user_posts/${encodeURIComponent(uid)}`
-    };
+<div id="toast"></div>
 
-    const $ = (id) => document.getElementById(id);
-    const state = {
-      user: localStorage.getItem("weall_user") || "",
-      poh: Number(localStorage.getItem("weall_poh") || "0"),
-      nftMinted: localStorage.getItem("weall_nft") === "1",
-      useLegacyFeed: false,
-    };
-
-    function saveSession() {
-      localStorage.setItem("weall_user", state.user);
-      localStorage.setItem("weall_poh", String(state.poh));
-      localStorage.setItem("weall_nft", state.nftMinted ? "1" : "0");
-    }
-
-    function show(id){ ["landing","authed"].forEach(x=>$(x).style.display = (x===id)?"block":"none"); }
-    function showTab(which){
-      for (const v of ["viewFeed","viewGov","viewProfile"]) $(v).style.display = "none";
-      const map = {feed:"viewFeed", gov:"viewGov", profile:"viewProfile"};
-      $(map[which]).style.display = "block";
-      document.querySelectorAll(".tab").forEach(t => t.classList.toggle("active", t.dataset.tab===which));
-    }
-
-    // ----------- Session/UI boot -----------
-    function renderAuthedBar() {
-      $("who").textContent = state.user || "";
-      $("pohBadge").textContent = `PoH: ${state.poh}`;
-      $("pfUser").textContent = state.user || "";
-      $("pfPoh").textContent = String(state.poh);
-
-    async function detectFeedMode() {
-      try {
-        const r = await fetch(API + PATHS.contentFeed);
-        if (r.status === 404) state.useLegacyFeed = true;
-      } catch { state.useLegacyFeed = true; }
-    }
-
-    async function refreshFeed() {
-      const list = $("feedList");
-      list.innerHTML = "";
-      try {
-        let items = [];
-        if (!state.useLegacyFeed) {
-          const r = await fetch(API + PATHS.contentFeed);
-          if (r.status === 404) { state.useLegacyFeed = true; return refreshFeed(); }
-          items = await r.json();
-        } else {
-          const r = await fetch(API + PATHS.legacyUserFeed(state.user));
-          items = await r.json();
-        }
-
-        if (!Array.isArray(items)) items = items.items || [];
-        if (items.length === 0) {
-          list.innerHTML = `<div class="card"><span class="muted">No posts yet.</span></div>`;
-          return;
-        }
-        for (const it of items) {
-          const author = it.author || it.user || "system";
-          const text = it.text || it.message || JSON.stringify(it);
-          const when = it.ts ? new Date(it.ts*1000) : new Date();
-          const div = document.createElement("div");
-          div.className = "card";
-          div.innerHTML = `<div style="display:flex;justify-content:space-between">
-              <strong>${author}</strong>
-              <span class="muted" style="font-size:12px">${when.toLocaleString()}</span>
-            </div>
-            <div style="margin-top:6px">${escapeHtml(text)}</div>`;
-          list.appendChild(div);
-        }
-      } catch (e) {
-        list.innerHTML = `<div class="card"><span class="muted">Failed to load feed.</span></div>`;
-      }
-    }
-
-    async function postMessage() {
-      const text = $("postText").value.trim();
-      if (!text) return alert("Type something to post.");
-      try {
-        if (!state.useLegacyFeed) {
-          const r = await fetch(API + PATHS.contentPost, {
-            method:"POST",
-            headers:{"content-type":"application/json"},
-            body: JSON.stringify({ author: state.user, text })
-          });
-          if (r.status === 404) {
-            state.useLegacyFeed = true;
-          } else if (!r.ok) {
-            const t = await r.text();
-            throw new Error(t || r.statusText);
-          }
-        } else {
-          // Legacy create endpoint not implemented—UI stays responsive.
-        }
-        $("postText").value = "";
-        await refreshFeed();
-      } catch (e) {
-        alert("Post failed: " + (e.message || e));
-      }
-    }
-
-    // ----------- Email/Tier-1 flow -----------
-    async function requestCode(email) {
-      const r = await fetch(API + PATHS.requestTier1, {
-        method:"POST",
-        headers:{"content-type":"application/json"},
-        body: JSON.stringify({ user: email, email })
-      });
-      if (!r.ok) throw new Error(await r.text());
-      return true;
-    }
-    async function verifyCode(email, code) {
-      const r = await fetch(API + PATHS.verifyTier1, {
-        method:"POST",
-        headers:{"content-type":"application/json"},
-        body: JSON.stringify({ user: email, code: String(code || "").trim() })
-      });
-      if (!r.ok) throw new Error(await r.text());
-      const out = await r.json(); // {ok:true, tier/poh_level:1, nft_minted:bool}
-      return out;
-    }
-
-    // ----------- Tier-2 / Tier-3 actions -----------
-    async function applyTier2() {
-      const evidence = ($("tier2Evidence").value || "").trim() || "selfie";
-      if (!state.user) return alert("Login first.");
-      const r = await fetch(API + "/poh/tier2", {
-        method:"POST",
-        headers:{ "content-type":"application/json" },
-        body: JSON.stringify({ user: state.user, evidence })
-      });
-      const out = await r.json().catch(()=>({}));
-      if (!r.ok || out.ok === false) return alert("Tier-2 failed: " + (out.error || r.statusText));
-      alert("Tier-2 OK: " + (out.status || "approved"));
-      // Optionally bump visible PoH if returned
-      if (typeof out.tier === "number" && out.tier > state.poh) {
-        state.poh = out.tier; saveSession(); renderAuthedBar();
-      }
-    }
-
-    async function applyTier3() {
-      const video_proof = ($("tier3Video").value || "").trim() || "video";
-      if (!state.user) return alert("Login first.");
-      const r = await fetch(API + "/poh/tier3", {
-        method:"POST",
-        headers:{ "content-type":"application/json" },
-        body: JSON.stringify({ user: state.user, video_proof })
-      });
-      const out = await r.json().catch(()=>({}));
-      if (!r.ok || out.ok === false) return alert("Tier-3 failed: " + (out.error || r.statusText));
-      alert("Tier-3 OK: " + (out.status || "approved"));
-      if (typeof out.tier === "number" && out.tier > state.poh) {
-        state.poh = out.tier; saveSession(); renderAuthedBar();
-      }
-    }
-
-    // ----------- Small helpers -----------
-    function escapeHtml(s){ return s.replace(/[&<>"]/g,c=>({ "&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;"}[c])) }
-
-    // ----------- Wire up -----------
-    $("btnSignup").onclick = () => { $("panelLogin").style.display="none"; $("panelSignup").style.display="block"; };
-    $("btnLogin").onclick  = () => { $("panelSignup").style.display="none"; $("panelLogin").style.display="block"; };
-    $("btnBack1").onclick = $("btnBack2").onclick = () => { $("panelSignup").style.display="none"; $("panelLogin").style.display="none"; };
-
-    $("btnRequestCode").onclick = async () => {
-      const email = $("suEmail").value.trim();
-      if (!email) return alert("Enter an email.");
-      try {
-        await requestCode(email);
-        $("codeArea").style.display = "block";
-        alert("Code sent. Check your email.");
-      } catch(e){ alert("Request failed: " + (e.message||e)); }
-    };
-    $("btnResend").onclick = () => $("btnRequestCode").onclick();
-
-    $("btnVerifyCode").onclick = async () => {
-      const email = $("suEmail").value.trim();
-      const code = $("suCode").value.trim();
-      if (!email || !code) return alert("Enter email and code.");
-      try {
-        const out = await verifyCode(email, code);
-        state.user = email;
-        state.poh = Number(out.poh_level ?? out.tier ?? 1);
-        state.nftMinted = !!out.nft_minted;
-        (function(){var e=document.getElementById("pfNft"); if(e){e.textContent=state.nftMinted?"Yes":"No";}})();
-        saveSession();
-        await afterLogin();
-      } catch(e){ alert("Verification failed: " + (e.message||e)); }
-    };
-
-    $("btnDoLogin").onclick = async () => {
-      const email = $("liEmail").value.trim();
-      if (!email) return alert("Enter user id.");
-      state.user = email;
-      state.poh = Number(localStorage.getItem("weall_poh") || "1");
-      saveSession();
-      await afterLogin();
-    };
-
-    $("btnLogout").onclick = () => {
-      state.user = ""; state.poh = 0; state.nftMinted = false;
-      saveSession();
-      show("landing");
-    };
-
-    document.querySelectorAll(".tab").forEach(t => t.onclick = () => showTab(t.dataset.tab));
-    $("btnRefreshFeed").onclick = refreshFeed;
-    $("btnPost").onclick = postMessage;
-
-    // New: Verification buttons
-    (document.getElementById("btnTier2")||{}).onclick = applyTier2;
-    (document.getElementById("btnTier3")||{}).onclick = applyTier3;
-
-    async function afterLogin() {
-      renderAuthedBar();
-      show("authed");
-      showTab("feed");
-      await detectFeedMode();
-      await refreshFeed();
-    }
-
-    // Boot
-    (async () => {
-      if (state.user) { await afterLogin(); } else { show("landing"); }
-    })();
-  </script>
-<!-- CLIENT-ERROR-LISTENER -->
-<script>
-window.addEventListener('error', e => {
-  try { fetch('/content/client-log', {method:'POST', headers:{'content-type':'application/json'}, body: JSON.stringify({ msg:String(e.message||''), file:e.filename, line:e.lineno, col:e.colno })}); } catch(_) {}
-});
-window.addEventListener('unhandledrejection', e => {
-  try { fetch('/content/client-log', {method:'POST', headers:{'content-type':'application/json'}, body: JSON.stringify({ promise:true, reason:String(e.reason||'') })}); } catch(_) {}
-});
-</script>
-
-
-<footer class="weall-footer">
-  <span>© WeAll</span>
-  &nbsp;•&nbsp;<a href="/frontend/privacy.html">Privacy</a>
-  &nbsp;•&nbsp;<a href="/frontend/terms.html">Terms</a>
-</footer>
-
-
-<a id="cta-float" href="/frontend/login.html">Join WeAll</a>
-
-<script>
-(function(){
-  function isSignUpEl(el){
-    if(!el) return false;
-    const t = (el.innerText || el.textContent || '').trim().toLowerCase();
-    const id = (el.id||'').toLowerCase();
-    const cls = (el.className||'').toString().toLowerCase();
-    const da = (el.getAttribute && (el.getAttribute('data-action')||'').toLowerCase()) || '';
-    return t === 'sign up' || id.includes('signup') || cls.includes('signup') || da === 'signup';
-  }
-  function go(){ location.assign('/frontend/login.html'); }
-
-  // Directly wire common candidates
-  var candidates = Array.from(document.querySelectorAll(
-    '#signup, #signUp, #btnSignUp, [data-action="signup"], .signup, button, a'
-  ));
-  candidates.filter(isSignUpEl).forEach(function(el){
-    try { el.removeAttribute('disabled'); } catch(_) {}
-    el.style.pointerEvents = 'auto';
-    el.style.cursor = 'pointer';
-    el.addEventListener('click', function(ev){ try{ev.preventDefault();}catch(_){} go(); }, {passive:false});
-  });
-
-  // Global safety net: capture clicks anywhere
-  document.addEventListener('click', function(ev){
-    var el = ev.target;
-    // Walk up a few ancestors in case of nested spans/icons
-    for (var i=0;i<4 && el;i++){
-      if (isSignUpEl(el)) { try{ev.preventDefault();}catch(_){} go(); return; }
-      el = el.parentElement;
-    }
-  }, true);
-})();
-</script>
-
-
-<script>
-  // Gate onboarding only when coming from a user-initiated Tier request
-  function goToOnboarding() {
-    try { sessionStorage.setItem('weall_go_onboarding','1'); } catch(e){}
-    // patched out: no auto-redirect to advanced login
-  }
-  // Wire up any existing buttons with data-go-onboarding
-  document.addEventListener('DOMContentLoaded', function(){
-    document.querySelectorAll('[data-go-onboarding]').forEach(function(btn){
-      btn.addEventListener('click', function(e){ e.preventDefault(); goToOnboarding(); });
-    });
-  });
-</script>
-
+<script src="/frontend/session.js"></script>
+<script src="/frontend/tiktok.js"></script>
 </body>
 </html>

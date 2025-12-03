@@ -1,36 +1,38 @@
-#!/usr/bin/env bash
-set -euo pipefail
-
-API="weall_node.weall_api:app"
-HOST="127.0.0.1"
-PORT="8000"
+#!/data/data/com.termux/files/usr/bin/bash
+set -e
 
 echo "== WeAll starter =="
 
-# 1) Start IPFS if not running
-if ! pgrep -f "ipfs daemon" >/dev/null 2>&1; then
-  echo "[ipfs] starting daemon..."
-  nohup ipfs daemon > ipfs.log 2>&1 &
-  sleep 2
+BASE_DIR="$HOME/weall_node"
+VENV_DIR="$BASE_DIR/.venv"
+LOG_FILE="$BASE_DIR/api.log"
+APP="weall_node.weall_api:app"
+HOST="${HOST:-127.0.0.1}"
+PORT="${PORT:-8000}"
+
+cd "$BASE_DIR"
+
+# Activate venv so uvicorn is available
+if [ -d "$VENV_DIR" ]; then
+  echo "[venv] activating $VENV_DIR"
+  # shellcheck disable=SC1090
+  . "$VENV_DIR/bin/activate"
 else
-  echo "[ipfs] already running"
+  echo "[venv] WARNING: venv not found at $VENV_DIR"
 fi
 
-# 2) Kill any existing uvicorn serving our app
-pkill -f "uvicorn .*${API}" >/dev/null 2>&1 || true
+# Try to start IPFS if available
+if command -v ipfs >/dev/null 2>&1; then
+  if ! pgrep -x ipfs >/dev/null 2>&1; then
+    echo "[ipfs] starting daemon..."
+    ipfs daemon > "$BASE_DIR/ipfs.log" 2>&1 &
+    sleep 5
+  else
+    echo "[ipfs] ipfs daemon already running"
+  fi
+else
+  echo "[ipfs] ipfs not installed; skipping"
+fi
 
-# 3) Launch API (note the `env` here)
 echo "[api] starting uvicorn on http://${HOST}:${PORT}"
-nohup env PYTHONUNBUFFERED=1 python3 -m uvicorn "${API}" --host "${HOST}" --port "${PORT}" > api.log 2>&1 &
-
-# 4) Quick health/log peek
-sleep 1
-echo "[api] last 25 log lines:"
-tail -n 25 api.log || true
-
-if command -v curl >/dev/null 2>&1; then
-  echo "[api] version probe:"
-  curl -fsS "http://${HOST}:${PORT}/version" || echo "(version probe failed)"
-fi
-
-echo "== Done. Use 'tail -f ~/Weall_node_MVP/api.log' to watch logs =="
+python -m uvicorn "$APP" --host "$HOST" --port "$PORT" 2>&1 | tee "$LOG_FILE"

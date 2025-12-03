@@ -43,3 +43,21 @@ def get_metrics():
         "uptime_sec": h["uptime_sec"],
         "ipfs_ok": h["ipfs"].get("ok", False),
     }
+
+@router.get("/p2p")
+def get_p2p():
+    """
+    Return basic P2P peer info for the top nav badge.
+    Shape: { ok: true, peers: <int>, peer_ids: [...] }
+    """
+    peers = []
+    try:
+        peers = executor.get_peer_list()
+    except Exception:
+        peers = []
+    return {
+        "ok": True,
+        "peers": len(peers),
+        "peer_ids": peers,
+    }
+

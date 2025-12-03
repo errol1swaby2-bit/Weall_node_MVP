@@ -135,6 +135,19 @@ def get_jwt_expire_min(cfg: Dict[str, Any]) -> int:
 def get_secret_key() -> str:
     """
     SECRET_KEY is intentionally not read from YAML.
-    Provide it via environment (SECRET_KEY). A weak dev fallback is used only if missing.
+    Provide it via environment (SECRET_KEY).
+
+    In dev, we allow a weak default so things start easily.
+    In prod (WEALL_ENV=prod), SECRET_KEY must be explicitly set and strong.
     """
-    return os.getenv("SECRET_KEY", "dev-only-change-me")
+    env = os.getenv("WEALL_ENV", "dev").lower()
+    raw = os.getenv("SECRET_KEY")
+
+    if env in ("prod", "production"):
+        if not raw or len(raw) < 32:
+            raise RuntimeError(
+                "SECRET_KEY must be set to a strong value (>=32 chars) when WEALL_ENV=prod"
+            )
+        return raw
+
+    return raw or "dev-only-change-me"
