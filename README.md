@@ -1,3 +1,24 @@
+## Status — December 2025
+
+This branch is aligned with the **WeAll Protocol Full Scope v2 (partial)**.
+
+**Implemented so far**
+
+- Ledger + WeCoin monetary policy (21M cap, halving, 5 reward pools)
+- PoH tiers & registry, roles, jurors & disputes
+- Groups, emissaries, basic governance runtime
+- P2P overlay, IPFS pinning, messaging
+- Reputation & participation tracking
+- TikTok-style feed MVP and Termux-ready starter scripts
+
+**Still in progress for full v2 alignment**
+
+- Full Proof-of-Humanity upgrade flows (Tier 1–3 verification journeys)
+- PoH-gated governance and strict 1-human-1-vote wiring
+- Unified content/feed model + juror/governance feeds
+- Validator selection (PoH + reputation aware) and slashing
+- STV elections for group emissaries & group wallets
+
 WeAll Node MVP
 
 A FastAPI-based node for the WeAll protocol, bundling:
