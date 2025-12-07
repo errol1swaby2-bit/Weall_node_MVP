@@ -1,104 +1,198 @@
-#!/usr/bin/env python3
 """
-Validators API
----------------------------------------------------------
-Handles validator registration, opt-in/out, and status checks.
-Uses lazy import of executor_instance to avoid circular import.
+weall_node/api/validators.py
+--------------------------------------------------
+MVP validator registry for WeAll Node.
+
+- Stores a simple set of validator records in the executor ledger
+- Does NOT yet implement slashing, staking, or automatic selection
+- Works alongside rewards pools, but does not modify them directly
+
+API surface:
+
+    GET  /validators/meta
+        -> high-level overview (count, ids)
+
+    GET  /validators
+        -> full list of validator records
+
+    POST /validators/register
+        -> register or update a validator record
+
+    DELETE /validators/{validator_id}
+        -> remove a validator from the registry
 """
 
-from fastapi import APIRouter, HTTPException, Query
-from weall_node.weall_runtime.wallet import has_nft
+import time
+from typing import Dict, List, Optional, Any
+
+from fastapi import APIRouter, HTTPException
+from pydantic import BaseModel, Field
+
+from ..weall_executor import executor
 
 router = APIRouter(prefix="/validators", tags=["validators"])
 
 
-# ---------------------------------------------------------------
-# Helper: lazy-load executor_instance to break circular import
-# ---------------------------------------------------------------
-def _get_executor():
-    try:
-        from weall_node.weall_api import executor_instance
+# ============================================================
+# Ledger helpers
+# ============================================================
 
-        return executor_instance
-    except Exception as e:
-        raise RuntimeError(f"Executor not available: {e}")
+def _state() -> Dict[str, Any]:
+    """
+    Ensure the validators namespace exists in the ledger.
+
+    Shape:
+
+        executor.ledger["validators"] = {
+            "validators": {
+                "<id>": { ...ValidatorRecord... },
+                ...
+            }
+        }
+    """
+    return executor.ledger.setdefault("validators", {"validators": {}})
 
 
-# ---------------------------------------------------------------
+def _validators() -> Dict[str, Dict[str, Any]]:
+    st = _state()
+    return st.setdefault("validators", {})
+
+
+# ============================================================
+# Models
+# ============================================================
+
+class ValidatorRecord(BaseModel):
+    id: str = Field(..., description="Validator identifier (eg. node id or handle)")
+    user_id: Optional[str] = Field(
+        default=None,
+        description="Associated user handle, eg. '@errol1swaby2'"
+    )
+    metadata: Dict[str, Any] = Field(
+        default_factory=dict,
+        description="Arbitrary metadata for this validator (device, region, etc.)"
+    )
+    status: str = Field(
+        default="active",
+        description="Status flag (active, paused, banned, etc.)"
+    )
+    created_at: float = Field(..., description="Unix timestamp when record was created")
+    updated_at: float = Field(..., description="Last update timestamp")
+
+
+class ValidatorRegisterRequest(BaseModel):
+    id: str = Field(..., description="Validator identifier (eg. 'node:1827f5b1948ad5b7')")
+    user_id: Optional[str] = Field(
+        default=None,
+        description="Optional associated user handle"
+    )
+    metadata: Dict[str, Any] = Field(
+        default_factory=dict,
+        description="Free-form metadata"
+    )
+    status: Optional[str] = Field(
+        default="active",
+        description="Optional explicit status override"
+    )
+
+
+class ValidatorsMetaResponse(BaseModel):
+    ok: bool = True
+    count: int
+    validator_ids: List[str]
+
+
+class ValidatorsListResponse(BaseModel):
+    ok: bool = True
+    validators: List[ValidatorRecord]
+
+
+class ValidatorSingleResponse(BaseModel):
+    ok: bool = True
+    validator: ValidatorRecord
+
+
+class DeleteResponse(BaseModel):
+    ok: bool = True
+    deleted: str
+
+
+# ============================================================
 # Routes
-# ---------------------------------------------------------------
-@router.post("/opt-in")
-def opt_in_validator(user_id: str = Query(...)):
-    """
-    Opt a user into the validator pool (requires PoH Tier-3).
-    """
-    if not has_nft(user_id, "PoH", min_level=3):
-        raise HTTPException(
-            status_code=401, detail="PoH Tier-3 required to become validator"
-        )
+# ============================================================
 
-    executor = _get_executor()
-    result = executor.opt_in_validator(user_id)
-    if not result.get("ok"):
-        raise HTTPException(
-            status_code=400, detail=result.get("error", "Opt-in failed")
-        )
-    return {"ok": True, "message": "User added to validator pool"}
+@router.get("/meta", response_model=ValidatorsMetaResponse)
+def validators_meta() -> Dict[str, Any]:
+    """
+    High-level overview – how many validators exist and their IDs.
+    """
+    vals = _validators()
+    ids = sorted(vals.keys())
+    return {
+        "ok": True,
+        "count": len(ids),
+        "validator_ids": ids,
+    }
 
 
-@router.post("/opt-out")
-def opt_out_validator(user_id: str = Query(...)):
+@router.get("", response_model=ValidatorsListResponse)
+def list_validators() -> Dict[str, Any]:
     """
-    Opt a user out of the validator pool.
+    Return all validator records.
     """
-    executor = _get_executor()
-    result = executor.opt_out_validator(user_id)
-    if not result.get("ok"):
-        raise HTTPException(
-            status_code=400, detail=result.get("error", "Opt-out failed")
-        )
-    return {"ok": True, "message": "User removed from validator pool"}
+    vals = _validators()
+    records = [ValidatorRecord(**v) for v in vals.values()]
+    return {
+        "ok": True,
+        "validators": records,
+    }
 
 
-@router.get("/list")
-def list_validators():
+@router.post("/register", response_model=ValidatorSingleResponse)
+def register_validator(payload: ValidatorRegisterRequest) -> Dict[str, Any]:
     """
-    Return the current list of validators.
+    Register or update a validator.
+
+    Idempotent: calling it again with the same `id` will update metadata/status
+    and bump `updated_at`.
     """
-    executor = _get_executor()
-    try:
-        vals = executor.get_validators()
-        return {"ok": True, "validators": vals, "count": len(vals)}
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=f"Failed to list validators: {e}")
+    vals = _validators()
+    now = time.time()
+
+    if payload.id in vals:
+        rec = vals[payload.id]
+        # Update existing record
+        rec["user_id"] = payload.user_id or rec.get("user_id")
+        rec["metadata"] = payload.metadata or rec.get("metadata", {})
+        if payload.status is not None:
+            rec["status"] = payload.status
+        rec["updated_at"] = now
+    else:
+        # Create new record
+        rec = ValidatorRecord(
+            id=payload.id,
+            user_id=payload.user_id,
+            metadata=payload.metadata,
+            status=payload.status or "active",
+            created_at=now,
+            updated_at=now,
+        ).dict()
+        vals[payload.id] = rec
+
+    return {
+        "ok": True,
+        "validator": ValidatorRecord(**rec),
+    }
 
 
-@router.get("/status/{user_id}")
-def validator_status(user_id: str):
+@router.delete("/{validator_id}", response_model=DeleteResponse)
+def delete_validator(validator_id: str) -> Dict[str, Any]:
     """
-    Check if a user is currently an active validator.
+    Remove a validator from the registry.
     """
-    executor = _get_executor()
-    try:
-        is_val = executor.is_validator(user_id)
-        return {"ok": True, "user_id": user_id, "is_validator": bool(is_val)}
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=f"Status check failed: {e}")
+    vals = _validators()
+    if validator_id not in vals:
+        raise HTTPException(status_code=404, detail="Validator not found")
 
-
-@router.post("/run")
-def run_validator_epoch(user_id: str = Query(...)):
-    """
-    Execute validator role for the current epoch (if elected).
-    """
-    if not has_nft(user_id, "PoH", min_level=3):
-        raise HTTPException(
-            status_code=401, detail="PoH Tier-3 required to run validator"
-        )
-
-    executor = _get_executor()
-    try:
-        result = executor.run_validator(user_id)
-        return {"ok": True, **result}
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=f"Validator execution failed: {e}")
+    vals.pop(validator_id)
+    return {"ok": True, "deleted": validator_id}

@@ -5,234 +5,198 @@
   <title>WeAll — Login</title>
   <meta name="viewport" content="width=device-width, initial-scale=1" />
   <link rel="icon" href="/frontend/favicon.svg" />
-  <link rel="stylesheet" href="/frontend/style.css?v=1762461479" />\n  <script src="/frontend/session.js"></script>
-
+  <link rel="stylesheet" href="/frontend/style.css" />
+  <script src="/frontend/env.js"></script>
+  <script src="/frontend/auth.js"></script>
   <style>
-    .step { display: none; }
-    .step.active { display: block; }
-    .hint { font-size: 12px; color: var(--muted); margin-top: 6px; }
-    #status { margin-top: 10px; font-size: 13px; }
-    #status.ok { color: #7dd47d; }
-    #status.error { color: #ff8a8a; }
+    body {
+      margin: 0;
+      min-height: 100vh;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      font-family: system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+      background: radial-gradient(circle at top, #22c55e22 0, #020617 55%, #020617 100%);
+      color: #e5e7eb;
+    }
+    .wa-card {
+      width: 100%;
+      max-width: 420px;
+      background: rgba(15, 23, 42, 0.96);
+      border-radius: 18px;
+      padding: 24px 22px 20px;
+      box-shadow:
+        0 22px 60px rgba(15, 23, 42, 0.85),
+        0 0 0 1px rgba(148, 163, 184, 0.25);
+    }
+    h1 {
+      margin: 0 0 4px;
+      font-size: 1.3rem;
+      font-weight: 600;
+      letter-spacing: 0.02em;
+    }
+    .wa-sub {
+      margin-bottom: 18px;
+      font-size: 0.9rem;
+      color: #9ca3af;
+    }
+    label {
+      display: block;
+      font-size: 0.78rem;
+      text-transform: uppercase;
+      letter-spacing: 0.06em;
+      color: #9ca3af;
+      margin-bottom: 4px;
+    }
+    input {
+      width: 100%;
+      border-radius: 10px;
+      padding: 9px 11px;
+      border: 1px solid rgba(148, 163, 184, 0.6);
+      background: rgba(15, 23, 42, 0.9);
+      color: #e5e7eb;
+      font-size: 0.9rem;
+      outline: none;
+    }
+    input:focus {
+      border-color: #22c55e;
+      box-shadow: 0 0 0 1px rgba(34, 197, 94, 0.5);
+    }
+    .field {
+      margin-bottom: 14px;
+    }
+    .wa-btn {
+      width: 100%;
+      border: none;
+      border-radius: 999px;
+      padding: 10px 14px;
+      font-size: 0.95rem;
+      font-weight: 600;
+      background: linear-gradient(135deg, #22c55e, #4ade80);
+      color: #020617;
+      cursor: pointer;
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      gap: 6px;
+      box-shadow: 0 18px 45px rgba(16, 185, 129, 0.7);
+    }
+    .wa-btn:disabled {
+      opacity: 0.6;
+      cursor: wait;
+      box-shadow: none;
+    }
+    .wa-hint {
+      margin-top: 12px;
+      font-size: 0.8rem;
+      color: #9ca3af;
+    }
+    .wa-hint strong {
+      color: #e5e7eb;
+    }
+    .wa-status {
+      margin-top: 10px;
+      font-size: 0.82rem;
+      min-height: 1.2em;
+    }
+    .wa-status.ok {
+      color: #4ade80;
+    }
+    .wa-status.err {
+      color: #f97373;
+    }
+    a {
+      color: #22c55e;
+      text-decoration: none;
+    }
+    a:hover {
+      text-decoration: underline;
+    }
   </style>
 </head>
 <body>
-  <div id="toast" role="status" aria-live="polite"></div>
-  <main style="min-height:100dvh;display:grid;place-items:center;padding:24px">
-    <div class="wa-card" style="width:min(560px,92vw)">
-      <h2 style="margin:0 0 8px 0">Welcome</h2>
-      <p class="wa-dim" style="margin:0 0 14px 0">
-        Enter your email, get a 6-digit code, verify, and we’ll log you in.
-      </p>
-
-      <!-- Step 1: enter email → send code -->
-      <section id="step1" class="step active">
-        <label class="wa-labelblock">
-          Email
-          <input id="email" name="email" type="email" autocomplete="email"
-                 placeholder="you@example.com" maxlength="254" required>
-        </label>
-        <div class="wa-row" style="margin-top:10px">
-          <button class="wa-btn" id="btnSend">Send code</button>
-        </div>
-        <div class="hint">We’ll email a 6-digit code to verify this address.</div>
-      </section>
-
-      <!-- Step 2: enter OTP → verify -->
-      <section id="step2" class="step">
-        <div class="wa-row" style="align-items:flex-end">
-          <label class="wa-labelblock" style="flex:1">Enter code
-            <input id="code" name="code" type="text" inputmode="numeric"
-                   pattern="\d{6}" maxlength="6" placeholder="123456">
-          </label>
-          <button class="wa-btn wa-ghost" id="btnResend" title="Resend code">Resend</button>
-        </div>
-        <div class="wa-row" style="margin-top:8px">
-          <button class="wa-btn" id="btnVerify">Verify & Continue</button>
-        </div>
-      </section>
-
-      <div id="status"></div>
-
-      <p class="wa-dim" style="font-size:12px;margin-top:12px">
-        Private keys and advanced setup will be handled after login.
-      </p>
+  <div class="wa-card">
+    <h1>Welcome back to WeAll</h1>
+    <div class="wa-sub">
+      Sign in with your handle and password. New? Enter a new handle and password to create an account.
     </div>
-  </main>
+
+    <form id="loginForm">
+      <div class="field">
+        <label for="userId">Handle</label>
+        <input id="userId" name="userId" autocomplete="username" placeholder="@yourname or yourname" />
+      </div>
+      <div class="field">
+        <label for="password">Password</label>
+        <input id="password" name="password" type="password" autocomplete="current-password" />
+      </div>
+      <button type="submit" class="wa-btn" id="loginBtn">
+        <span id="btnLabel">Continue</span>
+      </button>
+      <div class="wa-status" id="status"></div>
+    </form>
+
+    <div class="wa-hint">
+      <strong>Tip:</strong> Once logged in, you can manage your PoH and recovery from your
+      <a href="/frontend/profile.html">profile</a>.
+    </div>
+  </div>
 
   <script>
     (function () {
-      const step1 = document.getElementById('step1');
-      const step2 = document.getElementById('step2');
-      const emailInput = document.getElementById('email');
-      const codeInput = document.getElementById('code');
-      const btnSend = document.getElementById('btnSend');
-      const btnResend = document.getElementById('btnResend');
-      const btnVerify = document.getElementById('btnVerify');
-      const statusEl = document.getElementById('status');
+      const form = document.getElementById("loginForm");
+      const statusEl = document.getElementById("status");
+      const btn = document.getElementById("loginBtn");
+      const btnLabel = document.getElementById("btnLabel");
+      const userIdInput = document.getElementById("userId");
+      const pwdInput = document.getElementById("password");
 
-      let currentEmail = '';
-
-      function showStep(n) {
-        step1.classList.toggle('active', n === 1);
-        step2.classList.toggle('active', n === 2);
+      function setStatus(msg, cls) {
+        statusEl.textContent = msg || "";
+        statusEl.className = "wa-status" + (cls ? " " + cls : "");
       }
 
-      function setStatus(msg, kind) {
-        statusEl.textContent = msg || '';
-        statusEl.className = '';
-        if (kind) statusEl.classList.add(kind);
+      function nextUrl() {
+        const u = new URL(window.location.href);
+        let next = u.searchParams.get("next") || "/frontend/tiktok.html";
+        try { next = decodeURIComponent(next); } catch {}
+        if (!next.startsWith("/")) next = "/frontend/tiktok.html";
+        return next;
       }
 
-      async function postJson(url, body) {
-        const res = await fetch(url, {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify(body || {})
-        });
-        let data = {};
-        try { data = await res.json(); } catch (_) {}
-        if (!res.ok || data.error || data.detail) {
-          const msg = data.detail || data.error || (res.status + ' ' + res.statusText);
-          throw new Error(msg);
-        }
-        return data;
-      }
+      // Prefill handle if we have it
+      try {
+        const cached = weallAuth.getAccount && weallAuth.getAccount();
+        if (cached) userIdInput.value = cached;
+      } catch {}
 
-      async function sendCode() {
-        const email = (emailInput.value || '').trim();
-        if (!email) {
-          setStatus('Please enter your email.', 'error');
+      form.addEventListener("submit", async (ev) => {
+        ev.preventDefault();
+        const userId = userIdInput.value.trim();
+        const pwd = pwdInput.value || "";
+        if (!userId || !pwd) {
+          setStatus("Please enter both handle and password.", "err");
           return;
         }
+
+        btn.disabled = true;
+        btnLabel.textContent = "Signing in…";
+        setStatus("");
+
         try {
-          setStatus('Sending code…');
-          await postJson('/auth/start', { email });
-          currentEmail = email;
-          localStorage.setItem('weall_email', email);
-          setStatus('Code sent to ' + email + '. Check your inbox.', 'ok');
-          showStep(2);
-          codeInput.focus();
+          const data = await weallAuth.login(userId, pwd);
+          setStatus("Signed in as " + (data.user_id || userId) + ".", "ok");
+          // small delay so they see the success
+          setTimeout(() => {
+            window.location.replace(nextUrl());
+          }, 400);
         } catch (e) {
-          setStatus('Failed to send code: ' + e.message, 'error');
-        }
-      }
-
-      async function resendCode() {
-        const email = currentEmail || (emailInput.value || '').trim();
-        if (!email) {
-          setStatus('No email to resend to. Please start over.', 'error');
-          showStep(1);
-          return;
-        }
-        try {
-          setStatus('Resending code…');
-          await postJson('/auth/start', { email });
-          setStatus('Code resent to ' + email + '.', 'ok');
-        } catch (e) {
-          setStatus('Failed to resend code: ' + e.message, 'error');
-        }
-      }
-
-      async function verifyCode() {
-        const email = currentEmail || (emailInput.value || '').trim();
-        const code  = (codeInput.value || '').trim();
-        if (!email) {
-          setStatus('Email is required.', 'error');
-          return;
-        }
-        if (!/^\d{6}$/.test(code)) {
-          setStatus('Enter the 6-digit code.', 'error');
-          return;
-        }
-        try {
-          setStatus('Verifying…');
-          const res = await postJson('/auth/verify', { email, code });
-          if (res && (res.ok === true || res.token || res.message)) {
-            setStatus('Verified. Creating session…', 'ok');
-            try {
-              // Issue a signed session token (Session.js)
-              if (window.Session && typeof Session.login === 'function') {
-                const sess = await Session.login(email);
-                try {
-                  if (sess && sess.token) {
-                    // Legacy flag so older guards keep working
-                    localStorage.setItem('weall_token', sess.token);
-                  }
-                } catch (_) {}
-              }
-              // Normalize account / user identifiers for downstream pages
-              try {
-                localStorage.setItem('weall.account', email);
-                localStorage.setItem('weall_acct', email);
-                localStorage.setItem('weall_user', email);
-                if (!localStorage.getItem('weall_poh')) {
-                  localStorage.setItem('weall_poh', '1');
-                }
-                if (!localStorage.getItem('weall_nft')) {
-                  localStorage.setItem('weall_nft', '0');
-                }
-              } catch (_) {}
-            } catch (e) {
-              console.warn('Session login failed (continuing anyway):', e);
-            }
-
-            // Decide where to go next (respect ?next= when safe)
-            const qs = new URLSearchParams(location.search);
-            let next = (window.__WEALL_SAFE_NEXT__ || qs.get('next') || '/frontend/index.html');
-
-            // If next is URL-encoded like "%2F", decode it.
-            try {
-              next = decodeURIComponent(next);
-            } catch (_) {}
-
-            // Normalize unsafe or useless targets to the home feed
-            if (!next ||
-                next === '/' ||
-                next === '/frontend/' ||
-                next === '/frontend/login.html' ||
-                next === location.origin + '/' ||
-                next === location.origin) {
-              next = '/frontend/index.html';
-            }
-
-            // Only allow absolute paths within this origin
-            if (!next.startsWith('/')) next = '/frontend/index.html';
-
-            setStatus('Verified. Redirecting…', 'ok');
-            setTimeout(() => {
-              window.location.replace(next);
-            }, 150);
-          } else {
-            setStatus('Unexpected response from server.', 'error');
-          }
-        } catch (e) {
-          setStatus('Verification failed: ' + e.message, 'error');
-        }
-      }
-
-      // Wire buttons
-      btnSend.addEventListener('click', (e) => { e.preventDefault(); sendCode(); });
-      btnResend.addEventListener('click', (e) => { e.preventDefault(); resendCode(); });
-      btnVerify.addEventListener('click', (e) => { e.preventDefault(); verifyCode(); });
-
-      // Enter key on code field triggers verify
-      codeInput.addEventListener('keydown', (e) => {
-        if (e.key === 'Enter') {
-          e.preventDefault();
-          verifyCode();
+          setStatus(e.message || "Login failed.", "err");
+        } finally {
+          btn.disabled = false;
+          btnLabel.textContent = "Continue";
         }
       });
-
-      // If we already have an email in storage, prefill
-      (function prefill() {
-        try {
-          const savedEmail = localStorage.getItem('weall_email');
-          if (savedEmail) {
-            emailInput.value = savedEmail;
-          }
-        } catch (_) {}
-      })();
     })();
   </script>
 </body>

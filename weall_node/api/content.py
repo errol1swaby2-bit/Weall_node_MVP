@@ -1,175 +1,254 @@
 """
 weall_node/api/content.py
---------------------------------------------------
-Content posting + simple feed and media upload.
+-------------------------
+
+MVP content API for WeAll Node.
+
+- Stores posts in executor.ledger["content"]["posts"]
+- Supports simple text posts with "global" or "group" scope
+- Exposes:
+    GET  /content/meta
+    GET  /content/posts
+    POST /content/posts
+    GET  /content/feed
 """
 
 import time
-import uuid
-from typing import List, Optional
+import secrets
+from typing import List, Optional, Literal, Dict, Any
 
-from fastapi import APIRouter, HTTPException, UploadFile, File, Form
-from pydantic import BaseModel
+from fastapi import APIRouter, HTTPException, Query
+from pydantic import BaseModel, Field
 
 from ..weall_executor import executor
 
-# IMPORTANT: prefix so routes are /content/feed, /content/post, /content/upload
-router = APIRouter(prefix="/content")
+router = APIRouter()
 
 
-# ---------- Internal helpers ----------
+# ============================================================
+# Models
+# ============================================================
 
-
-def _ledger():
-    # Single shared runtime ledger
-    return getattr(executor, "ledger", {})
-
-
-def _posts_list():
-    """
-    Backwards-compatible: support both
-    - ledger["posts"] (older builds)
-    - ledger["content"]["posts"] (newer layout)
-    """
-    ledger = _ledger()
-
-    # Prefer legacy top-level "posts" if present
-    if "posts" in ledger and isinstance(ledger["posts"], list):
-        return ledger["posts"]
-
-    content = ledger.get("content")
-    if not isinstance(content, dict):
-        content = {}
-        ledger["content"] = content
-
-    posts = content.get("posts")
-    if not isinstance(posts, list):
-        posts = []
-        content["posts"] = posts
-
-    return posts
-
-
-def _append_post(p: dict):
-    p = dict(p or {})
-    p.setdefault("id", str(uuid.uuid4()))
-    ts = int(time.time())
-    # keep old key plus new ones the frontend reads
-    p.setdefault("ts", ts)
-    p.setdefault("time", ts)
-    p.setdefault("created_at", ts)
-
-    posts = _posts_list()
-    posts.append(p)
-
-    # persist via executor
-    try:
-        executor.save_state()
-    except Exception:
-        # non-fatal in case executor wiring changes
-        pass
-
-    return p
-
-
-# ---------- Models ----------
-
-
-class NewPost(BaseModel):
-    author: str
-    text: str
-    tags: Optional[List[str]] = None
-    media_url: Optional[str] = None
-    content_type: Optional[str] = None
-
-
-# ---------- Routes ----------
-
-
-@router.get("/feed")
-def get_feed(limit: int = 50):
-    """
-    Simple chronological feed; newest first.
-    """
-    posts = list(_posts_list())
-    # sort by time/ts descending
-    posts.sort(
-        key=lambda p: p.get("time") or p.get("created_at") or p.get("ts") or 0,
-        reverse=True,
+class PostCreate(BaseModel):
+    """Payload used when creating a new post."""
+    author: str = Field(..., description="@handle of the author")
+    text: str = Field(..., max_length=4000)
+    scope: Literal["global", "group"] = Field(
+        "global",
+        description="Post visibility scope: 'global' or 'group'.",
     )
-    if limit and limit > 0:
-        posts = posts[:limit]
-    return {"ok": True, "items": posts}
+    group_id: Optional[str] = Field(
+        None,
+        description="Required when scope='group'.",
+    )
 
 
-@router.post("/post")
-def create_post(body: NewPost):
+# ============================================================
+# Internal helpers
+# ============================================================
+
+def _normalize_post(raw: Dict[str, Any]) -> Dict[str, Any]:
     """
-    Create a new text or media post.
-    """
-    text = (body.text or "").strip()
-    if not body.author or not text:
-        raise HTTPException(status_code=400, detail="author and text are required")
-    if len(text) > 2000:
-        raise HTTPException(status_code=400, detail="text is too long")
+    Normalize any legacy post dicts into the current shape.
 
-    p = {
-        "author": body.author,
+    We tolerate older keys like 'user', 'body', 'description', 'timestamp', etc.
+    If something is missing, we fill in minimally so it won't crash the API.
+    """
+    if not isinstance(raw, dict):
+        return {}
+
+    now = int(time.time())
+
+    author = raw.get("author") or raw.get("user") or "@unknown"
+    text = (
+        raw.get("text")
+        or raw.get("body")
+        or raw.get("description")
+        or raw.get("title")
+        or ""
+    )
+
+    scope = raw.get("scope") or "global"
+    group_id = raw.get("group_id")
+
+    created_at = int(raw.get("created_at") or raw.get("timestamp") or now)
+    updated_at = int(raw.get("updated_at") or created_at)
+
+    post_id = raw.get("id") or secrets.token_hex(8)
+
+    return {
+        "id": post_id,
+        "author": author,
         "text": text,
-        "tags": body.tags or [],
+        "scope": scope,
+        "group_id": group_id,
+        "created_at": created_at,
+        "updated_at": updated_at,
     }
 
-    if body.media_url:
-        p["media_url"] = body.media_url
-    if body.content_type:
-        p["content_type"] = body.content_type
 
-    p = _append_post(p)
-    return {"ok": True, "post": p}
-
-
-@router.post("/upload")
-async def upload_media(
-    file: UploadFile = File(...),
-    visibility: str = Form("private"),
-):
+def _init_content_state() -> Dict[str, Any]:
     """
-    Upload a media file (video or image).
+    Ensure the 'content' namespace exists in the ledger and normalize posts.
 
-    If IPFS is available, we push the bytes there; otherwise this is a stub that
-    returns a fake URL so the frontend doesn't crash.
+    This is idempotent and safe to call on every request.
     """
-    try:
-        data = await file.read()
-    except Exception as e:
-        raise HTTPException(status_code=400, detail=f"read_failed: {e}")
+    state = executor.ledger.setdefault("content", {})
+    posts_raw: List[Dict[str, Any]] = state.setdefault("posts", [])
 
-    # Basic size guard; main protection is WEALL_MAX_UPLOAD_BYTES in settings
-    if not data:
-        raise HTTPException(status_code=400, detail="empty_file")
+    normalized: List[Dict[str, Any]] = []
+    for p in posts_raw:
+        norm = _normalize_post(p)
+        if norm:
+            normalized.append(norm)
 
-    # Try IPFS if available
-    cid = None
-    url = None
-    try:
-        ipfs = getattr(executor, "ipfs", None)
-        if ipfs is not None:
-            res = ipfs.add_bytes(data)
-            # res may be a dict or cid string depending on client
-            if isinstance(res, dict):
-                cid = res.get("Hash") or res.get("cid") or res.get("Cid")
-            else:
-                cid = str(res)
-        if cid:
-            url = f"ipfs://{cid}"
-    except Exception:
-        # use fallback URL if IPFS is offline
-        cid = None
+    # overwrite only if shape changed / to guarantee normalized form
+    state["posts"] = normalized
+    return state
 
-    if url is None:
-        # Fallback: this endpoint is mostly for dev on your phone; we don't
-        # persist the raw bytes here to avoid exhausting local storage.
-        fake_id = str(uuid.uuid4())
-        url = f"/dev/null/{fake_id}"
 
-    return {"ok": True, "cid": cid, "url": url, "visibility": visibility}
+# ============================================================
+# Routes
+# ============================================================
+
+@router.get("/content/meta")
+def get_content_meta() -> Dict[str, Any]:
+    """Return basic metadata about the content subsystem."""
+    _init_content_state()
+    return {
+        "ok": True,
+        "scopes": ["global", "group"],
+        "max_post_length": 4000,
+        "notes": "MVP content API; NFTs and media uploads will be layered on later.",
+    }
+
+
+@router.get("/content/posts")
+def list_posts(
+    scope: str = Query(
+        "global",
+        description="Scope filter: 'global' or 'group'.",
+    ),
+    group_id: Optional[str] = Query(
+        None,
+        description="Filter by group_id when scope == 'group'.",
+    ),
+) -> Dict[str, Any]:
+    """
+    List posts.
+
+    - scope='global' returns all global posts.
+    - scope='group' requires group_id and returns posts for that group.
+    """
+    state = _init_content_state()
+    posts: List[Dict[str, Any]] = state.get("posts", [])
+
+    if scope not in ("global", "group"):
+        raise HTTPException(status_code=400, detail="invalid_scope")
+
+    if scope == "global":
+        filtered = [p for p in posts if p.get("scope") == "global"]
+    else:
+        if not group_id:
+            raise HTTPException(status_code=400, detail="group_id_required")
+        filtered = [
+            p
+            for p in posts
+            if p.get("scope") == "group" and p.get("group_id") == group_id
+        ]
+
+    # newest first
+    filtered.sort(key=lambda p: p.get("created_at", 0), reverse=True)
+
+    return {
+        "ok": True,
+        "posts": filtered,
+    }
+
+
+@router.post("/content/posts")
+def create_post(payload: PostCreate) -> Dict[str, Any]:
+    """
+    Create a new text post.
+
+    For group-scoped posts, payload.group_id must be set.
+    """
+    state = _init_content_state()
+    posts: List[Dict[str, Any]] = state.get("posts", [])
+
+    if payload.scope == "group" and not payload.group_id:
+        raise HTTPException(status_code=400, detail="group_id_required")
+
+    now = int(time.time())
+    post_id = secrets.token_hex(8)
+
+    post = {
+        "id": post_id,
+        "author": payload.author,
+        "text": payload.text,
+        "scope": payload.scope,
+        "group_id": payload.group_id,
+        "created_at": now,
+        "updated_at": now,
+    }
+
+    posts.append(post)
+    state["posts"] = posts
+
+    # We rely on the executor's own persistence; no explicit save() call here.
+    return {
+        "ok": True,
+        "post": post,
+    }
+
+
+@router.get("/content/feed")
+def get_feed(
+    scope: str = Query(
+        "global",
+        description="Feed scope: 'global' or 'group'.",
+    ),
+    group_id: Optional[str] = Query(
+        None,
+        description="Group feed when scope == 'group'.",
+    ),
+    limit: int = Query(
+        50,
+        ge=1,
+        le=200,
+        description="Maximum number of posts to return.",
+    ),
+) -> Dict[str, Any]:
+    """
+    Simple feed endpoint.
+
+    Right now this is just a sorted slice of posts. Later we can plug in
+    ranking, personalization, and NFT/media decoration.
+    """
+    state = _init_content_state()
+    posts: List[Dict[str, Any]] = state.get("posts", [])
+
+    if scope not in ("global", "group"):
+        raise HTTPException(status_code=400, detail="invalid_scope")
+
+    if scope == "global":
+        filtered = [p for p in posts if p.get("scope") == "global"]
+    else:
+        if not group_id:
+            raise HTTPException(status_code=400, detail="group_id_required")
+        filtered = [
+            p
+            for p in posts
+            if p.get("scope") == "group" and p.get("group_id") == group_id
+        ]
+
+    # newest first
+    filtered.sort(key=lambda p: p.get("created_at", 0), reverse=True)
+    limited = filtered[:limit]
+
+    return {
+        "ok": True,
+        "scope": scope,
+        "group_id": group_id,
+        "posts": limited,
+    }

@@ -90,90 +90,78 @@
     return url;
   }
 
-  // ---------- Toast ----------
-
-  var toastTimer = null;
-
   function showToast(msg, kind) {
-    var el = $("toast");
-    if (!el) return;
-    el.textContent = msg || "";
-    el.className = "";
-    el.classList.add("show");
-    if (kind === "ok") el.classList.add("ok");
-    else if (kind === "warn") el.classList.add("warn");
-    else if (kind === "err") el.classList.add("err");
-    if (toastTimer) clearTimeout(toastTimer);
-    toastTimer = setTimeout(function () {
-      el.classList.remove("show", "ok", "warn", "err");
+    kind = kind || "info";
+    var toast = $("toast");
+    if (!toast) {
+      toast = document.createElement("div");
+      toast.id = "toast";
+      document.body.appendChild(toast);
+    }
+    toast.textContent = msg || "";
+    toast.className = "toast " + kind;
+    toast.style.opacity = "1";
+    setTimeout(function () {
+      toast.style.opacity = "0";
     }, 2600);
   }
 
-  // ---------- Sheet (composer) ----------
+  function closeSheet() {
+    var sheet = $("waSheet");
+    if (sheet) sheet.style.display = "none";
+    var overlay = $("waOverlay");
+    if (overlay) overlay.style.display = "none";
+  }
 
   function openSheet() {
-    var b = $("waSheetBackdrop");
-    if (!b) return;
-    b.classList.add("open");
-    hideSheetError();
+    var sheet = $("waSheet");
+    if (sheet) sheet.style.display = "block";
+    var overlay = $("waOverlay");
+    if (overlay) overlay.style.display = "block";
   }
 
-  function closeSheet() {
-    var b = $("waSheetBackdrop");
-    if (!b) return;
-    b.classList.remove("open");
-    hideSheetError();
+  function setSheetMode(mode) {
+    var textMode = $("waSheetTextMode");
+    var videoMode = $("waSheetVideoMode");
+    if (textMode) textMode.style.display = mode === "text" ? "block" : "none";
+    if (videoMode) videoMode.style.display = mode === "video" ? "block" : "none";
   }
 
-  function showSheetError(msg) {
-    var el = $("waSheetError");
-    if (!el) return;
-    el.textContent = msg || "Something went wrong.";
-    el.style.display = "block";
-  }
+  // ---------- DOM builders ----------
 
-  function hideSheetError() {
-    var el = $("waSheetError");
-    if (!el) return;
-    el.textContent = "";
-    el.style.display = "none";
+  function renderEmptyState() {
+    var root = $("waFeed");
+    if (!root) return;
+    root.innerHTML = "";
+    var div = document.createElement("div");
+    div.className = "wa-empty";
+    div.textContent = "No posts yet. Be the first to share something.";
+    root.appendChild(div);
   }
-
-  // ---------- Feed rendering ----------
 
   function renderFeed(items) {
-    var feed = $("waFeed");
-    if (!feed) return;
-    feed.innerHTML = "";
-
-    if (!items || !items.length) {
-      var empty = document.createElement("div");
-      empty.className = "wa-slide";
-      empty.innerHTML =
-        '<div class="wa-text">No posts yet. Tap the + button to share something.</div>';
-      feed.appendChild(empty);
+    var root = $("waFeed");
+    if (!root) return;
+    root.innerHTML = "";
+    if (!items || items.length === 0) {
+      renderEmptyState();
       return;
     }
 
-    items.forEach(function (p) {
-      feed.appendChild(renderSlide(p));
+    items.forEach(function (post) {
+      var slide = renderPost(post);
+      root.appendChild(slide);
     });
   }
 
-  function renderSlide(post) {
+  function renderPost(post) {
     var el = document.createElement("article");
     el.className = "wa-slide";
 
-    var author = post.author || "someone";
-    var handle = (post.handle || author || "").toString();
-    var text = (post.text || "").toString();
-    var ts = post.time || post.created_at || post.ts;
-    var ago = timeAgo(ts);
+    var body = document.createElement("div");
+    body.className = "wa-slide-body";
 
-    var pohTier = post.poh_tier || post.pohTier || null;
-
-    // header
-    var header = document.createElement("div");
+    var header = document.createElement("header");
     header.className = "wa-slide-header";
 
     var left = document.createElement("div");
@@ -187,15 +175,19 @@
 
     var name = document.createElement("div");
     name.className = "wa-author-name";
+    var handle = post.author || post.user_id || "anon";
+    if (handle && handle.indexOf("@") !== 0) handle = "@" + handle;
     name.textContent = handle;
-    at.appendChild(name);
 
     var meta = document.createElement("div");
     meta.className = "wa-author-meta";
+
     var tspan = document.createElement("span");
-    tspan.textContent = ago || "";
+    tspan.className = "wa-time";
+    tspan.textContent = timeAgo(post.created_at || post.timestamp || post.ts);
     meta.appendChild(tspan);
 
+    var pohTier = post.poh_tier || post.tier || null;
     if (pohTier) {
       var badge = document.createElement("span");
       badge.className = "wa-poh tier" + pohTier;
@@ -210,87 +202,85 @@
     right.className = "wa-slide-menu";
     var dotBadge = document.createElement("div");
     dotBadge.className = "wa-badge-small";
-    dotBadge.textContent = (post.group || "Public").toString();
+    dotBadge.textContent = (post.group || "Public").slice(0, 6);
     right.appendChild(dotBadge);
-
-    var dots = document.createElement("button");
-    dots.className = "wa-dots";
-    dots.innerHTML = "⋯";
-    dots.onclick = function (e) {
-      e.stopPropagation();
-      showToast("Post menu coming soon.", "warn");
-    };
-    right.appendChild(dots);
 
     header.appendChild(left);
     header.appendChild(right);
 
-    // body
-    var body = document.createElement("div");
-    body.className = "wa-slide-body";
+    var content = document.createElement("div");
+    content.className = "wa-slide-content";
 
-    if (
-      post.media_url &&
-      (post.content_type === "video" ||
-        (post.tags || []).indexOf("video") >= 0)
-    ) {
-      var shell = document.createElement("div");
-      shell.className = "wa-video-shell";
-      var v = document.createElement("video");
-      v.setAttribute("playsinline", "playsinline");
-      v.setAttribute("controls", "controls");
-      v.src = ipfsToHttp(post.media_url);
-      shell.appendChild(v);
-
-      var label = document.createElement("div");
-      label.className = "wa-video-label";
-      label.textContent = "Short video";
-      shell.appendChild(label);
-
-      body.appendChild(shell);
-    }
-
+    var text = (post.text || post.caption || "").trim();
     if (text) {
-      var t = document.createElement("div");
-      t.className = "wa-text";
-      t.textContent = text;
-      if (text.length > 180) t.classList.add("more");
-      body.appendChild(t);
+      var p = document.createElement("p");
+      p.className = "wa-slide-text";
+      p.textContent = text;
+      content.appendChild(p);
     }
 
-    // footer
-    var footer = document.createElement("div");
+    var mediaUrl = post.media_url || post.image_url || post.video_url || null;
+    var contentType = post.content_type || post.type || "";
+
+    if (mediaUrl) {
+      var resolved = ipfsToHttp(mediaUrl);
+      if (contentType === "video" || /\.mp4($|\?)/.test(resolved || "")) {
+        var videoWrap = document.createElement("div");
+        videoWrap.className = "wa-slide-video-wrap";
+        var video = document.createElement("video");
+        video.className = "wa-slide-video";
+        video.src = resolved;
+        video.controls = true;
+        video.playsInline = true;
+        videoWrap.appendChild(video);
+        content.appendChild(videoWrap);
+      } else {
+        var imgWrap = document.createElement("div");
+        imgWrap.className = "wa-slide-media-wrap";
+        var img = document.createElement("img");
+        img.className = "wa-slide-image";
+        img.src = resolved;
+        img.alt = "Post media";
+        imgWrap.appendChild(img);
+        content.appendChild(imgWrap);
+      }
+    }
+
+    body.appendChild(header);
+    body.appendChild(content);
+
+    var footer = document.createElement("footer");
     footer.className = "wa-slide-footer";
 
-    var leftF = document.createElement("div");
-    leftF.className = "wa-footer-left";
+    var stats = document.createElement("div");
+    stats.className = "wa-stats";
+    var likes = document.createElement("span");
+    likes.textContent = (post.likes || 0) + " likes";
+    var comments = document.createElement("span");
+    comments.textContent = (post.comments || 0) + " comments";
+    stats.appendChild(likes);
+    stats.appendChild(comments);
 
-    var likes = document.createElement("div");
-    likes.className = "wa-footer-stat";
-    likes.innerHTML = "<span>♡</span>" + (post.likes || 0);
-    leftF.appendChild(likes);
-
-    var comments = document.createElement("div");
-    comments.className = "wa-footer-stat";
-    comments.innerHTML = "<span>💬</span>" + (post.comments || 0);
-    leftF.appendChild(comments);
-
-    var rightF = document.createElement("div");
-    rightF.className = "wa-footer-right";
-
-    var btnOpenComments = document.createElement("button");
-    btnOpenComments.className = "wa-footer-button";
-    btnOpenComments.innerHTML = "<span>💬</span><span>Discuss</span>";
-    btnOpenComments.onclick = function () {
-      showToast("Comments not wired yet.", "warn");
+    var actions = document.createElement("div");
+    actions.className = "wa-actions";
+    var likeBtn = document.createElement("button");
+    likeBtn.className = "wa-action";
+    likeBtn.textContent = "♡";
+    likeBtn.onclick = function () {
+      showToast("Likes are coming soon.", "info");
     };
+    var commentBtn = document.createElement("button");
+    commentBtn.className = "wa-action";
+    commentBtn.textContent = "💬";
+    commentBtn.onclick = function () {
+      showToast("Comments are coming soon.", "info");
+    };
+    actions.appendChild(likeBtn);
+    actions.appendChild(commentBtn);
 
-    rightF.appendChild(btnOpenComments);
+    footer.appendChild(stats);
+    footer.appendChild(actions);
 
-    footer.appendChild(leftF);
-    footer.appendChild(rightF);
-
-    el.appendChild(header);
     el.appendChild(body);
     el.appendChild(footer);
 
@@ -315,17 +305,53 @@
       });
   }
 
+
+  // ---------- Top bar (user + PoH) ----------
+
+  function hydrateTopBar() {
+    var topUserEl = $("waTopUser");
+    var topPohEl = $("waTopPoh");
+
+    var user = getCurrentUser();
+    if (topUserEl) {
+      if (user && (user.id || user.email)) {
+        topUserEl.textContent = user.id || user.email;
+      } else {
+        topUserEl.textContent = "Guest";
+      }
+    }
+
+    if (!topPohEl) return;
+
+    apiFetch("/poh/me", { method: "GET" })
+      .then(function (res) {
+        if (!res.ok) throw new Error("poh " + res.status);
+        return res.json();
+      })
+      .then(function (poh) {
+        var tier = typeof poh.tier === "number" ? poh.tier : 0;
+        var status = (poh.status || "ok").toLowerCase();
+        var txt = "PoH: " + tier;
+        if (status !== "ok") {
+          txt += " · " + status;
+        }
+        topPohEl.textContent = txt;
+        topPohEl.dataset.status = status;
+      })
+      .catch(function () {
+        topPohEl.textContent = "PoH: –";
+      });
+  }
+
   // ---------- Post composer ----------
 
   function promptTextPost() {
     var text = window.prompt("Share something with WeAll:");
     if (!text) return;
-    text = String(text || "").trim();
-    if (!text) return;
 
     var user = getCurrentUser();
     if (!user || (!user.id && !user.email)) {
-      showSheetError("Please sign in before posting.");
+      alert("Please sign in before posting.");
       return;
     }
     var author = user.id || user.email;
@@ -351,24 +377,27 @@
       .catch(function (err) {
         console.warn("text post failed:", err);
         showSheetError(
-          "We couldn't publish your text post. Please try again."
+          "We couldn't publish your post. This is a beta node; please try again."
         );
       });
   }
 
-  function startVideoFlow() {
-    var input = $("waVideoInput");
-    if (!input) return;
-    input.value = "";
-    input.click();
+  function showSheetError(msg) {
+    var err = $("waSheetError");
+    if (!err) return;
+    err.textContent = msg || "";
+    err.style.display = msg ? "block" : "none";
   }
 
-  function handleVideoSelected(file) {
+  function handleVideoFile(file) {
     if (!file) return;
+    if (!file.type || file.type.indexOf("video/") !== 0) {
+      showSheetError("Please choose a video file.");
+      return;
+    }
 
-    // Guard for low-memory devices
-    var maxBytes = 16 * 1024 * 1024; // 16MB
-    if (file.size && file.size > maxBytes) {
+    var maxSizeBytes = 50 * 1024 * 1024; // 50 MB-ish for now
+    if (file.size > maxSizeBytes) {
       showToast("Video is too large for this device. Try a shorter clip.", "warn");
       return;
     }
@@ -398,6 +427,7 @@
         if (!url) {
           throw new Error("No media URL returned from upload.");
         }
+
         return apiFetch("/content/post", {
           method: "POST",
           body: JSON.stringify({
@@ -420,87 +450,108 @@
         return loadFeed();
       })
       .catch(function (err) {
-        console.warn("video upload flow failed:", err);
+        console.warn("video upload/post failed:", err);
         showSheetError(
-          "We couldn't upload this video. Try a smaller one or use text for now."
+          "We couldn't upload your video yet. This is a beta node; please try again."
         );
       });
   }
 
-  // ---------- Nav wiring ----------
+  function wireComposer() {
+    var fab = $("waFab");
+    var overlay = $("waOverlay");
+    var closeBtn = $("waSheetClose");
+    var textBtn = $("waSheetText");
+    var videoBtn = $("waSheetVideo");
+    var textSubmit = $("waSheetTextSubmit");
+    var videoSubmit = $("waSheetVideoSubmit");
+    var videoInput = $("waVideoInput");
+
+    if (fab) {
+      fab.onclick = function () {
+        setSheetMode("text");
+        openSheet();
+      };
+    }
+    if (overlay) {
+      overlay.onclick = closeSheet;
+    }
+    if (closeBtn) {
+      closeBtn.onclick = closeSheet;
+    }
+    if (textBtn) {
+      textBtn.onclick = function () {
+        setSheetMode("text");
+      };
+    }
+    if (videoBtn) {
+      videoBtn.onclick = function () {
+        setSheetMode("video");
+      };
+    }
+    if (textSubmit) {
+      textSubmit.onclick = function () {
+        promptTextPost();
+      };
+    }
+    if (videoSubmit) {
+      videoSubmit.onclick = function () {
+        if (videoInput) {
+          videoInput.click();
+        }
+      };
+    }
+    if (videoInput) {
+      videoInput.onchange = function (ev) {
+        var file = ev.target && ev.target.files && ev.target.files[0];
+        handleVideoFile(file);
+        // reset so selecting the same file again still fires change
+        ev.target.value = "";
+      };
+    }
+  }
 
   function wireNav() {
-    var fab = $("waFab");
-    if (fab) fab.onclick = openSheet;
+    var profileBtn = $("waProfileBtn");
+    var homeBtn = $("waHomeBtn");
+    var tabGov = $("waTabGov");
+    var btnGov = $("waBtnGov");
+    var tabInbox = $("waTabInbox");
+    var btnInbox = $("waBtnInbox");
+    var tabProfile = $("waTabProfile");
 
-    var sb = $("waSheetBackdrop");
-    var closeBtn = $("waSheetClose");
-    if (closeBtn) closeBtn.onclick = closeSheet;
-    if (sb) {
-      sb.addEventListener("click", function (ev) {
-        if (ev.target === sb) closeSheet();
-      });
+    if (profileBtn) {
+      profileBtn.onclick = function () {
+        window.location.href = "/frontend/profile.html";
+      };
     }
-
-    var optText = $("waOptText");
-    if (optText) optText.onclick = promptTextPost;
-
-    var optVideo = $("waOptVideo");
-    if (optVideo) optVideo.onclick = startVideoFlow;
-
-    var vidInput = $("waVideoInput");
-    if (vidInput) {
-      vidInput.addEventListener("change", function () {
-        var f = vidInput.files && vidInput.files[0];
-        handleVideoSelected(f);
-      });
-    }
-
-    // Bottom nav tabs
-    var tabHome = $("waTabHome");
-    if (tabHome) {
-      tabHome.onclick = function () {
-        window.location.href = "/frontend/index.html";
+    if (homeBtn) {
+      homeBtn.onclick = function () {
+        window.location.href = "/frontend/tiktok.html";
       };
     }
 
-    var tabGov = $("waTabGov");
-    var btnGov = $("waBtnGov");
     function goGov() {
       window.location.href = "/frontend/governance.html";
     }
     if (tabGov) tabGov.onclick = goGov;
     if (btnGov) btnGov.onclick = goGov;
 
-    var tabInbox = $("waTabInbox");
-    var btnInbox = $("waBtnInbox");
     function goInbox() {
       window.location.href = "/frontend/messaging.html";
     }
     if (tabInbox) tabInbox.onclick = goInbox;
     if (btnInbox) btnInbox.onclick = goInbox;
 
-    var tabProfile = $("waTabProfile");
     if (tabProfile) {
       tabProfile.onclick = function () {
         window.location.href = "/frontend/profile.html";
       };
     }
 
-    // Right-rail buttons – stubbed with toasts for now
-    var likeBtn = $("waLike");
-    var commentBtn = $("waComment");
-    var shareBtn = $("waShare");
-    if (likeBtn) {
-      likeBtn.onclick = function () {
-        showToast("Reactions are coming soon.", "warn");
-      };
-    }
-    if (commentBtn) {
-      commentBtn.onclick = function () {
-        showToast("Comments are coming soon.", "warn");
-      };
-    }
+    wireComposer();
+
+    var shareBtn = $("waShareBtn");
     if (shareBtn) {
       shareBtn.onclick = function () {
         showToast("Sharing is coming soon.", "warn");
@@ -512,6 +563,7 @@
 
   function init() {
     wireNav();
+    hydrateTopBar();
     loadFeed();
   }
 

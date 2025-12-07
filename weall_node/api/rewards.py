@@ -1,208 +1,138 @@
 """
 weall_node/api/rewards.py
+---------------------------------
+MVP rewards endpoints for WeAll Node.
 
-Automated reward distribution: each mined block selects one winner per pool
-and credits them immediately (signed mutation).
+- /rewards/meta              -> high-level rewards config
+- /rewards/pending/{user_id} -> pending rewards for a given user
+
+This is intentionally minimal: it gives you stable JSON shapes
+for the frontend & curl tests, while the actual reward accrual
+logic can be wired in later via the chain module.
 """
 
-from __future__ import annotations
+from typing import Dict, List, Optional
 
-import random
-from typing import Dict, Any, List
+from fastapi import APIRouter
+from pydantic import BaseModel, Field
 
-from fastapi import APIRouter, HTTPException
-
-# Executor façade (ledger, rewards, block mining, etc.)
 from ..weall_executor import executor
-
-# Reward pools live in the runtime ledger; fall back to empty if missing.
-try:
-    from ..weall_runtime.ledger import REWARD_POOLS  # type: ignore
-except Exception:  # pragma: no cover
-    REWARD_POOLS: Dict[str, float] = {}
 
 router = APIRouter(prefix="/rewards", tags=["rewards"])
 
-
-def _qualified_users(pool: str) -> List[str]:
-    """Users eligible to win rewards for the given pool."""
-    system_keys = {"treasury_balance", "nfts", "peers"}
-    return [
-        uid
-        for uid, val in executor.ledger.items()
-        if uid not in system_keys and isinstance(val, (int, float))
-    ]
+# ---------------------------------------------------------------------
+# Internal helpers
+# ---------------------------------------------------------------------
 
 
-def _choose_winner(pool: str) -> str:
-    users = _qualified_users(pool)
-    if not users:
-        # Seed a dummy balance so distribution always proceeds
-        dummy = f"auto_user_{pool}"
-        executor.ledger.setdefault(dummy, 0.0)
-        users = [dummy]
-    return random.choice(users)
+def _init_rewards_state() -> Dict:
+    """
+    Ensure executor.ledger has a well-formed rewards section.
+    """
+    state = executor.ledger.setdefault("rewards", {})
 
-
-def _distribute_block_rewards() -> List[Dict[str, Any]]:
-    """Split the per-block reward equally across pools and credit winners."""
-    reward_each = executor.get_health()["reward_per_block"] / max(
-        len(REWARD_POOLS) or 1, 1
+    # Global config
+    state.setdefault(
+        "meta",
+        {
+            # chain target is 600s per block
+            "epoch_length_seconds": 600,
+            "pools": [
+                "validators",
+                "jurors",
+                "creators",
+                "operators",
+                "treasury",
+            ],
+            "notes": "MVP stub – amounts are not yet wired to chain rewards.",
+        },
     )
-    payouts: List[Dict[str, Any]] = []
-    for pool in REWARD_POOLS:
-        winner = _choose_winner(pool)
-        # Signed mutation into ledger/rewards
-        executor.credit_reward(winner, pool, reward_each)
-        entry = {
-            "pool": pool,
-            "winner": winner,
-            "amount": reward_each,
-            "block": executor.block_height,
-        }
-        executor.rewards.setdefault(pool, []).append(entry)
-        payouts.append(entry)
-    executor.save_state()
-    return payouts
+
+    # Per-user pending rewards: { user_id -> [RewardRecord dicts] }
+    state.setdefault("pending", {})
+
+    state.setdefault("last_update", None)
+
+    return state
 
 
-@router.get("/")
-def summary() -> Dict[str, Any]:
-    return {
-        "ok": True,
-        "block_height": executor.block_height,
-        "epoch": executor.epoch,
-        "reward_per_block": executor.get_health()["reward_per_block"],
-        "recent_payouts": {
-            p: (executor.rewards[p][-5:] if executor.rewards.get(p) else [])
-            for p in REWARD_POOLS
-        },
-    }
+# ---------------------------------------------------------------------
+# Pydantic models
+# ---------------------------------------------------------------------
 
 
-@router.post("/mine")
-def mine_and_distribute():
-    block = executor.mine_block()
-    payouts = _distribute_block_rewards()
-    return {"ok": True, "block": block, "payouts": payouts}
-
-
-@router.get("/winners")
-def winners():
-    return {
-        "ok": True,
-        "winners": {
-            p: (executor.rewards[p][-1]["winner"] if executor.rewards.get(p) else None)
-            for p in REWARD_POOLS
-        },
-    }
-
-
-@router.get("/ledger")
-def ledger_snapshot():
-    return {"ok": True, "ledger": executor.ledger}
-
-
-@router.post("/reset")
-def reset():
-    executor.reset_state()
-    return {"ok": True}
-
-@router.post("/juror_ticket/dev")
-def add_juror_ticket_dev(account_id: str, weight: float = 1.0):
+class RewardRecord(BaseModel):
     """
-    DEV-ONLY: Add a juror ticket to the WeCoin 'jurors' pool.
+    A single reward entry accruing to a user.
 
-    This lets us test juror pool rewards independently of the full
-    dispute resolution pipeline. Later, dispute resolution code can
-    call the same logic directly instead of this dev endpoint.
+    For now only 'pool', 'amount' and 'source' really matter.
     """
-    try:
-        core = getattr(executor, "exec", executor)
-        wecoin = getattr(core, "wecoin", None)
-    except Exception:
-        wecoin = None
 
-    if wecoin is None or not hasattr(wecoin, "add_ticket"):
-        raise HTTPException(status_code=503, detail="WeCoin runtime not available")
+    id: str = Field(..., description="Local identifier for this reward entry.")
+    pool: str = Field(..., description="Which reward pool this came from.")
+    amount: float = Field(..., description="Amount in WeCoin.")
+    source: str = Field(
+        ..., description="Human-readable source, e.g. 'block:19' or 'case:abc123'."
+    )
+    created_at: int = Field(..., description="Unix timestamp created.")
+    mature_at: Optional[int] = Field(
+        None, description="When this becomes spendable, if relevant."
+    )
+    paid: bool = Field(
+        False, description="Whether this reward has already been paid out."
+    )
 
-    try:
-        wecoin.add_ticket("jurors", account_id, weight=float(weight))
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=f"Failed to add juror ticket: {e}")
 
-    pool_tickets = getattr(wecoin, "tickets", {}).get("jurors", {})
-    return {
-        "ok": True,
-        "pool": "jurors",
-        "account_id": account_id,
-        "weight": float(weight),
-        "current_tickets": pool_tickets,
-    }
+class RewardsMetaResponse(BaseModel):
+    ok: bool = True
+    epoch_length_seconds: int
+    pools: List[str]
+    notes: Optional[str] = None
 
-@router.post("/creator_ticket/dev")
-def add_creator_ticket_dev(account_id: str, weight: float = 1.0):
+
+class PendingRewardsResponse(BaseModel):
+    ok: bool = True
+    user: str
+    pending: List[RewardRecord]
+    total_pending: float
+    last_update: Optional[int] = None
+
+
+# ---------------------------------------------------------------------
+# Routes
+# ---------------------------------------------------------------------
+
+
+@router.get("/meta", response_model=RewardsMetaResponse)
+def get_rewards_meta() -> RewardsMetaResponse:
+    state = _init_rewards_state()
+    meta = state["meta"]
+    return RewardsMetaResponse(
+        epoch_length_seconds=meta["epoch_length_seconds"],
+        pools=list(meta["pools"]),
+        notes=meta.get("notes"),
+    )
+
+
+@router.get("/pending/{user_id}", response_model=PendingRewardsResponse)
+def get_pending_rewards(user_id: str) -> PendingRewardsResponse:
     """
-    DEV-ONLY: Add a creator ticket to the WeCoin 'creators' pool.
+    Return any pending rewards for a given user handle.
 
-    Later, content creation / engagement flows can call the same logic
-    directly instead of this dev endpoint.
+    For now this will usually be an empty list unless something
+    manually populates executor.ledger["rewards"]["pending"].
     """
-    from ..weall_executor import executor  # local import to avoid cycles
+    state = _init_rewards_state()
+    pending_by_user: Dict[str, List[Dict]] = state["pending"]
+    last_update = state.get("last_update")
 
-    try:
-        core = getattr(executor, "exec", executor)
-        wecoin = getattr(core, "wecoin", None)
-    except Exception:
-        wecoin = None
+    raw_list: List[Dict] = pending_by_user.get(user_id, [])
+    records = [RewardRecord(**item) for item in raw_list]
+    total = float(sum(r.amount for r in records))
 
-    if wecoin is None or not hasattr(wecoin, "add_ticket"):
-        raise HTTPException(status_code=503, detail="WeCoin runtime not available")
-
-    try:
-        wecoin.add_ticket("creators", account_id, weight=float(weight))
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=f"Failed to add creator ticket: {e}")
-
-    pool_tickets = getattr(wecoin, "tickets", {}).get("creators", {})
-    return {
-        "ok": True,
-        "pool": "creators",
-        "account_id": account_id,
-        "weight": float(weight),
-        "current_tickets": pool_tickets,
-    }
-
-@router.post("/operator_ticket/dev")
-def add_operator_ticket_dev(account_id: str, weight: float = 1.0):
-    """
-    DEV-ONLY: Add an operator ticket to the WeCoin 'operators' pool.
-
-    Later, IPFS / uptime / compute heartbeat flows can call the same
-    logic directly instead of this dev endpoint.
-    """
-    from ..weall_executor import executor  # local import to avoid cycles
-
-    try:
-        core = getattr(executor, "exec", executor)
-        wecoin = getattr(core, "wecoin", None)
-    except Exception:
-        wecoin = None
-
-    if wecoin is None or not hasattr(wecoin, "add_ticket"):
-        raise HTTPException(status_code=503, detail="WeCoin runtime not available")
-
-    try:
-        wecoin.add_ticket("operators", account_id, weight=float(weight))
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=f"Failed to add operator ticket: {e}")
-
-    pool_tickets = getattr(wecoin, "tickets", {}).get("operators", {})
-    return {
-        "ok": True,
-        "pool": "operators",
-        "account_id": account_id,
-        "weight": float(weight),
-        "current_tickets": pool_tickets,
-    }
-
+    return PendingRewardsResponse(
+        user=user_id,
+        pending=records,
+        total_pending=total,
+        last_update=last_update,
+    )

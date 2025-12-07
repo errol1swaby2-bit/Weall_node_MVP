@@ -1,163 +1,216 @@
-// Minimal login + PoH gate helper for WeAll Node frontends (hardened).
-// Usage on protected pages (e.g., juror/panel/groups):
-//   <script src="./auth.js"></script>
-//   <script> weallAuth.require({ minTier: 3 }); </script>
+// weall_node/weall_node/frontend/auth.js
+// Unified auth + PoH guard helper for WeAll Node frontends.
 //
-// Public/low-tier pages can set minTier: 0 or 1 as needed.
-// Relies on HTTPS and the node’s /poh/status and /auth/* endpoints.
+// Usage on protected pages (e.g. juror/panel/groups):
+//   <script src="/frontend/auth.js"></script>
+//   <script>
+//     document.addEventListener("DOMContentLoaded", () => {
+//       weallAuth.require({ minTier: 1 }); // or 2/3
+//     });
+//   </script>
+//
+// Relies on:
+//   POST /auth/apply
+//   GET  /auth/session
+//   POST /auth/logout
+//   GET  /poh/me
+//
+// NOTE: All auth is cookie-based via `weall_session`.
 
 (() => {
-  const LS_ACCT  = 'weall_acct';
-  const LS_TOKEN = 'weall_apply_token';
+  const LS_ACCT = "weall_acct";
 
-  // ---------- URL helpers ----------
-  function urlParam(name) {
-    const u = new URL(window.location.href);
-    return u.searchParams.get(name);
-  }
-  function setParam(url, k, v) {
-    const u = new URL(url, window.location.href);
-    if (v == null) u.searchParams.delete(k);
-    else u.searchParams.set(k, v);
-    return u.toString();
-  }
-  function page(urlRel) { return new URL(urlRel, window.location.href).toString(); }
-  function nowSec() { return Math.floor(Date.now()/1000); }
+  const API_BASE = window.ENV && window.ENV.VITE_API_BASE
+    ? window.ENV.VITE_API_BASE
+    : "";
 
-  // ---------- Transport helpers ----------
-  async function postJSON(path, body) {
-    const r = await fetch(path, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      credentials: 'include', // carry cookies if you add them later
-      body: JSON.stringify(body || {})
-    });
-    const t = await r.text();
-    let j = {};
-    try { j = t ? JSON.parse(t) : {}; } catch { j = { raw: t }; }
-    if (!r.ok) throw new Error(j.error || String(r.status));
-    return j;
-  }
-  async function getJSON(path) {
-    const r = await fetch(path, { credentials: 'include' });
-    if (!r.ok) throw new Error(String(r.status));
-    return r.json();
-  }
+  // --------------------------
+  // HTTP helpers
+  // --------------------------
 
-  // ---------- HTTPS enforcement ----------
-  function isSecureContext() {
-    return location.protocol === 'https:' ||
-           location.hostname === 'localhost' ||
-           location.hostname === '127.0.0.1' ||
-           location.hostname === '::1';
-  }
-  function ensureHttps() {
-    if (isSecureContext()) return true;
-    // upgrade to https on same host/path
-    const to = 'https://' + location.host + location.pathname + location.search + location.hash;
-    try { location.replace(to); } catch { location.href = to; }
-    return false;
-  }
+  async function jsonFetch(path, opts) {
+    const url = API_BASE + path;
+    const options = Object.assign(
+      {
+        headers: {
+          "Accept": "application/json",
+        },
+        credentials: "include",
+      },
+      opts || {}
+    );
 
-  // ---------- PoH ----------
-  async function pohStatus(accountId) {
-    if (!accountId) throw new Error('missing accountId');
-    return postJSON('/poh/status', { account_id: String(accountId) });
-  }
-  function isExpired(nft) {
-    if (!nft || !nft.expires_at) return false;
-    return nowSec() > Number(nft.expires_at);
-  }
-
-  // ---------- Session (localStorage; no secrets) ----------
-  function getAccount() { return localStorage.getItem(LS_ACCT) || null; }
-  function setAccount(id) { if (id) localStorage.setItem(LS_ACCT, String(id)); }
-  function logout() { localStorage.removeItem(LS_ACCT); localStorage.removeItem(LS_TOKEN); }
-
-  function getToken() { return localStorage.getItem(LS_TOKEN) || null; }
-  function setToken(tok) { if (tok) localStorage.setItem(LS_TOKEN, String(tok)); }
-
-  // ---------- Guard ----------
-  // opts: {
-  //   minTier: number = 1,
-  //   loginUrl: '/frontend/login.html',
-  //   onboardingUrl: 'onboarding.html',
-  //   fallback: 'index.html',          // used if node unreachable
-  //   enforceHttps: true
-  // }
-  async function requireGuard(opts = {}) {
-    const minTier       = Number(opts.minTier ?? 1);
-    const loginUrl      = opts.loginUrl || '/frontend/login.html';
-    const onboardingUrl = opts.onboardingUrl || 'onboarding.html';
-    const fallback      = opts.fallback || 'index.html';
-    const enforceHttps  = opts.enforceHttps !== false; // default true
-    const next = urlParam('next') || window.location.pathname + window.location.search;
-
-    if (enforceHttps) {
-      if (!ensureHttps()) return false; // will redirect
+    if (options.body && typeof options.body !== "string") {
+      options.headers["Content-Type"] = "application/json";
+      options.body = JSON.stringify(options.body);
     }
 
-    const acct = getAccount();
-    if (!acct) {
-      const to = setParam(page(loginUrl), 'next', next);
-      window.location.replace(to);
-      return false;
-    }
-
-    let s;
+    const res = await fetch(url, options);
+    let data = null;
     try {
-      s = await pohStatus(acct);
+      data = await res.json();
+    } catch {
+      data = null;
+    }
+
+    if (!res.ok) {
+      const msg =
+        (data && (data.detail || data.error || data.message)) ||
+        ("Request failed with status " + res.status);
+      throw new Error(msg);
+    }
+    return data;
+  }
+
+  // --------------------------
+  // Session / account helpers
+  // --------------------------
+
+  function normalizeUserId(id) {
+    if (!id) return "";
+    let v = String(id).trim();
+    // Allow @handle or plain
+    if (v.startsWith("@")) return v;
+    return v.toLowerCase();
+  }
+
+  function getAccount() {
+    // Prefer local cache first
+    try {
+      const v = localStorage.getItem(LS_ACCT);
+      if (v) return normalizeUserId(v);
+    } catch {}
+    return "";
+  }
+
+  function setAccount(userId) {
+    try {
+      localStorage.setItem(LS_ACCT, normalizeUserId(userId));
+    } catch {}
+  }
+
+  function clearAccount() {
+    try {
+      localStorage.removeItem(LS_ACCT);
+    } catch {}
+  }
+
+  // --------------------------
+  // Public API wrappers
+  // --------------------------
+
+  async function login(userId, password) {
+    const payload = {
+      user_id: normalizeUserId(userId),
+      password: String(password || ""),
+    };
+    const data = await jsonFetch("/auth/apply", {
+      method: "POST",
+      body: payload,
+    });
+    if (data && data.user_id) {
+      setAccount(data.user_id);
+    }
+    return data;
+  }
+
+  async function logout() {
+    try {
+      await jsonFetch("/auth/logout", { method: "POST" });
+    } catch {
+      // ignore
+    }
+    clearAccount();
+  }
+
+  async function getSession() {
+    const data = await jsonFetch("/auth/session", { method: "GET" });
+    if (data && data.user_id) {
+      setAccount(data.user_id);
+    }
+    return data;
+  }
+
+  async function getPohMe() {
+    return jsonFetch("/poh/me", { method: "GET" });
+  }
+
+  // --------------------------
+  // PoH guard
+  // --------------------------
+
+  async function requireGuard(opts) {
+    const minTier = (opts && typeof opts.minTier === "number")
+      ? opts.minTier
+      : 0;
+    const redirectToLogin = (opts && opts.redirectToLogin) || "/frontend/login.html";
+
+    // 1) Ensure we have a session
+    let sess;
+    try {
+      sess = await getSession();
     } catch (e) {
-      // Node unreachable => send to fallback (dashboard/home) rather than loop on login
-      const to = setParam(page(fallback), 'reason', 'node_unreachable');
-      window.location.replace(setParam(to, 'next', next));
+      // Not authenticated → go to login with ?next=
+      const next = encodeURIComponent(window.location.pathname + window.location.search);
+      window.location.replace(redirectToLogin + "?next=" + next);
       return false;
     }
 
-    let effectiveTier = s.tier || 0;
-    if (isExpired(s.nft)) effectiveTier = 0;
-
-    if (effectiveTier < minTier) {
-      // Force redirect to onboarding to reapply or upgrade tier
-      let to = setParam(page(onboardingUrl), 'next', next);
-      to = setParam(to, 'reason', 'low_tier');
-      window.location.replace(to);
+    if (!sess || !sess.user_id) {
+      const next = encodeURIComponent(window.location.pathname + window.location.search);
+      window.location.replace(redirectToLogin + "?next=" + next);
       return false;
+    }
+
+    // 2) Check PoH tier
+    if (minTier > 0) {
+      let poh;
+      try {
+        poh = await getPohMe();
+      } catch (e) {
+        alert("Failed to load PoH status: " + e.message);
+        return false;
+      }
+      const tier = typeof poh.tier === "number" ? poh.tier : 0;
+      const status = poh.status || "ok";
+
+      if (status === "banned") {
+        alert("Your account is banned and cannot access this page.");
+        return false;
+      }
+      if (status === "suspended") {
+        alert("Your account is suspended and cannot access this page.");
+        return false;
+      }
+      if (tier < minTier) {
+        alert(
+          "This page requires PoH Tier " +
+            minTier +
+            ". Your current tier is " +
+            tier +
+            "."
+        );
+        return false;
+      }
     }
 
     return true;
   }
 
-  // ---------- Tokens (apply scope) ----------
-  async function issueApplyToken() {
-    const acct = getAccount();
-    if (!acct) throw new Error('not logged in');
-    const r = await postJSON('/auth/apply', { account_id: acct });
-    setToken(r.token);
-    return r;
-  }
-  async function checkApplyToken(tok = null) {
-    const t = tok || getToken();
-    if (!t) throw new Error('no token');
-    return postJSON('/auth/check', { token: t, scope: 'apply' });
-  }
-
-  // ---------- Public API ----------
+  // Expose global
   window.weallAuth = {
-    // session
-    getAccount, setAccount, logout,
-    getToken, setToken,
+    // account
+    getAccount,
+    setAccount,
+    clearAccount,
 
-    // status
-    pohStatus,
+    // low-level
+    login,
+    logout,
+    getSession,
+    getPohMe,
 
     // guard
     require: requireGuard,
-
-    // tokens
-    issueApplyToken, checkApplyToken,
-
-    // optional
-    ensureHttps, isExpired,
   };
 })();

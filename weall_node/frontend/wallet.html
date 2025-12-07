@@ -1,106 +1,176 @@
-<div id="toast" role="status" aria-live="polite"></div>
-<script>
-/* wallet.js — client-side Ed25519 wallet with AES-GCM keystore export (no deps)
-   - Generates Ed25519 keypair using WebCrypto
-   - Exports public key (raw, base64)
-   - Exports private key (PKCS#8) and encrypts with PBKDF2→AES-GCM
-   - Produces a downloadable keystore JSON (no server private-key handling)
-*/
-
-window.Wallet = (function () {
-  const subtle = (crypto && crypto.subtle) || (window.msCrypto && window.msCrypto.subtle);
-
-  const enc = new TextEncoder();
-  const dec = new TextDecoder();
-
-  function bufToB64(buf) {
-    const b = new Uint8Array(buf);
-    let s = ""; for (let i = 0; i < b.length; i++) s += String.fromCharCode(b[i]);
-    return btoa(s);
-  }
-  function b64ToBuf(b64) {
-    const s = atob(b64);
-    const b = new Uint8Array(s.length);
-    for (let i = 0; i < s.length; i++) b[i] = s.charCodeAt(i);
-    return b.buffer;
-  }
-  function hexRandom(n) {
-    const a = new Uint8Array(n); crypto.getRandomValues(a);
-    return Array.from(a).map(x=>x.toString(16).padStart(2,'0')).join('');
-  }
-
-  async function createEd25519() {
-    if (!subtle || !('Ed25519' in (window ?? {}))) {
-      // Try anyway; many browsers support Ed25519 even if not exposed on window
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <title>Wallet – WeAll</title>
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <link rel="stylesheet" href="/frontend/styles.css" />
+  <style>
+    body {
+      margin: 0;
+      font-family: system-ui, -apple-system, BlinkMacSystemFont, "SF Pro Text",
+        "Roboto", sans-serif;
+      background: radial-gradient(circle at top, #101b3a, #050816 50%, #02040a);
+      color: #f9fafb;
+      min-height: 100vh;
+      display: flex;
+      justify-content: center;
+      align-items: flex-start;
+      padding: 24px 12px;
     }
-    return subtle.generateKey({ name: "Ed25519" }, true, ["sign", "verify"]);
-  }
+    .wallet-shell {
+      width: 100%;
+      max-width: 460px;
+      background: rgba(15, 23, 42, 0.94);
+      border-radius: 24px;
+      padding: 20px 18px 24px;
+      box-shadow: 0 18px 40px rgba(15, 23, 42, 0.8);
+      border: 1px solid rgba(148, 163, 184, 0.3);
+    }
+    .wallet-title {
+      font-size: 1.4rem;
+      font-weight: 700;
+      margin-bottom: 4px;
+    }
+    .wallet-subtitle {
+      font-size: 0.9rem;
+      color: #9ca3af;
+      margin-bottom: 16px;
+    }
+    .wallet-row {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      margin-bottom: 10px;
+      font-size: 0.95rem;
+    }
+    .wallet-balance {
+      font-size: 1.2rem;
+      font-weight: 600;
+      color: #22c55e;
+    }
+    .wallet-status {
+      font-size: 0.82rem;
+      margin-top: 8px;
+      color: #9ca3af;
+    }
+    .wallet-status[data-level="error"] {
+      color: #f97373;
+    }
+    .wallet-status[data-level="ok"] {
+      color: #4ade80;
+    }
+    .wallet-buttons {
+      margin: 14px 0 4px;
+      display: flex;
+      gap: 10px;
+    }
+    .btn {
+      flex: 1;
+      border-radius: 999px;
+      border: none;
+      padding: 10px 14px;
+      font-size: 0.9rem;
+      font-weight: 600;
+      cursor: pointer;
+    }
+    .btn-primary {
+      background: #22c55e;
+      color: #022c22;
+    }
+    .btn-primary:active {
+      transform: translateY(1px);
+    }
+    .nft-section-title {
+      font-size: 0.9rem;
+      font-weight: 600;
+      margin-top: 18px;
+      margin-bottom: 6px;
+      color: #e5e7eb;
+    }
+    .nft-list {
+      list-style: none;
+      margin: 0;
+      padding: 0;
+      max-height: 260px;
+      overflow-y: auto;
+    }
+    .nft-item {
+      padding: 10px 8px;
+      border-radius: 12px;
+      background: rgba(15, 23, 42, 0.85);
+      border: 1px solid rgba(55, 65, 81, 0.8);
+      margin-bottom: 8px;
+    }
+    .nft-main {
+      display: flex;
+      flex-direction: column;
+      gap: 2px;
+      margin-bottom: 4px;
+    }
+    .nft-title {
+      font-size: 0.95rem;
+      font-weight: 600;
+    }
+    .nft-meta {
+      font-size: 0.8rem;
+      color: #9ca3af;
+      display: flex;
+      gap: 8px;
+      flex-wrap: wrap;
+    }
+    .nft-cid {
+      font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas,
+        "Liberation Mono", "Courier New", monospace;
+      font-size: 0.75rem;
+      color: #6b7280;
+      overflow-wrap: anywhere;
+    }
+    .nft-empty {
+      font-size: 0.85rem;
+      color: #6b7280;
+      padding: 6px 0 2px;
+    }
+  </style>
+</head>
+<body>
+  <main class="wallet-shell">
+    <header>
+      <div class="wallet-title">Wallet</div>
+      <div class="wallet-subtitle">
+        Your on-protocol balance and creator NFTs.
+      </div>
+    </header>
 
-  async function exportPublicRawB64(publicKey) {
-    const raw = await subtle.exportKey("raw", publicKey); // 32 bytes
-    return bufToB64(raw);
-  }
+    <section>
+      <div class="wallet-row">
+        <span>Balance</span>
+        <span id="walletBalance" class="wallet-balance">0 WeCoin</span>
+      </div>
+      <div class="wallet-row">
+        <span>NFTs minted</span>
+        <span id="walletNftCount">0</span>
+      </div>
+      <div class="wallet-buttons">
+        <button id="mintDemoBtn" class="btn btn-primary">
+          Mint demo NFT
+        </button>
+      </div>
+      <div id="walletStatus" class="wallet-status" data-level="info">
+        Ready.
+      </div>
+    </section>
 
-  async function exportPrivatePkcs8(privateKey) {
-    return await subtle.exportKey("pkcs8", privateKey); // ArrayBuffer
-  }
+    <section>
+      <div class="nft-section-title">Your NFTs</div>
+      <ul id="nftList" class="nft-list">
+        <li class="nft-empty">Loading…</li>
+      </ul>
+    </section>
+  </main>
 
-  async function deriveAesKey(passphrase, salt, iterations = 250000) {
-    const keyMaterial = await subtle.importKey("raw", enc.encode(passphrase), "PBKDF2", false, ["deriveKey"]);
-    return subtle.deriveKey(
-      { name: "PBKDF2", salt, iterations, hash: "SHA-256" },
-      keyMaterial,
-      { name: "AES-GCM", length: 256 },
-      false,
-      ["encrypt", "decrypt"]
-    );
-  }
-
-  async function makeKeystore(privatePkcs8, publicRawB64, passphrase) {
-    const salt = crypto.getRandomValues(new Uint8Array(16));
-    const iv   = crypto.getRandomValues(new Uint8Array(12));
-    const iters = 250000;
-
-    const aes = await deriveAesKey(passphrase, salt, iters);
-    const ct  = await subtle.encrypt({ name: "AES-GCM", iv }, aes, privatePkcs8);
-
-    const ks = {
-      kty: "OKP",
-      alg: "Ed25519",
-      fmt: "pkcs8",
-      pub_raw_b64: publicRawB64,
-      kdf: { name: "PBKDF2", hash: "SHA-256", iterations: iters, salt_b64: bufToB64(salt) },
-      enc: { name: "AES-GCM", iv_b64: bufToB64(iv) },
-      ciphertext_b64: bufToB64(ct),
-      created: new Date().toISOString(),
-      id: "weall:" + hexRandom(8)
-    };
-    return ks;
-  }
-
-  function downloadKeystore(json, filename) {
-    const blob = new Blob([JSON.stringify(json, null, 2)], { type: "application/json" });
-    const url = URL.createObjectURL(blob);
-    const a = document.createElement("a");
-    a.href = url; a.download = filename;
-    document.body.appendChild(a); a.click();
-    setTimeout(()=>{ URL.revokeObjectURL(url); a.remove(); }, 0);
-  }
-
-  return {
-    createEd25519,
-    exportPublicRawB64,
-    exportPrivatePkcs8,
-    makeKeystore,
-    downloadKeystore
-  };
-})();
-</script>
-
-
-<footer class="weall-footer">
-  <span>© WeAll</span>
-  &nbsp;•&nbsp;<a href="/frontend/privacy.html">Privacy</a>
-  &nbsp;•&nbsp;<a href="/frontend/terms.html">Terms</a>
-</footer>
-
+  <script src="/frontend/env.js"></script>
+  <script src="/frontend/api_shim.js"></script>
+  <script src="/frontend/wallet.js"></script>
+</body>
+</html>

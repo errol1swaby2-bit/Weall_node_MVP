@@ -1,24 +1,385 @@
-<!DOCTYPE html>
+<!doctype html>
 <html lang="en">
 <head>
-  <meta charset="UTF-8">
-  <title>WeAll Onboarding • Genesis</title>
-  <link rel="stylesheet" href="/frontend/style.css">
-  <script defer src="/frontend/session.js"></script>
+  <meta charset="utf-8" />
+  <title>WeAll – Onboarding</title>
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <link rel="stylesheet" href="/frontend/style.css" />
+  <script src="/frontend/env.js"></script>
+  <script src="/frontend/auth.js"></script>
+  <style>
+    body {
+      margin: 0;
+      padding: 1.4rem 1.1rem 1.8rem;
+      font-family: system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+      background: radial-gradient(circle at top, #22c55e22 0, #020617 55%, #020617 100%);
+      color: #e5e7eb;
+    }
+    .wrap {
+      max-width: 980px;
+      margin: 0 auto;
+    }
+    header {
+      display: flex;
+      align-items: flex-start;
+      justify-content: space-between;
+      gap: 0.8rem;
+      margin-bottom: 1.3rem;
+    }
+    .back-link {
+      font-size: 0.8rem;
+      color: #9ca3af;
+      text-decoration: none;
+    }
+    .back-link:hover { text-decoration: underline; }
+    h1 {
+      margin: 0;
+      font-size: 1.4rem;
+      letter-spacing: 0.03em;
+    }
+    .sub {
+      margin: 0.1rem 0 0;
+      font-size: 0.82rem;
+      color: #9ca3af;
+    }
+    .pill {
+      border-radius: 999px;
+      padding: 6px 10px;
+      font-size: 0.8rem;
+      border: 1px solid rgba(148,163,184,0.6);
+      background: rgba(15,23,42,0.95);
+      color: #e5e7eb;
+    }
+    main {
+      display: grid;
+      grid-template-columns: minmax(0, 1.3fr) minmax(0, 1fr);
+      gap: 1rem;
+    }
+    @media (max-width: 840px) {
+      main { grid-template-columns: minmax(0, 1fr); }
+    }
+    .card {
+      background: rgba(15,23,42,0.96);
+      border-radius: 16px;
+      padding: 14px 14px 13px;
+      border: 1px solid rgba(148,163,184,0.4);
+      box-shadow: 0 18px 50px rgba(15,23,42,0.9);
+    }
+    .card h2 {
+      margin: 0 0 0.4rem;
+      font-size: 0.95rem;
+      letter-spacing: 0.08em;
+      text-transform: uppercase;
+      color: #9ca3af;
+    }
+    .card p {
+      margin: 0.12rem 0;
+      font-size: 0.86rem;
+      color: #cbd5f5;
+    }
+    .tier-grid {
+      display: grid;
+      grid-template-columns: repeat(2, minmax(0, 1fr));
+      gap: 0.6rem;
+    }
+    @media (max-width: 660px) {
+      .tier-grid { grid-template-columns: minmax(0, 1fr); }
+    }
+    .tier-card {
+      border-radius: 14px;
+      padding: 10px 11px;
+      border: 1px solid rgba(148,163,184,0.5);
+      background: rgba(15,23,42,0.95);
+      position: relative;
+    }
+    .tier-title {
+      font-size: 0.9rem;
+      font-weight: 600;
+      margin-bottom: 3px;
+    }
+    .tier-tag {
+      display: inline-flex;
+      align-items: center;
+      gap: 6px;
+      border-radius: 999px;
+      padding: 3px 9px;
+      font-size: 0.72rem;
+      background: rgba(15,23,42,0.9);
+      border: 1px solid rgba(148,163,184,0.6);
+    }
+    .tier-dot {
+      width: 8px;
+      height: 8px;
+      border-radius: 999px;
+      background: #64748b;
+    }
+    .tier-dot.active { background: #22c55e; }
+    .tier-dot.future { background: #facc15; }
+    .tier-desc {
+      font-size: 0.82rem;
+      color: #9ca3af;
+      margin-top: 3px;
+    }
+    .step-list {
+      margin: 0.3rem 0 0;
+      padding-left: 1.05rem;
+      font-size: 0.82rem;
+      color: #e5e7eb;
+    }
+    .step-list li {
+      margin-bottom: 2px;
+    }
+    .status {
+      margin-top: 0.5rem;
+      font-size: 0.8rem;
+      color: #9ca3af;
+      min-height: 1.2em;
+    }
+    a {
+      color: #22c55e;
+      text-decoration: none;
+    }
+    a:hover { text-decoration: underline; }
+    .rep-score {
+      font-size: 1.3rem;
+      font-weight: 600;
+    }
+  </style>
 </head>
 <body>
-  <main class="onboarding" style="max-width:720px;margin:2rem auto;font-family:sans-serif;">
-    <h1>Welcome to WeAll • Genesis</h1>
-    <p>This node follows the Genesis / FullScope spec.</p>
-    <ol>
-      <li><strong>Tier 1</strong>: Verify email &amp; create your keys.</li>
-      <li><strong>Tier 2</strong>: Submit async video for human verification.</li>
-      <li><strong>Tier 3</strong>: Complete live juror verification to unlock governance, juror, and validator powers.</li>
-    </ol>
-    <p>
-      When you're ready:
-      <a href="/frontend/login.html">Continue to Login</a>
-    </p>
-  </main>
+  <div class="wrap">
+    <header>
+      <div>
+        <a href="/frontend/tiktok.html" class="back-link">&larr; Back to Feed</a>
+        <h1>Onboarding & Proof-of-Humanity</h1>
+        <p class="sub" id="onbUser">Checking session…</p>
+      </div>
+      <button class="pill" id="onbProfileBtn">Open profile</button>
+    </header>
+
+    <main>
+      <!-- Left: Your current status-->
+      <section class="card">
+        <h2>Your status</h2>
+        <p id="onbPohLine">Loading PoH status…</p>
+        <p id="onbRepLine">Reputation: –</p>
+        <p class="status" id="onbStatus"></p>
+
+        <div class="tier-grid" style="margin-top: 0.7rem;">
+          <div class="tier-card" id="tier0Card">
+            <div class="tier-title">Tier 0 – Guest</div>
+            <div class="tier-tag">
+              <span class="tier-dot" id="tier0Dot"></span>
+              <span>Default state</span>
+            </div>
+            <p class="tier-desc">
+              You can browse the feed and read public content, but you can’t create posts
+              or participate in governance.
+            </p>
+            <ul class="step-list">
+              <li>Step 1: <a href="/frontend/login.html">Create an account</a>.</li>
+            </ul>
+          </div>
+
+          <div class="tier-card" id="tier1Card">
+            <div class="tier-title">Tier 1 – Verified account</div>
+            <div class="tier-tag">
+              <span class="tier-dot" id="tier1Dot"></span>
+              <span>Required for posting & voting</span>
+            </div>
+            <p class="tier-desc">
+              Tier 1 lets you post to the feed and create or vote on proposals.
+            </p>
+            <ul class="step-list">
+              <li>Sign in and complete basic verification from your <a href="/frontend/profile.html">profile</a>.</li>
+            </ul>
+          </div>
+
+          <div class="tier-card" id="tier2Card">
+            <div class="tier-title">Tier 2 – Strong liveness</div>
+            <div class="tier-tag">
+              <span class="tier-dot" id="tier2Dot"></span>
+              <span>Higher trust</span>
+            </div>
+            <p class="tier-desc">
+              Tier 2 adds asynchronous liveness checks. This tier is preferred for operators
+              and heavier protocol access.
+            </p>
+            <ul class="step-list">
+              <li>Complete additional liveness steps when they are available in your region.</li>
+            </ul>
+          </div>
+
+          <div class="tier-card" id="tier3Card">
+            <div class="tier-title">Tier 3 – Juror-ready</div>
+            <div class="tier-tag">
+              <span class="tier-dot" id="tier3Dot"></span>
+              <span>Required for jurors & validators</span>
+            </div>
+            <p class="tier-desc">
+              Tier 3 includes juror-backed checks. It unlocks juror duties, validator
+              eligibility, and operator roles where reputation matters most.
+            </p>
+            <ul class="step-list">
+              <li>Once available, complete the juror onboarding flow and panel interview.</li>
+            </ul>
+          </div>
+        </div>
+      </section>
+
+      <!-- Right: How reputation fits in -->
+      <section class="card">
+        <h2>Reputation & roles</h2>
+        <p>
+          Reputation is a separate score that grows with constructive participation and
+          shrinks when juror-backed disputes confirm harmful behavior. It never burns WCN,
+          only changes what you can access.
+        </p>
+        <p style="margin-top:0.4rem;">
+          Current reputation:
+          <span class="rep-score" id="repScore">–</span>
+        </p>
+        <p class="status" id="repStatus"></p>
+
+        <p style="margin-top:0.5rem;">
+          Rough guidance:
+        </p>
+        <ul class="step-list">
+          <li>Any reputation: basic access after PoH Tier 1.</li>
+          <li>Higher reputation: better odds to join juror pools, validator sets, and operator roles.</li>
+          <li>Severe, juror-backed bans: your PoH record is marked as <strong>banned</strong>, and your access is removed, but your past WCN doesn’t disappear — it’s re-routed according to governance rules.</li>
+        </ul>
+
+        <p class="status" id="onbHint"></p>
+      </section>
+    </main>
+  </div>
+
+  <script>
+    (async function () {
+      const $ = (id) => document.getElementById(id);
+
+      function apiBase() {
+        return (window.ENV && window.ENV.VITE_API_BASE) || "";
+      }
+
+      async function getReputation(userId) {
+        const res = await fetch(apiBase() + "/reputation/" + encodeURIComponent(userId), {
+          method: "GET",
+          headers: { "Accept": "application/json" },
+          credentials: "include"
+        });
+        let data = {};
+        try { data = await res.json(); } catch {}
+        if (!res.ok) {
+          throw new Error(data.detail || data.error || "Request failed");
+        }
+        return data;
+      }
+
+      const onbUser = $("onbUser");
+      const onbPohLine = $("onbPohLine");
+      const onbRepLine = $("onbRepLine");
+      const onbStatus = $("onbStatus");
+      const repScoreEl = $("repScore");
+      const repStatus = $("repStatus");
+      const onbHint = $("onbHint");
+
+      const tierDots = {
+        0: $("tier0Dot"),
+        1: $("tier1Dot"),
+        2: $("tier2Dot"),
+        3: $("tier3Dot")
+      };
+
+      const profileBtn = $("onbProfileBtn");
+      if (profileBtn) {
+        profileBtn.onclick = () => {
+          window.location.href = "/frontend/profile.html";
+        };
+      }
+
+      // Session + PoH
+      let userId = null;
+      try {
+        const sess = await weallAuth.getSession();
+        if (sess && sess.user_id) {
+          userId = sess.user_id;
+          onbUser.textContent = "Signed in as " + userId;
+        } else {
+          onbUser.textContent = "Not signed in. You’re viewing the public onboarding view.";
+        }
+      } catch {
+        onbUser.textContent = "Not signed in. You’re viewing the public onboarding view.";
+      }
+
+      if (!userId) {
+        onbPohLine.textContent = "PoH: Tier 0 (guest). Sign in to begin verification.";
+        onbRepLine.textContent = "Reputation: –";
+        onbStatus.textContent = "Create an account to start moving through Tier 1 and beyond.";
+        if (tierDots[0]) tierDots[0].classList.add("active");
+        if (tierDots[1]) tierDots[1].classList.add("future");
+        if (tierDots[2]) tierDots[2].classList.add("future");
+        if (tierDots[3]) tierDots[3].classList.add("future");
+        repStatus.textContent = "Reputation will start tracking once you have a verified account.";
+        onbHint.textContent = "Next step: open the login page, pick a handle, and sign in.";
+        return;
+      }
+
+      // We have a user; load PoH
+      try {
+        const poh = await weallAuth.getPohMe();
+        const tier = typeof poh.tier === "number" ? poh.tier : 0;
+        const status = (poh.status || "ok").toLowerCase();
+        const pohId = poh.poh_id || userId;
+
+        onbPohLine.textContent =
+          "PoH: Tier " + tier + " (" + status + "), linked to " + pohId + ".";
+
+        if (status === "banned") {
+          onbStatus.textContent =
+            "Your PoH record is banned. You can’t advance tiers or access most protocol features.";
+        } else if (status === "suspended") {
+          onbStatus.textContent =
+            "Your PoH record is temporarily suspended. Some actions may be blocked.";
+        } else {
+          onbStatus.textContent =
+            "You can move up tiers as verification pipelines come online.";
+        }
+
+        Object.keys(tierDots).forEach((k) => {
+          const dot = tierDots[k];
+          if (!dot) return;
+          dot.classList.remove("active", "future");
+        });
+        const curDot = tierDots[tier] || tierDots[0];
+        if (curDot) curDot.classList.add("active");
+        [1, 2, 3].forEach((t) => {
+          if (t > tier && tierDots[t]) tierDots[t].classList.add("future");
+        });
+      } catch (e) {
+        onbPohLine.textContent = "Failed to load PoH status: " + e.message;
+        onbStatus.textContent = "";
+      }
+
+      // Reputation
+      try {
+        const data = await getReputation(userId);
+        const rep = typeof data.reputation === "number" ? data.reputation : 0;
+        repScoreEl.textContent = rep.toFixed(2);
+        onbRepLine.textContent = "Reputation: " + rep.toFixed(2);
+        repStatus.textContent =
+          "Higher reputation will unlock juror, validator, and operator roles as the protocol matures.";
+        onbHint.textContent =
+          "Next step: participate constructively — post, vote, and help moderate where appropriate.";
+      } catch (e) {
+        repScoreEl.textContent = "–";
+        onbRepLine.textContent = "Reputation: unavailable.";
+        repStatus.textContent = "Unable to load reputation: " + e.message;
+        onbHint.textContent =
+          "You can still use core features while the node’s reputation module is warming up.";
+      }
+    })();
+  </script>
 </body>
 </html>

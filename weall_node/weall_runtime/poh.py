@@ -1,449 +1,242 @@
-"""
-weall_node/weall_runtime/poh.py
-----------------------------------
-Proof-of-Humanity runtime + ledger helpers.
-
-This module centralises how PoH state is persisted in the unified ledger.
-
-Spec alignment
---------------
-- Section 3: Identity & PoH tiers (Tier1/2/3)
-- Section 3.5: Revocation & recovery (ledger-backed flags)
-- Section 5.3 / 6.1: PoH-gated consensus (other modules consume ledger["poh"])
-"""
-
+# weall_node/weall_runtime/poh.py
 from __future__ import annotations
 
+"""
+Proof-of-Humanity (PoH) runtime for WeAll.
+
+This module manages PoH records and their enforcement status.
+
+Data model
+----------
+executor.ledger["poh"] = {
+    "records": {
+        user_id: {
+            "user_id": str,
+            "poh_id": str,            # canonical identity id (often same as user_id)
+            "tier": int,              # 0 (none), 1, 2, 3
+            "status": str,            # "ok" | "downgraded" | "suspended" | "banned"
+            "created_at": float,
+            "updated_at": float,
+            "revoked": bool,          # derived legacy flag (status in suspended/banned)
+            "keys": {
+                "current_pk": str | None,
+                "historical": [
+                    {"old_pk": str, "new_pk": str, "at": float, "case_id": str | None}
+                ],
+            },
+        },
+        ...
+    },
+    "enforcements": [
+        {
+            "poh_id": str,
+            "status": str,
+            "reason": str,
+            "case_id": str | None,
+            "at": float,
+        },
+        ...
+    ],
+}
+"""
+
 import time
-from dataclasses import dataclass, field
-from typing import Any, Dict, Optional, List
+from typing import Dict, Optional
 
-try:
-    # The executor is the single source of truth for the ledger.
-    from weall_node.weall_executor import executor  # type: ignore
-except Exception:  # pragma: no cover - makes tests/imports safer
-    executor = None  # type: ignore
+from ..weall_executor import executor
 
 
 # ---------------------------------------------------------------------------
-# Low-level ledger helpers
+# Internal helpers
 # ---------------------------------------------------------------------------
 
-def _ledger() -> Dict[str, Any]:
-    """
-    Return the canonical executor.ledger dict, creating an empty one if needed.
 
-    This keeps PoH state in the same JSON that backs weall_state.json.
-    """
-    global executor
-    led: Any = getattr(executor, "ledger", None)
-    if not isinstance(led, dict):
-        led = {}
-        try:
-            # type: ignore[assignment]
-            executor.ledger = led
-        except Exception:
-            pass
-    return led  # type: ignore[return-value]
+def _ensure_poh_ledger() -> Dict[str, dict]:
+    ledger = executor.ledger
+    poh_ns = ledger.setdefault("poh", {})
+    poh_ns.setdefault("records", {})
+    poh_ns.setdefault("enforcements", [])
+    return poh_ns  # type: ignore[return-value]
 
 
-def _poh_bucket() -> Dict[str, Dict[str, Any]]:
-    """
-    Return the ledger["poh"] mapping: user_id -> PoH record.
-    Creates it on first use and normalises unexpected types.
-    """
-    led = _ledger()
-    bucket = led.get("poh")
-    if not isinstance(bucket, dict):
-        bucket = {}
-        led["poh"] = bucket
-    return bucket  # type: ignore[return-value]
-
-
-def _t2_queue_bucket() -> Dict[str, Dict[str, Any]]:
-    """
-    Return the ledger["poh_t2_queue"] mapping: account_id -> Tier-2 application.
-    This replaces the old in-memory queue so state survives restarts.
-    """
-    led = _ledger()
-    bucket = led.get("poh_t2_queue")
-    if not isinstance(bucket, dict):
-        bucket = {}
-        led["poh_t2_queue"] = bucket
-    return bucket  # type: ignore[return-value]
-
-
-def _t2_config_bucket() -> Dict[str, Any]:
-    """
-    Return the Tier-2 config stored under ledger["poh_t2_config"].
-    """
-    led = _ledger()
-    cfg = led.get("poh_t2_config")
-    if not isinstance(cfg, dict):
-        cfg = {
-            "required_yes": 3,
-            "max_pending": 128,
-        }
-        led["poh_t2_config"] = cfg
-    # normalise keys
-    if "required_yes" not in cfg:
-        cfg["required_yes"] = 3
-    if "max_pending" not in cfg:
-        cfg["max_pending"] = 128
-    return cfg  # type: ignore[return-value]
+def _now() -> float:
+    return time.time()
 
 
 # ---------------------------------------------------------------------------
-# Public helpers used by the API layer & other modules
+# Public API
 # ---------------------------------------------------------------------------
 
-def get_poh_record(user_id: str) -> Optional[Dict[str, Any]]:
-    """
-    Look up a user's PoH record from the ledger.
 
-    Shape of the record (per spec & existing state):
-        {
-            "tier": int,
-            "revoked": bool,
-            "source": str,
-            "updated_at": int (unix ts),
-            "revocation_reason": Optional[str],
-        }
+def get_poh_record(user_id: str) -> Optional[dict]:
     """
-    if not user_id:
-        return None
-    bucket = _poh_bucket()
-    rec = bucket.get(str(user_id))
+    Return the PoH record for a given user_id (or None if missing).
+    """
+    poh_ns = _ensure_poh_ledger()
+    return poh_ns["records"].get(user_id)
+
+
+def ensure_poh_record(user_id: str) -> dict:
+    """
+    Ensure a PoH record exists for this user_id and return it.
+
+    Default record:
+    - tier = 0
+    - status = "ok"
+    - revoked = False
+    """
+    poh_ns = _ensure_poh_ledger()
+    rec = poh_ns["records"].get(user_id)
+    now = _now()
     if rec is None:
-        return None
-    # defensive normalisation
-    try:
-        rec["tier"] = int(rec.get("tier", 0))
-    except Exception:
-        rec["tier"] = 0
-    rec["revoked"] = bool(rec.get("revoked", False))
-    rec.setdefault("source", "unknown")
-    rec.setdefault("updated_at", int(time.time()))
-    rec.setdefault("revocation_reason", None)
-    return rec
-
-
-def set_poh_tier(
-    user_id: str,
-    tier: int,
-    source: str = "manual",
-    revoked: bool = False,
-    revocation_reason: Optional[str] = None,
-) -> Dict[str, Any]:
-    """
-    Persist a user's PoH tier in ledger["poh"] and mirror useful fields into
-    ledger["accounts"][user_id] for convenience.
-
-    This is the single place that should mutate PoH tier state.
-    """
-    if not user_id:
-        raise ValueError("user_id is required")
-
-    bucket = _poh_bucket()
-    now = int(time.time())
-    rec = bucket.get(user_id) or {
-        "tier": 0,
-        "revoked": False,
-        "source": "unknown",
-        "updated_at": now,
-        "revocation_reason": None,
-    }
-
-    rec.update(
-        {
-            "tier": int(tier),
-            "revoked": bool(revoked),
-            "source": str(source or "manual"),
-            "updated_at": now,
-            "revocation_reason": revocation_reason,
-        }
-    )
-    bucket[user_id] = rec
-
-    # Keep a minimal mirror on accounts for other modules.
-    try:
-        led = _ledger()
-        accounts = led.setdefault("accounts", {})
-        acct = accounts.setdefault(user_id, {})
-        acct["poh_tier"] = rec["tier"]
-        acct["poh_revoked"] = rec["revoked"]
-    except Exception:
-        # Never let bookkeeping failures crash the node.
-        pass
-
-    # Best-effort persistence
-    try:
-        save_state = getattr(executor, "save_state", None)
-        if callable(save_state):
-            save_state()
-    except Exception:
-        pass
-
-    return rec
-
-
-def set_poh_revoked(
-    user_id: str,
-    revoked: bool = True,
-    reason: Optional[str] = None,
-    source: str = "revocation",
-) -> Dict[str, Any]:
-    """
-    Convenience helper to revoke/unrevoke a user's PoH status.
-    """
-    rec = get_poh_record(user_id) or {
-        "tier": 0,
-        "revoked": False,
-        "source": "unknown",
-        "updated_at": int(time.time()),
-        "revocation_reason": None,
-    }
-    return set_poh_tier(
-        user_id=user_id,
-        tier=int(rec.get("tier", 0)),
-        source=source,
-        revoked=revoked,
-        revocation_reason=reason,
-    )
-
-
-def get_t2_config() -> Dict[str, Any]:
-    """
-    Return Tier-2 configuration (required_yes, max_pending).
-    """
-    return dict(_t2_config_bucket())
-
-
-def update_t2_config(required_yes: Optional[int] = None, max_pending: Optional[int] = None) -> Dict[str, Any]:
-    """
-    Update Tier-2 configuration in the ledger.
-    """
-    cfg = _t2_config_bucket()
-    if required_yes is not None and required_yes > 0:
-        cfg["required_yes"] = int(required_yes)
-    if max_pending is not None and max_pending > 0:
-        cfg["max_pending"] = int(max_pending)
-
-    # Best-effort persistence
-    try:
-        save_state = getattr(executor, "save_state", None)
-        if callable(save_state):
-            save_state()
-    except Exception:
-        pass
-
-    return dict(cfg)
-
-
-def get_t2_queue() -> Dict[str, Dict[str, Any]]:
-    """
-    Expose the Tier-2 queue for read-only operations.
-    Callers should treat the returned dict as read-only or
-    copy it before mutating.
-    """
-    bucket = _t2_queue_bucket()
-    # Return a shallow copy to discourage accidental in-place changes.
-    return {k: dict(v) for k, v in bucket.items()}
-
-
-def upsert_t2_application(
-    account_id: str,
-    videos: Optional[List[str]] = None,
-    title: str = "",
-    desc: str = "",
-) -> Dict[str, Any]:
-    """
-    Create or update a Tier-2 application entry in ledger["poh_t2_queue"].
-
-    Does not change the applicant's PoH tier; that is handled by juror votes.
-    """
-    if not account_id:
-        raise ValueError("account_id is required")
-
-    bucket = _t2_queue_bucket()
-    now = int(time.time())
-    app = bucket.get(account_id) or {
-        "account_id": account_id,
-        "videos": [],
-        "title": "",
-        "desc": "",
-        "status": "pending",
-        "submitted_at": now,
-        "updated_at": now,
-        "yes": 0,
-        "no": 0,
-        "votes": [],  # list of {juror_id, approve, time}
-    }
-
-    if videos is not None:
-        app["videos"] = list(videos)
-    if title:
-        app["title"] = title
-    if desc:
-        app["desc"] = desc
-
-    app["status"] = app.get("status", "pending")
-    app["updated_at"] = now
-    bucket[account_id] = app
-
-    try:
-        save_state = getattr(executor, "save_state", None)
-        if callable(save_state):
-            save_state()
-    except Exception:
-        pass
-
-    return app
-
-
-def register_t2_vote(
-    candidate_id: str,
-    juror_id: str,
-    approve: bool,
-) -> Dict[str, Any]:
-    """
-    Register a juror's vote on a Tier-2 application.
-
-    When the application reaches the configured required_yes threshold,
-    this helper will automatically:
-        - mark status = "approved"
-        - set PoH tier to 2 for the candidate (if not already >=2)
-    """
-    if not candidate_id:
-        raise ValueError("candidate_id is required")
-    if not juror_id:
-        raise ValueError("juror_id is required")
-
-    bucket = _t2_queue_bucket()
-    app = bucket.get(candidate_id)
-    if not app:
-        raise KeyError(f"No Tier-2 application found for {candidate_id!r}")
-
-    # Prevent duplicate votes from the same juror.
-    votes: List[Dict[str, Any]] = app.setdefault("votes", [])
-    for v in votes:
-        if v.get("juror_id") == juror_id:
-            # Idempotent: update existing vote in-place.
-            v["approve"] = bool(approve)
-            v["time"] = int(time.time())
-            break
-    else:
-        votes.append(
-            {
-                "juror_id": juror_id,
-                "approve": bool(approve),
-                "time": int(time.time()),
-            }
-        )
-
-    # Recompute tallies.
-    yes = sum(1 for v in votes if v.get("approve") is True)
-    no = sum(1 for v in votes if v.get("approve") is False)
-    app["yes"] = int(yes)
-    app["no"] = int(no)
-
-    cfg = _t2_config_bucket()
-    required_yes = int(cfg.get("required_yes", 3))
-    if app.get("status") == "pending" and yes >= required_yes:
-        # Auto-approve and upgrade to Tier 2.
-        app["status"] = "approved"
-        set_poh_tier(
-            candidate_id,
-            tier=max(2, int((get_poh_record(candidate_id) or {}).get("tier", 0))),
-            source="tier2_jurors",
-        )
-
-    bucket[candidate_id] = app
-
-    try:
-        save_state = getattr(executor, "save_state", None)
-        if callable(save_state):
-            save_state()
-    except Exception:
-        pass
-
-    return app
-
-
-# ---------------------------------------------------------------------------
-# Optional higher-level runtime wrapper
-# ---------------------------------------------------------------------------
-
-@dataclass
-class PoHRuntime:
-    """
-    Thin runtime wrapper that can be used by other subsystems
-    (e.g., juror consoles, onboarding flows) without needing
-    to know about the underlying ledger layout.
-    """
-
-    # Reserved for future use (e.g., in-memory caches or additional queues)
-    attached_at: float = field(default_factory=lambda: time.time())
-
-    def status(self, user_id: str) -> Dict[str, Any]:
-        """
-        Return the current PoH status for a user, suitable for API responses.
-        """
-        rec = get_poh_record(user_id) or {
-            "tier": 0,
-            "revoked": False,
-            "source": "unknown",
-            "updated_at": None,
-            "revocation_reason": None,
-        }
-        return {
+        rec = {
             "user_id": user_id,
-            "tier": int(rec.get("tier", 0)),
-            "revoked": bool(rec.get("revoked", False)),
-            "source": rec.get("source") or "unknown",
-            "updated_at": rec.get("updated_at"),
-            "revocation_reason": rec.get("revocation_reason"),
+            "poh_id": user_id,
+            "tier": 0,
+            "status": "ok",
+            "created_at": now,
+            "updated_at": now,
+            "revoked": False,
+            "keys": {
+                "current_pk": None,
+                "historical": [],
+            },
         }
-
-    def t2_applications(self) -> Dict[str, Dict[str, Any]]:
-        """
-        Return all Tier-2 applications (shallow copy).
-        """
-        return get_t2_queue()
-
-    def t2_get(self, account_id: str) -> Optional[Dict[str, Any]]:
-        """
-        Return a single Tier-2 application.
-        """
-        return get_t2_queue().get(account_id)
-
-    def t2_submit(
-        self,
-        account_id: str,
-        videos: Optional[List[str]] = None,
-        title: str = "",
-        desc: str = "",
-    ) -> Dict[str, Any]:
-        """
-        Convenience wrapper for upsert_t2_application().
-        """
-        return upsert_t2_application(
-            account_id=account_id,
-            videos=videos,
-            title=title,
-            desc=desc,
-        )
-
-    def t2_vote(self, candidate_id: str, juror_id: str, approve: bool) -> Dict[str, Any]:
-        """
-        Convenience wrapper for register_t2_vote().
-        """
-        return register_t2_vote(
-            candidate_id=candidate_id,
-            juror_id=juror_id,
-            approve=approve,
-        )
+        poh_ns["records"][user_id] = rec
+        _maybe_save_state()
+    return rec
 
 
-# Provide a module-level runtime instance for convenience.
-poh_runtime = PoHRuntime()
+def set_poh_tier(user_id: str, tier: int) -> dict:
+    """
+    Set the PoH tier for a given user.
+
+    This does NOT change status. Tiers are normally:
+    - 0: no PoH
+    - 1: basic (e.g. email + minimal checks)
+    - 2: stronger (async liveness, etc.)
+    - 3: full PoH (juror-eligible, validator-eligible, etc.)
+    """
+    if tier < 0:
+        raise ValueError("tier must be >= 0")
+    rec = ensure_poh_record(user_id)
+    rec["tier"] = int(tier)
+    rec["updated_at"] = _now()
+    _maybe_save_state()
+    return rec
+
+
+def set_poh_status(
+    user_id: str,
+    status: str,
+    reason: str,
+    case_id: Optional[str] = None,
+) -> dict:
+    """
+    Set enforcement status for a PoH identity.
+
+    Allowed statuses:
+    - "ok"          : normal
+    - "downgraded"  : PoH tier reduced (e.g. 3 -> 1)
+    - "suspended"   : temporarily not allowed to act
+    - "banned"      : permanently banned (may trigger economic actions)
+
+    This function updates:
+    - record["status"]
+    - record["revoked"] (derived: True if status in {"suspended", "banned"})
+    - enforcement log in executor.ledger["poh"]["enforcements"]
+    """
+    allowed = {"ok", "downgraded", "suspended", "banned"}
+    if status not in allowed:
+        raise ValueError(f"status must be one of {sorted(allowed)}")
+
+    poh_ns = _ensure_poh_ledger()
+    rec = ensure_poh_record(user_id)
+    rec["status"] = status
+    rec["revoked"] = status in {"suspended", "banned"}
+    rec["updated_at"] = _now()
+
+    poh_ns["enforcements"].append(
+        {
+            "poh_id": rec["poh_id"],
+            "status": status,
+            "reason": reason,
+            "case_id": case_id,
+            "at": _now(),
+        }
+    )
+    _maybe_save_state()
+    return rec
+
+
+def bind_account_key(user_id: str, account_pk_hex: str) -> dict:
+    """
+    Bind an account public key to this PoH identity.
+
+    This sets "keys.current_pk" if not already set. It does not touch
+    historical records (it is assumed to be an initial bind).
+    """
+    rec = ensure_poh_record(user_id)
+    keys = rec.setdefault("keys", {})
+    if keys.get("current_pk") is None:
+        keys["current_pk"] = account_pk_hex
+        rec["updated_at"] = _now()
+        _maybe_save_state()
+    return rec
+
+
+def rebind_account_key(
+    user_id: str,
+    old_pk_hex: Optional[str],
+    new_pk_hex: str,
+    *,
+    case_id: Optional[str] = None,
+) -> dict:
+    """
+    Rebind an account public key for this PoH identity.
+
+    This is used by the recovery flow once a juror-backed recovery
+    decision has been finalized.
+
+    - If old_pk_hex is provided and doesn't match the current_pk, the
+      operation still proceeds but records the mismatch in history.
+    - The old current_pk (if any) is appended to the historical list.
+    """
+    rec = ensure_poh_record(user_id)
+    keys = rec.setdefault("keys", {})
+    current = keys.get("current_pk")
+    history = keys.setdefault("historical", [])
+
+    history.append(
+        {
+            "old_pk": current,
+            "new_pk": new_pk_hex,
+            "at": _now(),
+            "case_id": case_id,
+            "claimed_old_pk": old_pk_hex,
+        }
+    )
+    keys["current_pk"] = new_pk_hex
+    rec["updated_at"] = _now()
+    _maybe_save_state()
+    return rec
+
+
+def is_banned(user_id: str) -> bool:
+    rec = get_poh_record(user_id)
+    if not rec:
+        return False
+    return rec.get("status") == "banned"
+
+
+def is_suspended(user_id: str) -> bool:
+    rec = get_poh_record(user_id)
+    if not rec:
+        return False
+    return rec.get("status") == "suspended"
+
+
+def _maybe_save_state() -> None:
+    save_state = getattr(executor, "save_state", None)
+    if callable(save_state):
+        save_state()

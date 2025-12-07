@@ -1,132 +1,123 @@
 """
 weall_node/api/treasury.py
---------------------------------------------------
-Unified Treasury API for WeAll Node v1.1
-Handles protocol treasury balance, funding proposals, and NFT-based receipts.
-Uses the unified executor runtime (no app_state or weall_runtime dependencies).
+---------------------------------
+MVP treasury endpoints for WeAll Node.
+
+- /treasury/meta  -> monetary policy & pool splits
+- /treasury/pools -> current pool balances (stubbed for now)
+
+Data is stored in executor.ledger["treasury"].
 """
 
-from fastapi import APIRouter, HTTPException
-from pydantic import BaseModel
-from typing import Dict, Any, List, Optional
+from typing import Dict, Optional
+
+from fastapi import APIRouter
+from pydantic import BaseModel, Field
+
 from ..weall_executor import executor
 
-router = APIRouter()
+router = APIRouter(prefix="/treasury", tags=["treasury"])
+
+# ---------------------------------------------------------------------
+# Internal helpers
+# ---------------------------------------------------------------------
 
 
-# ---------------------------------------------------------------
-# Data models
-# ---------------------------------------------------------------
-class Proposal(BaseModel):
-    """Simple treasury proposal structure."""
+def _init_treasury_state() -> Dict:
+    """
+    Ensure executor.ledger has a well-formed treasury section.
+    Returns the mutable state dict.
+    """
+    state = executor.ledger.setdefault("treasury", {})
 
-    proposal_id: str
-    proposer: str
-    amount: float
-    description: str
-    approved: bool = False
-    executed: bool = False
+    # Monetary policy – aligned with Full Scope spec
+    state.setdefault(
+        "meta",
+        {
+            "initial_block_reward": 100.0,
+            # 2 years in seconds
+            "halving_interval_seconds": 2 * 365 * 24 * 3600,
+            # 5×20% split, expressed in basis points (10000 = 100%)
+            "pool_splits_bps": {
+                "validators": 2000,
+                "jurors": 2000,
+                "creators": 2000,
+                "operators": 2000,
+                "treasury": 2000,
+            },
+        },
+    )
+
+    # Pool balances – all zero for the local single-node dev chain
+    state.setdefault(
+        "pools",
+        {
+            "validators": 0.0,
+            "jurors": 0.0,
+            "creators": 0.0,
+            "operators": 0.0,
+            "treasury": 0.0,
+        },
+    )
+
+    state.setdefault("last_update", None)
+
+    return state
 
 
-# ---------------------------------------------------------------
-# In-memory proposal list (temporary)
-# ---------------------------------------------------------------
-PROPOSALS: Dict[str, Proposal] = {}
+# ---------------------------------------------------------------------
+# Pydantic models
+# ---------------------------------------------------------------------
 
 
-# ---------------------------------------------------------------
-# Helper functions
-# ---------------------------------------------------------------
-def _treasury_balance() -> float:
-    """Return current treasury balance from executor ledger."""
-    return float(executor.ledger.get("treasury_balance", 0.0))
+class TreasuryMetaResponse(BaseModel):
+    ok: bool = True
+    initial_block_reward: float = Field(
+        ..., description="Initial block reward in WeCoin."
+    )
+    halving_interval_seconds: int = Field(
+        ..., description="Seconds between reward halvings."
+    )
+    pool_splits_bps: Dict[str, int] = Field(
+        ..., description="Split of block reward per pool, in basis points."
+    )
 
 
-def _update_treasury_balance(amount: float) -> None:
-    executor.ledger["treasury_balance"] = _treasury_balance() + amount
-    executor.save_state()
+class TreasuryPoolsResponse(BaseModel):
+    ok: bool = True
+    pools: Dict[str, float] = Field(
+        ..., description="Current balances per pool (WeCoin)."
+    )
+    last_update: Optional[int] = Field(
+        None,
+        description="Unix timestamp of last treasury update, or null if never.",
+    )
 
 
-# ---------------------------------------------------------------
+# ---------------------------------------------------------------------
 # Routes
-# ---------------------------------------------------------------
+# ---------------------------------------------------------------------
 
 
-@router.get("/balance")
-def get_treasury_balance() -> Dict[str, Any]:
-    """Return current treasury balance."""
-    return {"ok": True, "balance": _treasury_balance()}
-
-
-@router.post("/deposit")
-def deposit_to_treasury(sender: str, amount: float):
-    """Simulate deposit to treasury (for testing)."""
-    if not executor.transfer_funds(sender, "treasury", amount):
-        raise HTTPException(status_code=400, detail="Insufficient funds")
-    _update_treasury_balance(amount)
-    return {"ok": True, "balance": _treasury_balance()}
-
-
-@router.post("/propose")
-def propose_funding(proposal: Proposal):
-    """Submit a new treasury proposal."""
-    if proposal.proposal_id in PROPOSALS:
-        raise HTTPException(status_code=400, detail="Proposal already exists")
-    PROPOSALS[proposal.proposal_id] = proposal
-    return {"ok": True, "proposal": proposal}
-
-
-@router.get("/proposals")
-def list_proposals() -> List[Dict[str, Any]]:
-    """List all current proposals."""
-    return [p.dict() for p in PROPOSALS.values()]
-
-
-@router.post("/approve/{proposal_id}")
-def approve_proposal(proposal_id: str, approver: Optional[str] = None):
-    """Approve a funding proposal."""
-    if proposal_id not in PROPOSALS:
-        raise HTTPException(status_code=404, detail="Proposal not found")
-    prop = PROPOSALS[proposal_id]
-    prop.approved = True
-    return {"ok": True, "proposal": prop}
-
-
-@router.post("/execute/{proposal_id}")
-def execute_proposal(proposal_id: str):
+@router.get("/meta", response_model=TreasuryMetaResponse)
+def get_treasury_meta() -> TreasuryMetaResponse:
     """
-    Execute an approved proposal.
-    Deducts amount from treasury and issues an NFT receipt.
+    Return static monetary policy + pool split config.
     """
-    if proposal_id not in PROPOSALS:
-        raise HTTPException(status_code=404, detail="Proposal not found")
-
-    prop = PROPOSALS[proposal_id]
-    if not prop.approved:
-        raise HTTPException(status_code=400, detail="Proposal not approved")
-    if prop.executed:
-        raise HTTPException(status_code=400, detail="Proposal already executed")
-
-    balance = _treasury_balance()
-    if balance < prop.amount:
-        raise HTTPException(status_code=400, detail="Insufficient treasury funds")
-
-    # Deduct from treasury balance
-    executor.ledger["treasury_balance"] = balance - prop.amount
-    executor.save_state()
-
-    # Mint NFT receipt (on-ledger proof of disbursement)
-    nft_metadata = f"Treasury grant to {prop.proposer}: {prop.description}"
-    receipt = executor.mint_nft(prop.proposer, prop.proposal_id, nft_metadata)
-
-    prop.executed = True
-    return {"ok": True, "proposal": prop, "receipt": receipt}
+    state = _init_treasury_state()
+    meta = state["meta"]
+    return TreasuryMetaResponse(**meta)
 
 
-@router.post("/burn/{nft_id}")
-def burn_treasury_receipt(nft_id: str):
-    """Burn an existing treasury receipt NFT."""
-    success = executor.burn_nft(nft_id)
-    if not success:
-        raise HTTPException(status_code=404, detail="NFT not found or already burned")
-    return {"ok": True, "burned": nft_id}
+@router.get("/pools", response_model=TreasuryPoolsResponse)
+def get_treasury_pools() -> TreasuryPoolsResponse:
+    """
+    Return current per-pool balances.
+
+    In the current MVP these are stubbed to zeros and will later
+    be updated by the block-production / rewards pipeline.
+    """
+    state = _init_treasury_state()
+    pools = state["pools"]
+    last_update = state.get("last_update")
+    return TreasuryPoolsResponse(pools=pools, last_update=last_update)

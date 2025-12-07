@@ -120,7 +120,7 @@ function setupProfilePanel() {
     if (!id) { $('#pohOut').textContent = 'Enter account id'; return; }
     $('#pohOut').textContent = 'Checking…';
     try {
-      const j = await getJSON(`/poh/status/${encodeURIComponent(id)}`);
+      const j = await getJSON(`/poh/status?user_id=${encodeURIComponent(id)}`);
       $('#pohOut').textContent = JSON.stringify(j, null, 2);
     } catch (e) {
       $('#pohOut').textContent = String(e);

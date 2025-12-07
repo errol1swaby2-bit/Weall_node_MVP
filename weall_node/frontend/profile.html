@@ -1,278 +1,545 @@
 <!doctype html>
 <html lang="en">
-<head>
-  <meta charset="utf-8">
-  <title>WeAll - User Profile</title>
-  <meta name="viewport" content="width=device-width, initial-scale=1">
-  <style>
-    body {
-      margin: 0;
-      padding: 1.2rem;
-      font-family: system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
-      background: #020617;
-      color: #f9fafb;
-    }
-    a { color: #22c55e; text-decoration: none; }
-    a:hover { text-decoration: underline; }
-    header { margin-bottom: 1rem; display: flex; align-items: center; gap: 0.5rem; }
-    header h1 { font-size: 1.6rem; margin: 0; }
-    .back-link { font-size: 0.9rem; }
-    .cards { display: flex; flex-direction: column; gap: 1rem; }
-    .card {
-      background: #020617;
-      border-radius: 12px;
-      padding: 1rem;
-      border: 1px solid #1f2937;
-      box-shadow: 0 8px 20px rgba(0,0,0,0.35);
-    }
-    .card h2 {
-      margin: 0 0 0.4rem;
-      font-size: 1.1rem;
-    }
-    .card.poh h2,
-    .card.wallet h2,
-    .card.rep h2 { color: #22c55e; }
-    .label { font-weight: 600; font-size: 0.9rem; }
-    .value { font-size: 0.95rem; }
-    .row { margin-top: 0.3rem; }
-    button {
-      border: none;
-      border-radius: 999px;
-      padding: 0.45rem 0.9rem;
-      background: #22c55e;
-      color: #022c22;
-      font-weight: 600;
-      margin-top: 0.6rem;
-    }
-    button:active { transform: scale(0.97); }
-    input {
-      width: 100%;
-      padding: 0.45rem 0.6rem;
-      margin-top: 0.25rem;
-      border-radius: 8px;
-      border: 1px solid #374151;
-      background: #020617;
-      color: #f9fafb;
-      box-sizing: border-box;
-    }
-    .muted { font-size: 0.85rem; opacity: 0.8; }
-    .error { color: #f97373; font-size: 0.85rem; margin-top: 0.4rem; }
-    .success { color: #4ade80; font-size: 0.85rem; margin-top: 0.4rem; }
-  </style>
-</head>
-<body>
-  <header>
-    <div class="back-link"><a href="/frontend/index.html">← Back to Feed</a></div>
-    <h1>User Profile</h1>
-  </header>
+  <head>
+    <meta charset="utf-8" />
+    <title>Profile — WeAll</title>
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
 
-  <div class="muted" id="userIdLine">User: loading…</div>
+    <!-- If styles.css exists it will be used; otherwise the inline styles below are enough -->
+    <link rel="stylesheet" href="/frontend/styles.css" />
 
-  <div class="cards">
+    <style>
+      :root {
+        color-scheme: dark;
+        --bg: #050816;
+        --bg-soft: #0b1020;
+        --card-bg: #101626;
+        --card-border: #262f46;
+        --accent: #22c55e;
+        --accent-soft: rgba(34, 197, 94, 0.15);
+        --accent-yellow: #facc15;
+        --accent-red: #f97373;
+        --text-main: #e5e7eb;
+        --text-sub: #9ca3af;
+      }
 
-    <!-- Proof of Humanity -->
-    <section class="card poh">
-      <h2>Proof of Humanity</h2>
-      <div class="row">
-        <span class="label">User ID:</span>
-        <span class="value" id="pohUserId">loading…</span>
+      * {
+        box-sizing: border-box;
+      }
+
+      body {
+        margin: 0;
+        min-height: 100vh;
+        font-family: system-ui, -apple-system, BlinkMacSystemFont, "SF Pro Text",
+          sans-serif;
+        background: radial-gradient(circle at top, #1f2937 0, #020617 55%);
+        color: var(--text-main);
+      }
+
+      .page-shell {
+        max-width: 720px;
+        margin: 0 auto;
+        padding: 16px 16px 40px;
+      }
+
+      header {
+        margin-bottom: 20px;
+      }
+
+      .page-title {
+        font-size: 1.8rem;
+        font-weight: 700;
+        letter-spacing: 0.03em;
+      }
+
+      .page-subtitle {
+        margin-top: 4px;
+        font-size: 0.9rem;
+        color: var(--text-sub);
+      }
+
+      .pill {
+        display: inline-flex;
+        align-items: center;
+        gap: 6px;
+        border-radius: 999px;
+        padding: 3px 10px;
+        font-size: 0.75rem;
+        font-weight: 500;
+        border: 1px solid rgba(148, 163, 184, 0.3);
+        background: rgba(15, 23, 42, 0.9);
+        color: var(--text-sub);
+      }
+
+      .pill-dot {
+        width: 8px;
+        height: 8px;
+        border-radius: 999px;
+        background: var(--accent-yellow);
+      }
+
+      .cards-grid {
+        display: flex;
+        flex-direction: column;
+        gap: 16px;
+        margin-top: 12px;
+      }
+
+      .card {
+        border-radius: 18px;
+        background: radial-gradient(circle at top left, #111827, #020617 70%);
+        border: 1px solid var(--card-border);
+        padding: 16px 14px 14px;
+        box-shadow: 0 18px 35px rgba(15, 23, 42, 0.9);
+      }
+
+      .card-header {
+        display: flex;
+        justify-content: space-between;
+        align-items: center;
+        margin-bottom: 10px;
+      }
+
+      .card-title {
+        font-size: 0.95rem;
+        letter-spacing: 0.12em;
+        text-transform: uppercase;
+        color: var(--text-sub);
+      }
+
+      .card-tag {
+        font-size: 0.75rem;
+        padding: 3px 8px;
+        border-radius: 999px;
+        border: 1px solid rgba(148, 163, 184, 0.3);
+        color: var(--text-sub);
+      }
+
+      .poh-tier-label {
+        font-size: 1rem;
+        font-weight: 600;
+      }
+
+      .poh-row {
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        gap: 8px;
+        margin-top: 4px;
+      }
+
+      .poh-meta {
+        font-size: 0.8rem;
+        color: var(--text-sub);
+      }
+
+      .btn-row {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 8px;
+        margin-top: 12px;
+      }
+
+      .btn {
+        border-radius: 999px;
+        border: 1px solid rgba(148, 163, 184, 0.4);
+        padding: 7px 12px;
+        font-size: 0.8rem;
+        font-weight: 500;
+        background: rgba(15, 23, 42, 0.9);
+        color: var(--text-main);
+        cursor: pointer;
+        display: inline-flex;
+        align-items: center;
+        gap: 6px;
+      }
+
+      .btn-primary {
+        background: linear-gradient(135deg, #22c55e, #4ade80);
+        border-color: transparent;
+        color: #020617;
+      }
+
+      .btn:disabled {
+        opacity: 0.45;
+        cursor: default;
+      }
+
+      .roles-grid {
+        display: grid;
+        grid-template-columns: repeat(3, minmax(0, 1fr));
+        gap: 10px;
+        margin-top: 6px;
+      }
+
+      @media (max-width: 640px) {
+        .roles-grid {
+          grid-template-columns: 1fr;
+        }
+      }
+
+      .role-card {
+        border-radius: 14px;
+        padding: 10px 10px 9px;
+        background: linear-gradient(145deg, #020617, #0b1120);
+        border: 1px solid rgba(55, 65, 81, 0.9);
+      }
+
+      .role-title-row {
+        display: flex;
+        justify-content: space-between;
+        align-items: center;
+        font-size: 0.8rem;
+      }
+
+      .role-name {
+        font-weight: 600;
+      }
+
+      .role-chip {
+        font-size: 0.7rem;
+        padding: 1px 7px;
+        border-radius: 999px;
+        border: 1px solid rgba(148, 163, 184, 0.5);
+        color: var(--text-sub);
+      }
+
+      .toggle-row {
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        margin-top: 6px;
+        font-size: 0.8rem;
+      }
+
+      .toggle-label {
+        color: var(--text-sub);
+      }
+
+      .switch {
+        position: relative;
+        display: inline-block;
+        width: 34px;
+        height: 18px;
+      }
+
+      .switch input {
+        opacity: 0;
+        width: 0;
+        height: 0;
+      }
+
+      .slider {
+        position: absolute;
+        cursor: pointer;
+        inset: 0;
+        background-color: #111827;
+        border-radius: 999px;
+        transition: 0.2s;
+        border: 1px solid #4b5563;
+      }
+
+      .slider:before {
+        position: absolute;
+        content: "";
+        height: 14px;
+        width: 14px;
+        left: 2px;
+        bottom: 1px;
+        background-color: #9ca3af;
+        transition: 0.2s;
+        border-radius: 50%;
+      }
+
+      .switch input:checked + .slider {
+        background-color: var(--accent-soft);
+        border-color: var(--accent);
+      }
+
+      .switch input:checked + .slider:before {
+        transform: translateX(14px);
+        background-color: #bbf7d0;
+      }
+
+      .switch input:disabled + .slider {
+        opacity: 0.4;
+        cursor: default;
+      }
+
+      .roles-note {
+        font-size: 0.78rem;
+        color: var(--text-sub);
+        margin-top: 8px;
+      }
+
+      .roles-note strong {
+        color: var(--accent-yellow);
+        font-weight: 600;
+      }
+
+      .roles-note.error {
+        color: #fecaca;
+      }
+
+      .intensity-row {
+        margin-top: 8px;
+        font-size: 0.8rem;
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        gap: 8px;
+      }
+
+      .intensity-row select {
+        flex-shrink: 0;
+        border-radius: 999px;
+        border: 1px solid rgba(148, 163, 184, 0.5);
+        background: rgba(15, 23, 42, 0.9);
+        color: var(--text-main);
+        padding: 4px 10px;
+        font-size: 0.8rem;
+      }
+
+      .nav-row {
+        margin-top: 10px;
+        display: flex;
+        flex-wrap: wrap;
+        gap: 8px;
+      }
+
+      .nav-row .btn {
+        border-radius: 14px;
+      }
+
+      .badge-tier3 {
+        color: var(--accent);
+      }
+
+      .badge-tier-lock {
+        color: var(--accent-yellow);
+      }
+
+      .hidden {
+        display: none !important;
+      }
+    </style>
+
+    <script defer src="/frontend/session.js"></script>
+    <script defer src="/frontend/profile.js"></script>
+  </head>
+  <body>
+    <div class="page-shell">
+      <header>
+        <div class="page-title" id="profileTitle">Profile</div>
+        <div class="page-subtitle" id="profileSubtitle">
+          Loading session…
+        </div>
+      </header>
+
+      <div class="cards-grid">
+        <!-- PoH / Identity card -->
+        <section class="card">
+          <div class="card-header">
+            <div>
+              <div class="card-title">Proof-of-Humanity</div>
+              <div class="poh-tier-label" id="pohTierLabel">
+                Tier — loading…
+              </div>
+            </div>
+            <div class="pill" id="pohBadge">
+              <span class="pill-dot"></span>
+              <span id="pohBadgeText">Checking status…</span>
+            </div>
+          </div>
+
+          <div class="poh-row">
+            <div class="poh-meta">
+              PoH ID:
+              <span id="pohIdText" style="color: #e5e7eb">—</span>
+            </div>
+            <div class="poh-meta">
+              Status:
+              <span id="pohStatusText" style="color: #22c55e">—</span>
+            </div>
+          </div>
+
+          <div class="btn-row">
+            <button id="btnAccountRecovery" class="btn">
+              🔐 Account recovery
+            </button>
+            <button id="btnPohUpgrade" class="btn btn-primary">
+              ⚡ Request PoH upgrade
+            </button>
+          </div>
+        </section>
+
+        <!-- Roles & validation card -->
+        <section class="card">
+          <div class="card-header">
+            <div>
+              <div class="card-title">Roles & Validation</div>
+              <div style="font-size: 0.8rem; color: var(--text-sub)">
+                Configure how this device participates in the protocol.
+              </div>
+            </div>
+            <div class="card-tag" id="rolesTierTag">Tier — loading…</div>
+          </div>
+
+          <div id="rolesLocked" class="roles-note hidden">
+            This device is currently
+            <strong>below Tier 3</strong>. Validation, juror, and operator
+            roles unlock once you complete live jury verification.
+          </div>
+
+          <div id="rolesError" class="roles-note error hidden"></div>
+
+          <div id="rolesGrid" class="roles-grid hidden">
+            <!-- Validator role -->
+            <div class="role-card">
+              <div class="role-title-row">
+                <div class="role-name">Validator</div>
+                <div class="role-chip">Block rewards</div>
+              </div>
+
+              <div class="toggle-row">
+                <span class="toggle-label">Enable on this device</span>
+                <label class="switch">
+                  <input
+                    id="toggleValidatorEnabled"
+                    type="checkbox"
+                  />
+                  <span class="slider"></span>
+                </label>
+              </div>
+
+              <div class="toggle-row">
+                <span class="toggle-label">Run in background</span>
+                <label class="switch">
+                  <input
+                    id="toggleValidatorBackground"
+                    type="checkbox"
+                  />
+                  <span class="slider"></span>
+                </label>
+              </div>
+
+              <div class="toggle-row">
+                <span class="toggle-label">Wi-Fi only</span>
+                <label class="switch">
+                  <input id="toggleValidatorWifiOnly" type="checkbox" />
+                  <span class="slider"></span>
+                </label>
+              </div>
+
+              <div class="toggle-row">
+                <span class="toggle-label">Only while charging</span>
+                <label class="switch">
+                  <input
+                    id="toggleValidatorChargingOnly"
+                    type="checkbox"
+                  />
+                  <span class="slider"></span>
+                </label>
+              </div>
+
+              <div class="intensity-row">
+                <span class="toggle-label">Intensity</span>
+                <select id="selectValidatorIntensity">
+                  <option value="low">Low</option>
+                  <option value="medium">Medium</option>
+                  <option value="high">High</option>
+                </select>
+              </div>
+            </div>
+
+            <!-- Juror role -->
+            <div class="role-card">
+              <div class="role-title-row">
+                <div class="role-name">Juror</div>
+                <div class="role-chip">Disputes & PoH</div>
+              </div>
+
+              <div class="toggle-row">
+                <span class="toggle-label">Available as juror</span>
+                <label class="switch">
+                  <input id="toggleJurorEnabled" type="checkbox" />
+                  <span class="slider"></span>
+                </label>
+              </div>
+
+              <div
+                style="
+                  font-size: 0.78rem;
+                  color: var(--text-sub);
+                  margin-top: 8px;
+                "
+              >
+                Jurors help resolve disputes and verify new humans. You’ll only
+                be called inside your consent windows (future setting).
+              </div>
+            </div>
+
+            <!-- Operator role -->
+            <div class="role-card">
+              <div class="role-title-row">
+                <div class="role-name">Node operator</div>
+                <div class="role-chip">Routing & storage</div>
+              </div>
+
+              <div class="toggle-row">
+                <span class="toggle-label">Run as overlay node</span>
+                <label class="switch">
+                  <input id="toggleOperatorEnabled" type="checkbox" />
+                  <span class="slider"></span>
+                </label>
+              </div>
+
+              <div
+                style="
+                  font-size: 0.78rem;
+                  color: var(--text-sub);
+                  margin-top: 8px;
+                "
+              >
+                Operators boost p2p routing and pin shared content. Future
+                versions will expose bandwidth / storage budgets here.
+              </div>
+            </div>
+          </div>
+
+          <div class="roles-note" id="rolesFooterNote">
+            Tier <span id="rolesTierNumber">—</span>:
+            <span id="rolesTierLegend">Loading…</span>
+          </div>
+        </section>
+
+        <!-- Navigation -->
+        <section class="card">
+          <div class="card-header">
+            <div class="card-title">Navigation</div>
+          </div>
+          <div class="nav-row">
+            <button
+              class="btn btn-primary"
+              onclick="window.location.href='/frontend/index.html'"
+            >
+              🎥 Open TikTok feed
+            </button>
+            <button
+              class="btn"
+              onclick="window.location.href='/frontend/governance.html'"
+            >
+              🗳 Governance
+            </button>
+            <button
+              class="btn"
+              onclick="window.location.href='/frontend/wallet.html'"
+            >
+              💰 Wallet
+            </button>
+          </div>
+        </section>
       </div>
-      <div class="row">
-        <span class="label">Tier:</span>
-        <span class="value" id="pohTier">Loading…</span>
-      </div>
-      <div class="row muted" id="pohStatusMsg"></div>
-      <button id="pohRefreshBtn">Refresh Status</button>
-      <div class="error" id="pohError"></div>
-    </section>
-
-    <!-- Wallet -->
-    <section class="card wallet">
-      <h2>Wallet</h2>
-      <div class="row">
-        <span class="label">Address:</span>
-        <span class="value" id="walletAddress">(loading…)</span>
-      </div>
-      <div class="row">
-        <span class="label">Balance:</span>
-        <span class="value" id="walletBalance">0 WEC</span>
-      </div>
-
-      <div class="row" style="margin-top:0.7rem;">
-        <span class="label">Recipient User ID</span>
-        <input id="sendRecipient" placeholder="@friend">
-      </div>
-      <div class="row">
-        <span class="label">Amount (WEC)</span>
-        <input id="sendAmount" placeholder="0.0" inputmode="decimal">
-      </div>
-      <button id="sendBtn">Send WEC</button>
-      <div class="error" id="walletError"></div>
-      <div class="success" id="walletSuccess"></div>
-    </section>
-
-    <!-- Reputation -->
-    <section class="card rep">
-      <h2>Reputation</h2>
-      <div class="row">
-        <span class="label">Score:</span>
-        <span class="value" id="repScore">Loading…</span>
-      </div>
-      <button id="repRefreshBtn">Refresh</button>
-      <div class="error" id="repError"></div>
-    </section>
-
-    <!-- Governance -->
-    <section class="card">
-      <h2>Governance</h2>
-      <div class="muted">Create and vote on proposals.</div>
-      <button onclick="window.location.href='/frontend/governance.html'">Open Governance</button>
-    </section>
-
-  </div>
-
-<script>
-  // -------------------------
-  // User identity
-  // -------------------------
-  function getCurrentUserId() {
-    let v = localStorage.getItem("weall.account") ||
-            localStorage.getItem("weall_user") ||
-            "";
-    v = (v || "").trim().toLowerCase();
-    if (!v) return "unknown";
-    if (v.includes("@") && !v.startsWith("@")) {
-      return "@" + v.split("@", 1)[0];
-    }
-    return v;
-  }
-
-  const userId = getCurrentUserId();
-  document.getElementById("userIdLine").textContent = "User: " + userId;
-  document.getElementById("pohUserId").textContent = userId;
-
-  async function fetchJSON(url, opts) {
-    const res = await fetch(url, opts || {});
-    let data = {};
-    try { data = await res.json(); } catch {}
-    if (!res.ok) throw new Error(data.detail || data.error || "Request failed");
-    return data;
-  }
-
-  // -------------------------
-  // PoH Section
-  // -------------------------
-  async function refreshPoh() {
-    const tEl = document.getElementById("pohTier");
-    const sEl = document.getElementById("pohStatusMsg");
-    const eEl = document.getElementById("pohError");
-
-    tEl.textContent = "Loading…";
-    sEl.textContent = "";
-    eEl.textContent = "";
-
-    try {
-      const data = await fetchJSON("/poh/status/" + encodeURIComponent(userId));
-      tEl.textContent = data.tier ?? "None";
-      sEl.textContent = data.status || (data.tier ? "Verified" : "Not verified");
-    } catch (err) {
-      eEl.textContent = "PoH error: " + err.message;
-      tEl.textContent = "Unknown";
-    }
-  }
-
-  document.getElementById("pohRefreshBtn").onclick = refreshPoh;
-
-  // -------------------------
-  // Wallet Section
-  // -------------------------
-  async function refreshWallet() {
-    const balEl = document.getElementById("walletBalance");
-    const addrEl = document.getElementById("walletAddress");
-    const errEl = document.getElementById("walletError");
-
-    balEl.textContent = "Loading…";
-    errEl.textContent = "";
-
-    try {
-      const data = await fetchJSON("/ledger/balance/" + encodeURIComponent(userId));
-      balEl.textContent = (data.balance || 0) + " WEC";
-      addrEl.textContent = (data.wallet && data.wallet.address) || "(not set)";
-    } catch (err) {
-      errEl.textContent = "Wallet error: " + err.message;
-      balEl.textContent = "0 WEC";
-    }
-  }
-
-  async function sendWEC() {
-    const recip = document.getElementById("sendRecipient").value.trim().toLowerCase();
-    const amt = parseFloat(document.getElementById("sendAmount").value);
-    const errEl = document.getElementById("walletError");
-    const okEl = document.getElementById("walletSuccess");
-
-    errEl.textContent = "";
-    okEl.textContent = "";
-
-    if (!recip) {
-      errEl.textContent = "Recipient required.";
-      return;
-    }
-    let cleanRecip = recip;
-    if (recip.includes("@") && !recip.startsWith("@")) {
-      cleanRecip = "@" + recip.split("@", 1)[0];
-    }
-
-    if (!amt || amt <= 0) {
-      errEl.textContent = "Enter a positive amount.";
-      return;
-    }
-
-    try {
-      await fetchJSON("/wallet/transfer", {
-        method: "POST",
-        headers: { "Content-Type":"application/json" },
-        body: JSON.stringify({
-          sender: userId,
-          recipient: cleanRecip,
-          amount: amt
-        })
-      });
-      okEl.textContent = "Transfer complete.";
-      refreshWallet();
-    } catch (err) {
-      errEl.textContent = "Transfer failed: " + err.message;
-    }
-  }
-
-  document.getElementById("sendBtn").onclick = sendWEC;
-
-  // -------------------------
-  // Reputation Section
-  // -------------------------
-  async function refreshRep() {
-    const scoreEl = document.getElementById("repScore");
-    const errEl = document.getElementById("repError");
-
-    scoreEl.textContent = "Loading…";
-    errEl.textContent = "";
-
-    try {
-      const data = await fetchJSON("/reputation/" + encodeURIComponent(userId));
-      scoreEl.textContent = data.score ?? data.reputation ?? 0;
-    } catch (err) {
-      errEl.textContent = "Reputation error: " + err.message;
-      scoreEl.textContent = "0";
-    }
-  }
-
-  document.getElementById("repRefreshBtn").onclick = refreshRep;
-
-  // -------------------------
-  // Initial Load
-  // -------------------------
-  refreshPoh();
-  refreshWallet();
-  refreshRep();
-</script>
-</body>
+    </div>
+  </body>
 </html>

@@ -82,6 +82,8 @@ from .api import (  # noqa: E402
     operators,
     consensus,
     recovery,
+    faucet,
+    p2p_overlay,   # <-- added
 )
 
 # ---------------------------------------------------------------------------
@@ -113,6 +115,7 @@ app.include_router(auth_router)         # /auth/send-code, /auth/verify (dev / n
 app.include_router(content.router)      # /content/...
 app.include_router(rewards.router)      # /rewards/...
 app.include_router(chain.router)        # /chain/...
+app.include_router(faucet.router)
 
 # Governance & treasury
 app.include_router(governance.router)   # /governance/...
@@ -128,6 +131,9 @@ app.include_router(messaging.router)    # /messaging/... + legacy /content alias
 app.include_router(sync.router)         # sync / p2p wiring
 app.include_router(ledger.router)       # ledger inspection endpoints
 app.include_router(storage.router)      # /storage/... (IPFS / local)
+
+# P2P overlay (identity & peers)
+app.include_router(p2p_overlay.router)  # /p2p/...
 
 # Reputation & PoH (explicit)
 app.include_router(reputation.router)   # /reputation/...

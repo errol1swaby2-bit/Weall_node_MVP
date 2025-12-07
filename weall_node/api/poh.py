@@ -1,340 +1,423 @@
 """
 weall_node/api/poh.py
-----------------------------------
-FastAPI router for Proof-of-Humanity operations.
+--------------------------------------------------
+Proof-of-Humanity (PoH) tiers and upgrade flow.
 
-Goals for this version:
-- Persist all PoH state in executor.ledger["poh"] (no in-memory STATE dicts)
-- Provide Tier-2 async verification endpoints used by the web SDK
-- Expose a simple /poh/status endpoint for frontends & auth gates
+Tiers:
+    0 - Crawler / exchange (read-only, no account)
+    1 - Email verified (like, comment, message)
+    2 - Async verified human (create posts, join groups)
+    3 - Live jury verified human (full protocol access)
 
-Spec alignment
---------------
-- Section 3.2 / 3.3 / 3.4: Tier flows
-- Section 3.5: Revocation & recovery (via ledger-backed records)
-- Section 8.3: Juror votes on Tier-2 applications
+Data layout in executor.ledger["poh"]:
+    {
+        "records": {
+            "<poh_id>": {
+                "poh_id": str,
+                "tier": int,
+                "tier_label": str,
+                "status": "active" | "revoked",
+                "created_at": int,
+                "updated_at": int,
+            },
+            ...
+        },
+        "requests": {
+            "<request_id>": {
+                "id": str,
+                "poh_id": str,
+                "current_tier": int,
+                "target_tier": int,
+                "status": "pending" | "approved" | "rejected",
+                "evidence_cid": str | None,
+                "note": str | None,
+                "created_at": int,
+                "decided_at": int | None,
+                "decided_by": str | None,
+                "decision_note": str | None,
+            },
+            ...
+        },
+    }
 """
 
-from __future__ import annotations
+import time
+import secrets
+from typing import Dict, Any, List, Optional
 
-import logging
-from typing import Any, Dict, List, Optional
-
-from fastapi import APIRouter, HTTPException
+from fastapi import APIRouter, HTTPException, Header, Query
 from pydantic import BaseModel, Field
 
 from ..weall_executor import executor
-from weall_node.weall_runtime.poh import (
-    poh_runtime,
-    get_poh_record,
-    set_poh_tier,
-    get_t2_config,
-    update_t2_config,
-    get_t2_queue,
-    upsert_t2_application,
-    register_t2_vote,
-)
-from weall_node.weall_runtime.wallet import ensure_poh_badge  # type: ignore
+
+router = APIRouter()
+
+# ---------------------------------------------------------------------
+# Tier metadata
+# ---------------------------------------------------------------------
+
+POH_TIERS: Dict[int, Dict[str, Any]] = {
+    0: {
+        "label": "Tier 0 – None",
+        "description": "Crawler / exchange read-only access to the chain.",
+        "capabilities": [
+            "Read public chain data",
+        ],
+    },
+    1: {
+        "label": "Tier 1 – Email verified",
+        "description": "Email verified account.",
+        "capabilities": [
+            "Like posts",
+            "Comment on posts",
+            "Send and receive messages",
+        ],
+    },
+    2: {
+        "label": "Tier 2 – Async verified human",
+        "description": "Async verification (upload evidence, reviewed by jurors).",
+        "capabilities": [
+            "Everything from Tier 1",
+            "Create public and group posts",
+            "Join existing groups",
+        ],
+    },
+    3: {
+        "label": "Tier 3 – Live jury verified human",
+        "description": "Video / live jury verification.",
+        "capabilities": [
+            "Everything from Tier 2",
+            "Create new groups (governance units)",
+            "Opt into juror, node operator, and validator roles",
+            "Participate in protocol-level governance",
+        ],
+    },
+}
+
+MAX_TIER = max(POH_TIERS.keys())
 
 
-logger = logging.getLogger("poh")
-router = APIRouter(prefix="/poh", tags=["poh"])
-
-
-# ---------------------------------------------------------------------------
+# ---------------------------------------------------------------------
 # Pydantic models
-# ---------------------------------------------------------------------------
+# ---------------------------------------------------------------------
 
-class StatusReq(BaseModel):
-    account_id: str = Field(..., description="Logical account/user id")
-
-
-class StatusResp(BaseModel):
-    ok: bool
-    account_id: str
+class PohStatusResponse(BaseModel):
+    ok: bool = True
+    poh_id: str
     tier: int
-    revoked: bool
-    source: Optional[str] = None
-    updated_at: Optional[int] = None
-    revocation_reason: Optional[str] = None
+    tier_label: str
+    status: str
+    created_at: int
+    updated_at: int
 
 
-class T2SubmitReq(BaseModel):
-    account_id: str
-    videos: List[str] = Field(default_factory=list)
-    title: str = ""
-    desc: str = ""
-
-
-class T2ListReq(BaseModel):
-    status: Optional[str] = Field(
-        default=None,
-        description="Optional filter: pending / approved / rejected",
+class PohRequestCreate(BaseModel):
+    target_tier: int = Field(..., ge=1, le=MAX_TIER)
+    evidence_cid: Optional[str] = None
+    note: Optional[str] = Field(
+        None,
+        max_length=4000,
+        description="Optional human-readable note for this request.",
     )
-    limit: int = 50
-    offset: int = 0
 
 
-class T2VoteReq(BaseModel):
-    candidate_id: str
-    juror_id: str
-    approve: bool
+class PohRequest(BaseModel):
+    id: str
+    poh_id: str
+    current_tier: int
+    target_tier: int
+    status: str
+    evidence_cid: Optional[str] = None
+    note: Optional[str] = None
+    created_at: int
+    decided_at: Optional[int] = None
+    decided_by: Optional[str] = None
+    decision_note: Optional[str] = None
 
 
-class T2ItemReq(BaseModel):
-    account_id: str
+class RequestDecision(BaseModel):
+    decision: str = Field(..., pattern="^(approve|reject)$")
+    note: Optional[str] = Field(
+        None,
+        max_length=4000,
+        description="Optional note explaining the decision.",
+    )
 
 
-class T2ConfigReq(BaseModel):
-    required_yes: Optional[int] = None
-    max_pending: Optional[int] = None
+class PohMetaResponse(BaseModel):
+    ok: bool = True
+    tiers: Dict[int, Dict[str, Any]]
 
 
-# ---------------------------------------------------------------------------
-# Helpers
-# ---------------------------------------------------------------------------
-
-def _ensure_executor_ledger() -> Dict[str, Any]:
-    led = getattr(executor, "ledger", None)
-    if not isinstance(led, dict):
-        raise HTTPException(status_code=500, detail="Ledger not initialised")
-    return led
+class PohRequestsResponse(BaseModel):
+    ok: bool = True
+    requests: List[PohRequest]
 
 
-def _persist() -> None:
-    try:
-        save_state = getattr(executor, "save_state", None)
-        if callable(save_state):
-            save_state()
-    except Exception as exc:  # pragma: no cover - logging only
-        logger.warning("Failed to save state after PoH update: %r", exc)
+# ---------------------------------------------------------------------
+# Ledger helpers
+# ---------------------------------------------------------------------
+
+def _now() -> int:
+    return int(time.time())
 
 
-# ---------------------------------------------------------------------------
-# Public endpoints
-# ---------------------------------------------------------------------------
-
-@router.post("/status", response_model=StatusResp)
-async def poh_status(body: StatusReq) -> StatusResp:
+def _get_poh_state() -> Dict[str, Any]:
     """
-    Return the current PoH status for a given account.
-
-    This is the endpoint used by:
-      - websdk.js → api.pohStatus()
-      - frontend/auth.js PoH gates
+    Ensure executor.ledger has a stable "poh" root with
+    'records' and 'requests' subdicts.
     """
-    account_id = (body.account_id or "").strip()
-    if not account_id:
-        raise HTTPException(status_code=400, detail="account_id required")
+    state = executor.ledger.setdefault("poh", {})
+    state.setdefault("records", {})
+    state.setdefault("requests", {})
+    return state
 
-    _ensure_executor_ledger()
 
-    rec = get_poh_record(account_id) or {
-        "tier": 0,
-        "revoked": False,
-        "source": "unknown",
-        "updated_at": None,
-        "revocation_reason": None,
-    }
+def _ensure_record(poh_id: str) -> Dict[str, Any]:
+    """
+    Ensure a PoH record exists for the given poh_id.
 
-    try:
-        # Best-effort: ensure an NFT badge exists for non-zero tiers
-        tier_val = int(rec.get("tier", 0))
-        if tier_val > 0:
-            ensure_poh_badge(account_id, tier=tier_val)
-    except Exception:
-        # Never fail the status call because of NFT minting issues.
-        pass
+    Default tier is 1 (email verified) for real user accounts.
+    Tier 0 is reserved for system / crawler contexts.
+    """
+    state = _get_poh_state()
+    records = state["records"]
 
-    return StatusResp(
+    rec = records.get(poh_id)
+    if rec is None:
+        now = _now()
+        tier = 1 if poh_id != "anonymous" else 0
+        meta = POH_TIERS.get(tier, POH_TIERS[0])
+
+        rec = {
+            "poh_id": poh_id,
+            "tier": tier,
+            "tier_label": meta["label"],
+            "status": "active",
+            "created_at": now,
+            "updated_at": now,
+        }
+        records[poh_id] = rec
+
+    return rec
+
+
+def _recompute_and_persist_tier(poh_id: str) -> Dict[str, Any]:
+    """
+    Look at the base record tier AND any approved requests for this poh_id.
+    Set the record's tier to the maximum approved level.
+    """
+    state = _get_poh_state()
+    records = state["records"]
+    requests = state["requests"]
+
+    rec = _ensure_record(poh_id)
+
+    base_tier = int(rec.get("tier", 0))
+    max_tier = base_tier
+
+    for req in requests.values():
+        if req.get("poh_id") == poh_id and req.get("status") == "approved":
+            t = int(req.get("target_tier") or 0)
+            if t > max_tier:
+                max_tier = t
+
+    if max_tier < 0 or max_tier > MAX_TIER:
+        max_tier = min(max(max_tier, 0), MAX_TIER)
+
+    if max_tier != rec.get("tier"):
+        meta = POH_TIERS.get(max_tier, POH_TIERS[0])
+        rec["tier"] = max_tier
+        rec["tier_label"] = meta["label"]
+        rec["updated_at"] = _now()
+
+    return rec
+
+
+def _require_user_header(x_weall_user: Optional[str]) -> str:
+    if not x_weall_user:
+        raise HTTPException(
+            status_code=400,
+            detail="Missing X-WeAll-User header for PoH operations.",
+        )
+    return x_weall_user
+
+
+# ---------------------------------------------------------------------
+# API endpoints
+# ---------------------------------------------------------------------
+
+@router.get("/poh/meta", response_model=PohMetaResponse)
+def poh_meta() -> PohMetaResponse:
+    """
+    Expose tier metadata for the frontend.
+    """
+    return PohMetaResponse(ok=True, tiers=POH_TIERS)
+
+
+@router.get("/poh/me", response_model=PohStatusResponse)
+def poh_me(
+    x_weall_user: Optional[str] = Header(default=None, alias="X-WeAll-User"),
+) -> PohStatusResponse:
+    """
+    Return PoH status for the current user.
+
+    - If no record exists, create one (Tier 1 for normal accounts).
+    - Always recompute tier from any approved upgrade requests.
+    """
+    poh_id = _require_user_header(x_weall_user)
+    rec = _recompute_and_persist_tier(poh_id)
+
+    return PohStatusResponse(
         ok=True,
-        account_id=account_id,
-        tier=int(rec.get("tier", 0)),
-        revoked=bool(rec.get("revoked", False)),
-        source=rec.get("source"),
-        updated_at=rec.get("updated_at"),
-        revocation_reason=rec.get("revocation_reason"),
+        poh_id=rec["poh_id"],
+        tier=int(rec["tier"]),
+        tier_label=str(rec.get("tier_label", POH_TIERS[int(rec["tier"])]["label"])),
+        status=str(rec.get("status", "active")),
+        created_at=int(rec.get("created_at", _now())),
+        updated_at=int(rec.get("updated_at", _now())),
     )
 
 
-# ----------- Tier-2 Async Verification -----------
-
-@router.post("/t2/submit")
-async def t2_submit(body: T2SubmitReq) -> Dict[str, Any]:
+@router.post("/poh/requests", response_model=dict)
+def create_poh_request(
+    payload: PohRequestCreate,
+    x_weall_user: Optional[str] = Header(default=None, alias="X-WeAll-User"),
+):
     """
-    Submit or update a Tier-2 async verification request.
-
-    Called by:
-        websdk.t2Submit({ accountId, videos, title, desc })
+    User-initiated upgrade request to a higher tier (e.g. Tier 2 or 3).
     """
-    acct = (body.account_id or "").strip()
-    if not acct:
-        raise HTTPException(status_code=400, detail="account_id required")
+    poh_id = _require_user_header(x_weall_user)
+    state = _get_poh_state()
+    records = state["records"]
+    requests = state["requests"]
 
-    _ensure_executor_ledger()
-    cfg = get_t2_config()
+    rec = _ensure_record(poh_id)
+    current_tier = int(rec.get("tier", 0))
 
-    # Soft guard: avoid unbounded growth of pending queue.
-    queue = get_t2_queue()
-    pending = [a for a in queue.values() if a.get("status") == "pending"]
-    if len(pending) >= int(cfg.get("max_pending", 128)):
-        raise HTTPException(status_code=429, detail="Too many pending Tier-2 applications")
-
-    app = upsert_t2_application(
-        account_id=acct,
-        videos=body.videos,
-        title=body.title,
-        desc=body.desc,
-    )
-
-    _persist()
-    return {
-        "ok": True,
-        "application": app,
-    }
-
-
-@router.post("/t2/list")
-async def t2_list(body: T2ListReq) -> Dict[str, Any]:
-    """
-    List Tier-2 applications, optionally filtered by status.
-    """
-    _ensure_executor_ledger()
-    queue = get_t2_queue()
-
-    items: List[Dict[str, Any]] = list(queue.values())
-    if body.status:
-        wanted = str(body.status).lower()
-        items = [a for a in items if str(a.get("status", "")).lower() == wanted]
-
-    total = len(items)
-    start = max(0, int(body.offset))
-    end = max(start, start + int(body.limit))
-    page = items[start:end]
-
-    return {
-        "ok": True,
-        "total": total,
-        "items": page,
-        "limit": body.limit,
-        "offset": body.offset,
-    }
-
-
-@router.post("/t2/item")
-async def t2_item(body: T2ItemReq) -> Dict[str, Any]:
-    """
-    Fetch a single Tier-2 application by account id.
-    """
-    acct = (body.account_id or "").strip()
-    if not acct:
-        raise HTTPException(status_code=400, detail="account_id required")
-
-    _ensure_executor_ledger()
-    queue = get_t2_queue()
-    app = queue.get(acct)
-    if not app:
-        raise HTTPException(status_code=404, detail="Tier-2 application not found")
-
-    return {
-        "ok": True,
-        "application": app,
-    }
-
-
-@router.post("/t2/vote")
-async def t2_vote(body: T2VoteReq) -> Dict[str, Any]:
-    """
-    Register a juror vote for a Tier-2 application.
-
-    Called by:
-        websdk.t2Vote({ candidateId, jurorId, approve })
-    """
-    candidate_id = (body.candidate_id or "").strip()
-    juror_id = (body.juror_id or "").strip()
-    if not candidate_id or not juror_id:
-        raise HTTPException(status_code=400, detail="candidate_id and juror_id required")
-
-    _ensure_executor_ledger()
-
-    try:
-        app = register_t2_vote(
-            candidate_id=candidate_id,
-            juror_id=juror_id,
-            approve=bool(body.approve),
+    if payload.target_tier <= current_tier:
+        raise HTTPException(
+            status_code=400,
+            detail="Target tier must be higher than current tier.",
         )
-    except KeyError:
-        raise HTTPException(status_code=404, detail="Tier-2 application not found")
+    if payload.target_tier > MAX_TIER:
+        raise HTTPException(
+            status_code=400,
+            detail=f"Target tier {payload.target_tier} is not supported.",
+        )
 
-    # When auto-approved, also mint/upgrade badge.
-    try:
-        if app.get("status") == "approved":
-            rec = get_poh_record(candidate_id)
-            if rec:
-                ensure_poh_badge(candidate_id, tier=int(rec.get("tier", 2)))
-    except Exception:
-        pass
+    req_id = secrets.token_hex(8)
+    now = _now()
 
-    _persist()
-
-    return {
-        "ok": True,
-        "application": app,
+    req = {
+        "id": req_id,
+        "poh_id": poh_id,
+        "current_tier": current_tier,
+        "target_tier": int(payload.target_tier),
+        "status": "pending",
+        "evidence_cid": payload.evidence_cid,
+        "note": payload.note,
+        "created_at": now,
+        "decided_at": None,
+        "decided_by": None,
+        "decision_note": None,
     }
 
+    requests[req_id] = req
 
-@router.post("/t2/config")
-async def t2_config(body: T2ConfigReq) -> Dict[str, Any]:
-    """
-    Get or update Tier-2 configuration.
+    return {"ok": True, "request": req}
 
-    If both fields are None, this behaves as a pure "get" call.
+
+@router.get("/poh/requests/mine", response_model=PohRequestsResponse)
+def my_poh_requests(
+    x_weall_user: Optional[str] = Header(default=None, alias="X-WeAll-User"),
+) -> PohRequestsResponse:
     """
-    _ensure_executor_ledger()
-    if body.required_yes is None and body.max_pending is None:
-        cfg = get_t2_config()
+    List all requests created by the current user.
+    """
+    poh_id = _require_user_header(x_weall_user)
+    state = _get_poh_state()
+    requests = state["requests"]
+
+    out: List[PohRequest] = []
+    for req in requests.values():
+        if req.get("poh_id") == poh_id:
+            out.append(PohRequest(**req))
+
+    # Sort newest first for convenience
+    out.sort(key=lambda r: r.created_at, reverse=True)
+
+    return PohRequestsResponse(ok=True, requests=out)
+
+
+@router.get("/poh/requests/pending", response_model=PohRequestsResponse)
+def pending_poh_requests(
+    target_tier: Optional[int] = Query(
+        default=None,
+        description="If provided, only show requests for this target tier.",
+    ),
+):
+    """
+    Juror / operator view of pending requests.
+
+    (For now, access control is manual: use 'jury:local' or similar in X-WeAll-User
+    at the client level; later we can gate it on Tier 3 + juror flag.)
+    """
+    state = _get_poh_state()
+    requests = state["requests"]
+
+    out: List[PohRequest] = []
+    for req in requests.values():
+        if req.get("status") != "pending":
+            continue
+        if target_tier is not None and int(req.get("target_tier", 0)) != target_tier:
+            continue
+        out.append(PohRequest(**req))
+
+    # Newest first
+    out.sort(key=lambda r: r.created_at, reverse=True)
+
+    return PohRequestsResponse(ok=True, requests=out)
+
+
+@router.post("/poh/requests/{request_id}/decision", response_model=dict)
+def decide_poh_request(
+    request_id: str,
+    payload: RequestDecision,
+    x_weall_user: Optional[str] = Header(default=None, alias="X-WeAll-User"),
+):
+    """
+    Juror/operator decision on a PoH upgrade request.
+
+    For now, any caller (e.g. 'jury:local') can decide. Later we can
+    gate this to Tier 3 + juror pool membership.
+    """
+    decider = _require_user_header(x_weall_user)
+    state = _get_poh_state()
+    requests = state["requests"]
+
+    req = requests.get(request_id)
+    if not req:
+        raise HTTPException(status_code=404, detail="PoH request not found")
+
+    if req.get("status") != "pending":
+        # Idempotent-ish behaviour: if we try to decide twice, just return.
+        raise HTTPException(status_code=400, detail="Request is already approved")
+
+    now = _now()
+
+    if payload.decision == "approve":
+        req["status"] = "approved"
     else:
-        cfg = update_t2_config(
-            required_yes=body.required_yes,
-            max_pending=body.max_pending,
-        )
+        req["status"] = "rejected"
 
-    _persist()
+    req["decided_at"] = now
+    req["decided_by"] = decider
+    req["decision_note"] = payload.note
 
-    return {
-        "ok": True,
-        "config": cfg,
-    }
+    # IMPORTANT: recompute tier now that we have a new decision.
+    poh_id = req.get("poh_id")
+    if poh_id:
+        _recompute_and_persist_tier(poh_id)
 
-
-# ---------------------------------------------------------------------------
-# Admin / manual PoH tier setting (optional)
-# ---------------------------------------------------------------------------
-
-class AdminSetTierReq(BaseModel):
-    user_id: str
-    tier: int = Field(..., ge=0, le=3)
-    source: Optional[str] = None
-
-
-@router.post("/admin/set-tier")
-async def admin_set_tier(body: AdminSetTierReq) -> Dict[str, Any]:
-    """
-    Minimal admin helper to directly set PoH tier from the backend.
-
-    This should be protected by higher-level auth/ACL in production.
-    """
-    uid = (body.user_id or "").strip()
-    if not uid:
-        raise HTTPException(status_code=400, detail="user_id required")
-
-    _ensure_executor_ledger()
-    rec = set_poh_tier(uid, body.tier, source=body.source or "admin_set")
-
-    try:
-        ensure_poh_badge(uid, tier=rec.get("tier", body.tier))
-    except Exception:
-        pass
-
-    _persist()
-    return {"ok": True, "poh": rec}
+    return {"ok": True, "request": req}

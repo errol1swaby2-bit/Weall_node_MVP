@@ -450,6 +450,114 @@ class WeAllExecutor:
             f"[consensus] committed height={block['height']} txs={len(block['txs'])} id={block_id}"
         )
 
+    def apply_remote_block(self, block: dict) -> Dict[str, Any]:
+        """
+        Integrate a block received from a peer.
+
+        Genesis assumptions:
+        - We are in a single-epoch, single-fork environment.
+        - We only accept blocks that extend the current tip by exactly +1 height.
+        - We verify the block_id against the deterministic header hash.
+        - We reject or ignore anything that doesn't cleanly extend the local chain.
+
+        Returns a dict of the shape:
+            {
+              "ok": bool,
+              "status": "appended" | "ignored",
+              "error": <str> | None,
+              "height": <int> | None
+            }
+        """
+        try:
+            if not isinstance(block, dict):
+                return {
+                    "ok": False,
+                    "status": "ignored",
+                    "error": "invalid_block_type",
+                    "height": None,
+                }
+
+            chain = self.ledger.setdefault("chain", [])
+            local_height = len(chain)
+
+            # Basic required fields
+            height = block.get("height")
+            prev_block_id = block.get("prev_block_id")
+            block_id = block.get("block_id")
+
+            if height is None or block_id is None:
+                return {
+                    "ok": False,
+                    "status": "ignored",
+                    "error": "missing_fields",
+                    "height": local_height,
+                }
+
+            # Recompute header hash to validate block_id (header = non-tx fields)
+            header = {k: v for k, v in block.items() if k not in ("block_id", "txs")}
+            computed_id = _block_hash(header)
+            if str(block_id) != computed_id:
+                return {
+                    "ok": False,
+                    "status": "ignored",
+                    "error": "bad_block_hash",
+                    "height": local_height,
+                }
+
+            # For Genesis, only accept the next sequential block:
+            #   remote.height == local_height
+            if height != local_height:
+                # If the remote chain is strictly behind, or skipping heights,
+                # we ignore it for now (no fork handling in Genesis).
+                return {
+                    "ok": False,
+                    "status": "ignored",
+                    "error": "height_mismatch",
+                    "height": local_height,
+                }
+
+            # Validate prev_block_id if we already have a tip
+            if local_height > 0:
+                tip = chain[-1]
+                tip_id = tip.get("block_id")
+                if tip_id != prev_block_id:
+                    return {
+                        "ok": False,
+                        "status": "ignored",
+                        "error": "prev_block_mismatch",
+                        "height": local_height,
+                    }
+
+            # At this point we treat the block as valid and append it.
+            self._apply_block(block)
+            chain.append(block)
+            self.current_block_height = len(chain)
+            try:
+                self.save_state()
+            except Exception:
+                # Not fatal for Genesis; chain has already been updated in-memory.
+                pass
+
+            return {
+                "ok": True,
+                "status": "appended",
+                "error": None,
+                "height": self.current_block_height,
+            }
+        except Exception as e:
+            # Extremely defensive catch-all so that remote blocks can never
+            # crash the node.
+            try:
+                current_height = len(self.ledger.get("chain", []))
+            except Exception:
+                current_height = None
+            return {
+                "ok": False,
+                "status": "ignored",
+                "error": f"exception:{e!s}",
+                "height": current_height,
+            }
+
     def _apply_block(self, block: dict) -> None:
         for tx in block.get("txs", []):
             try:

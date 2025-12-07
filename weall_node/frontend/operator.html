@@ -82,7 +82,7 @@
 (async () => {
   const acct = localStorage.getItem('weall.account');
   if (!acct) return location.href = '/frontend/login.html';
-  const r = await fetch(`/poh/status/${encodeURIComponent(acct)}`);
+  const r = await fetch(`/poh/status?user_id=${encodeURIComponent(acct)}`);
   const s = await r.json();
   const tier = (s.tier ?? s.poh_level ?? 0);
   if (tier < 3) location.href = '/frontend/verify.html?reason=tier3_required';

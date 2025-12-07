@@ -1,106 +1,129 @@
 # weall_node/weall_runtime/governance.py
+from __future__ import annotations
+
 """
-GovernanceRuntime:
-- Proposal registry
-- Voting with quorum/threshold (threshold currently unused in MVP)
-- Enactment hooks (Treasury.allocate, Params.set, Governance.set_rules)
+Runtime governance defaults for WeAll.
 
-Executor injects/shared GLOBAL_PARAMS from its own constants.
+This module centralizes the "knobs" used by the node to apply
+governance-related rewards and penalties.
+
+Key principles encoded here
+---------------------------
+1. **WCN is never burned or destructively slashed here.**
+   - These parameters do NOT directly move token balances.
+   - Any economic flows (WCN) must be implemented in the ledger /
+     rewards / treasury layers as explicit transfers, always preserving
+     total supply.
+
+2. **Reputation is the primary axis of sanction and reward.**
+   - All "*_rep_penalty" and "*_rep_reward" values are intended to be
+     applied to a user's reputation score (e.g. via ReputationRuntime),
+     not to their token balances.
+
+3. **Compatibility with older "slash" terminology.**
+   - Older code and docs used names like "juror_slash" or
+     "validator_slash" to refer to penalties.
+   - To avoid breaking existing code, we expose read-only aliases for
+     those legacy keys, but new code should migrate to the explicit
+     "*_rep_penalty" naming.
 """
 
-import time
-from typing import Dict, Any
+from typing import Any, Dict
 
-# This dict is overwritten by the executor at construction time to keep
-# parameters in sync across the whole runtime.
-GLOBAL_PARAMS: Dict[str, Any] = {
-    "quorum": 3,
-    "threshold": 0.5,
-    "juror_reward": 2,
-    "juror_slash": 1,
-    "author_slash": 5,
-    "profile_slash": 10,
-    "block_reward": 100,  # total block reward
-    "block_rep_reward": 2,  # rep reward for block proposer
-    "validator_slash": 5,  # rep penalty for misbehavior
-    "operator_reward_online": 1,  # rep reward per uptime check
-    "operator_slash_offline": 1,  # rep penalty for missed uptime
-    "operator_slash_missing": 2,  # rep penalty for missing CID
-    "operator_reward_storage_check": 1,  # rep reward for passing PoS challenge
+# ---------------------------------------------------------------------------
+# Core parameter table
+# ---------------------------------------------------------------------------
+
+GOVERNANCE_PARAMS: Dict[str, Any] = {
+    # -------------------------------------------------
+    # Jurors (reputation-only economics)
+    # -------------------------------------------------
+    # Reputation reward per correct/majority-aligned decision
+    "juror_rep_reward": 2,
+    # Reputation penalty per clearly harmful / minority-against-evidence decision
+    "juror_rep_penalty": 1,
+
+    # -------------------------------------------------
+    # Authors / profiles (reputation-only penalties)
+    # -------------------------------------------------
+    # Reputation penalty for content / behavior that results in a negative verdict
+    "author_rep_penalty": 5,
+    # Reputation penalty for identity-level sanctions (e.g. repeated abuse)
+    "profile_rep_penalty": 10,
+
+    # -------------------------------------------------
+    # Block & operator rewards (WCN + reputation)
+    # -------------------------------------------------
+    # Base block reward (in WCN) BEFORE any splitting between validator,
+    # node operators, jurors, creators, treasury, etc. The actual
+    # distribution is handled in the ledger / rewards module.
+    "block_reward_wcn": 100,
+
+    # Reputation reward for a validator successfully proposing / validating
+    # a block according to consensus rules.
+    "validator_rep_reward": 0.5,
+    # Reputation penalty for validator misbehavior (e.g. invalid blocks).
+    "validator_rep_penalty": 5,
+
+    # Reputation reward for an operator staying online / serving traffic.
+    "operator_uptime_rep_reward": 0.5,
+    # Reputation penalty for an operator being offline during uptime checks.
+    "operator_rep_penalty_offline": 1,
+    # Reputation penalty for repeated / severe missed uptime events.
+    "operator_rep_penalty_missing": 2,
 }
 
 
-class GovernanceRuntime:
-    def __init__(self):
-        self.proposals: Dict[int, Dict[str, Any]] = {}
-        self.next_proposal_id: int = 1
-        self.ledger = None  # attached by executor
+# ---------------------------------------------------------------------------
+# Legacy "slash" aliases (reputation only)
+# ---------------------------------------------------------------------------
+#
+# These are provided for backwards compatibility with existing code and
+# config that may still reference "juror_slash", "author_slash", etc.
+#
+# IMPORTANT:
+# - They MUST be interpreted as reputation penalties only.
+# - New code should use the "*_rep_penalty" and "*_rep_reward" names.
+#
 
-    # ------------------------
-    # Proposal lifecycle
-    # ------------------------
-    def propose(
-        self, creator: str, title: str, description: str, pallet_ref: str, params=None
-    ):
-        pid = self.next_proposal_id
-        self.next_proposal_id += 1
-        prop = {
-            "id": pid,
-            "creator": creator,
-            "title": title,
-            "description": description,
-            "pallet": pallet_ref,
-            "params": dict(params or {}),
-            "votes": {},
-            "status": "open",
-            "created_at": time.time(),
-        }
-        self.proposals[pid] = prop
-        return prop
+# Jurors
+GOVERNANCE_PARAMS.setdefault("juror_reward", GOVERNANCE_PARAMS["juror_rep_reward"])
+GOVERNANCE_PARAMS.setdefault("juror_slash", GOVERNANCE_PARAMS["juror_rep_penalty"])
 
-    def vote(self, user_id: str, proposal_id: int, vote_option: str):
-        prop = self.proposals.get(proposal_id)
-        if not prop or prop["status"] != "open":
-            return {"ok": False, "error": "proposal_closed_or_missing"}
+# Authors / profiles
+GOVERNANCE_PARAMS.setdefault("author_slash", GOVERNANCE_PARAMS["author_rep_penalty"])
+GOVERNANCE_PARAMS.setdefault("profile_slash", GOVERNANCE_PARAMS["profile_rep_penalty"])
 
-        if user_id in prop["votes"]:
-            return {"ok": False, "error": "already_voted"}
+# Validators
+GOVERNANCE_PARAMS.setdefault("validator_slash", GOVERNANCE_PARAMS["validator_rep_penalty"])
 
-        prop["votes"][user_id] = vote_option
+# Operators
+GOVERNANCE_PARAMS.setdefault(
+    "operator_slash_offline", GOVERNANCE_PARAMS["operator_rep_penalty_offline"]
+)
+GOVERNANCE_PARAMS.setdefault(
+    "operator_slash_missing", GOVERNANCE_PARAMS["operator_rep_penalty_missing"]
+)
 
-        # Check quorum only (threshold reserved for later use)
-        if len(prop["votes"]) >= int(GLOBAL_PARAMS.get("quorum", 3)):
-            self._enact(prop)
 
-        return {"ok": True, "votes": prop["votes"], "status": prop["status"]}
+# ---------------------------------------------------------------------------
+# Convenience accessors
+# ---------------------------------------------------------------------------
 
-    # ------------------------
-    # Enactment
-    # ------------------------
-    def _enact(self, prop: Dict[str, Any]) -> None:
-        pallet = prop["pallet"]
-        params = prop.get("params", {})
 
-        if pallet == "Treasury.allocate":
-            pool = params.get("pool")
-            amt = float(params.get("amount", 0))
-            if self.ledger is not None:
-                self.ledger.mint(pool, amt)
-            prop["status"] = "enacted"
+def get_param(name: str, default: Any | None = None) -> Any:
+    """
+    Helper to safely access governance parameters.
 
-        elif pallet == "Params.set":
-            GLOBAL_PARAMS.update(params)
-            prop["status"] = "enacted"
+    This is primarily a convenience for other runtime modules (e.g.
+    participation, rewards, disputes) so they don't hard-code magic
+    numbers.
 
-        elif pallet == "Governance.set_rules":
-            GLOBAL_PARAMS.update(params)
-            prop["status"] = "enacted"
-
-        else:
-            prop["status"] = "rejected: unknown_pallet"
-
-    # ------------------------
-    # Wire dependencies
-    # ------------------------
-    def attach_ledger(self, ledger):
-        self.ledger = ledger
+    Examples
+    --------
+    >>> get_param("juror_rep_reward")
+    2
+    >>> get_param("block_reward_wcn")
+    100
+    """
+    return GOVERNANCE_PARAMS.get(name, default)

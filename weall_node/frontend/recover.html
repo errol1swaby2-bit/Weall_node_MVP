@@ -2,177 +2,261 @@
 <html lang="en">
 <head>
   <meta charset="UTF-8">
+  <title>WeAll – Account Recovery</title>
   <meta name="viewport" content="width=device-width, initial-scale=1">
-  <title>WeAll — Account Recovery</title>
-  <link rel="stylesheet" href="/frontend/style.css?v=1762461479">
+  <link rel="stylesheet" href="/frontend/style.css">
+  <script src="/frontend/env.js"></script>
+  <script src="/frontend/auth.js"></script>
   <style>
     body {
-      display:flex;
-      align-items:center;
-      justify-content:center;
-      flex-direction:column;
-      min-height:100vh;
-      text-align:center;
-      padding:20px;
+      margin: 0;
+      min-height: 100vh;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      padding: 1.6rem 1.1rem;
+      font-family: system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+      background: radial-gradient(circle at top, #22c55e22 0, #020617 55%, #020617 100%);
+      color: #e5e7eb;
     }
-    .card {
-      background:#111;
-      border:1px solid #222;
-      border-radius:12px;
-      padding:25px;
-      width:90%;
-      max-width:420px;
-      box-shadow:0 0 10px rgba(0,0,0,0.25);
+    .wrap {
+      width: 100%;
+      max-width: 620px;
+      background: rgba(15,23,42,0.96);
+      border-radius: 18px;
+      padding: 18px 18px 16px;
+      box-shadow:
+        0 22px 60px rgba(15, 23, 42, 0.9),
+        0 0 0 1px rgba(148, 163, 184, 0.3);
     }
-    h2 { color:#2ecc71; margin-bottom:10px; }
-    input {
-      width:100%;
-      margin:10px 0;
-      padding:10px;
-      border:none;
-      border-radius:8px;
-      background:#000;
-      color:#fff;
+    h1 {
+      margin: 0 0 4px;
+      font-size: 1.25rem;
+      letter-spacing: 0.02em;
     }
-    button {
-      width:100%;
-      margin-top:10px;
+    .sub {
+      margin: 0;
+      font-size: 0.86rem;
+      color: #9ca3af;
     }
-    .msg {
-      color:#aaa;
-      font-size:0.85em;
-      margin-top:10px;
+    label {
+      display: block;
+      font-size: 0.78rem;
+      text-transform: uppercase;
+      letter-spacing: 0.06em;
+      color: #9ca3af;
+      margin-bottom: 4px;
     }
-    .step {
-      display:none;
+    input, textarea {
+      width: 100%;
+      border-radius: 10px;
+      padding: 9px 11px;
+      border: 1px solid rgba(148, 163, 184, 0.6);
+      background: rgba(15, 23, 42, 0.9);
+      color: #e5e7eb;
+      font-size: 0.9rem;
+      outline: none;
+      resize: vertical;
     }
-    .step.active {
-      display:block;
+    input:focus, textarea:focus {
+      border-color: #22c55e;
+      box-shadow: 0 0 0 1px rgba(34, 197, 94, 0.5);
+    }
+    .field {
+      margin-top: 12px;
+    }
+    .field textarea {
+      min-height: 110px;
+    }
+    .btn-row {
+      margin-top: 16px;
+      display: flex;
+      flex-wrap: wrap;
+      gap: 0.65rem;
+    }
+    .btn {
+      border-radius: 999px;
+      padding: 8px 13px;
+      font-size: 0.88rem;
+      border: 1px solid rgba(148,163,184,0.7);
+      background: rgba(15,23,42,0.95);
+      color: #e5e7eb;
+      cursor: pointer;
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      gap: 6px;
+    }
+    .btn.primary {
+      border: none;
+      background: linear-gradient(135deg, #22c55e, #4ade80);
+      color: #020617;
+      font-weight: 600;
+      box-shadow: 0 16px 45px rgba(16, 185, 129, 0.8);
+    }
+    .btn:disabled {
+      opacity: 0.6;
+      cursor: wait;
+      box-shadow: none;
+    }
+    .status {
+      margin-top: 10px;
+      font-size: 0.82rem;
+      min-height: 1.2em;
+    }
+    .status.ok { color: #4ade80; }
+    .status.err { color: #f97373; }
+    .hint {
+      margin-top: 10px;
+      font-size: 0.8rem;
+      color: #9ca3af;
+    }
+    a {
+      color: #22c55e;
+      text-decoration: none;
+    }
+    a:hover { text-decoration: underline; }
+    code {
+      font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", "Courier New", monospace;
+      font-size: 0.8rem;
+      padding: 2px 4px;
+      background: rgba(15,23,42,0.9);
+      border-radius: 4px;
     }
   </style>
-  <script src="env.js"></script>
-  <script src="api_shim.js"></script>
 </head>
 <body>
-<div id="toast" role="status" aria-live="polite"></div>
-  <div class="card">
-    <h2>Recover Your Account</h2>
-    <p class="text-muted">Use your verified email to reset your credentials.</p>
+  <div class="wrap">
+    <h1>Account Recovery Request</h1>
+    <p class="sub">
+      This creates a recovery case that a juror panel can review. On approval, your
+      Proof-of-Humanity identity will be rebound to a new account key.
+    </p>
 
-    <!-- Step 1: Enter email -->
-    <div id="step1" class="step active">
-      <input id="codeInput" type="email" placeholder="you@example.com" inputmode="numeric" pattern="[0-9]*" maxlength="6">
-      <button id="verifyBtn" class="accent" onclick="requestCode()">Send Recovery Code</button>
-      <div id="msg1" class="msg"></div>
+    <div class="field">
+      <label for="userId">Your handle / user id</label>
+      <input id="userId" placeholder="@yourname or yourname" />
     </div>
 
-    <!-- Step 2: Enter code -->
-    <div id="step2" class="step">
-      <p>Enter the 6-digit code sent to your email.</p>
-      <input id=\"codeInput\" type=\"text\" inputmode=\"numeric\" pattern=\"[0-9]*\" maxlength=\"6\" placeholder=\"123456\">
-      <button class="accent" onclick="verifyCode()" id="verifyBtn">Verify & Restore</button>
-      <div id="msg2" class="msg"></div>
+    <div class="field">
+      <label for="newPk">New account public key (Ed25519 hex)</label>
+      <input id="newPk" placeholder="e.g. 9f21ab… (public key only)" />
     </div>
 
-    <!-- Step 3: Success -->
-    <div id="step3" class="step">
-      <h3 style="color:#2ecc71;">✅ Success</h3>
-      <p>Your new credentials have been restored.</p>
-      <button onclick="window.location.href='/frontend/login.html'">Back to Login</button>
+    <div class="field">
+      <label for="reason">Explain what happened</label>
+      <textarea id="reason"
+        placeholder="Describe how you lost access, how we can verify it's really you (e.g., prior activity, PoH details), and any extra context."
+      ></textarea>
+    </div>
+
+    <div class="btn-row">
+      <button class="btn primary" id="submitBtn">Submit recovery request</button>
+      <a class="btn" href="/frontend/profile.html">Back to profile</a>
+    </div>
+
+    <div class="status" id="status"></div>
+
+    <div class="hint">
+      Once your case is created, you’ll see a <strong>case id</strong>.
+      Jurors and governance tools can use that id to review and finalize your recovery.
     </div>
   </div>
 
   <script>
-    async function requestCode() {
-      const email = document.getElementById('email').value.trim();
-      const msg1 = document.getElementById('msg1');
-      msg1.textContent = '';
-      if (!email) return msg1.textContent = 'Please enter your verified email.';
+    (function () {
+      const statusEl = document.getElementById("status");
+      const userIdEl = document.getElementById("userId");
+      const pkEl = document.getElementById("newPk");
+      const reasonEl = document.getElementById("reason");
+      const submitBtn = document.getElementById("submitBtn");
 
-      try {
-        const res = await fetch('/recovery/request', {
-          method: 'POST',
-          headers: {'Content-Type': 'application/json'},
-          body: JSON.stringify({ email })
-        });
-        const data = await res.json();
-        if (!res.ok) throw new Error(data.detail || data.message);
-        msg1.textContent = '✅ ' + data.message;
-        document.getElementById('step1').classList.remove('active');
-        document.getElementById('step2').classList.add('active');
-      } catch (err) {
-        msg1.textContent = '⚠️ ' + err.message;
+      function setStatus(msg, cls) {
+        statusEl.textContent = msg || "";
+        statusEl.className = "status" + (cls ? " " + cls : "");
       }
-    }
 
-    async function verifyCode() {
-      const email = document.getElementById('email').value.trim();
-      const code = document.getElementById('code').value.trim();
-      const msg2 = document.getElementById('msg2');
-      msg2.textContent = '';
-      if (!code) return msg2.textContent = 'Enter the recovery code.';
-
-      try {
-        const res = await fetch('/recovery/verify', {
-          method: 'POST',
-          headers: {'Content-Type': 'application/json'},
-          body: JSON.stringify({ email, code })
-        });
-        const data = await res.json();
-        if (!res.ok) throw new Error(data.detail || data.message);
-
-        // Store new credentials
-        localStorage.setItem('weall_keys', JSON.stringify(data.new_credentials));
-        msg2.textContent = '✅ Account recovered successfully.';
-        setTimeout(() => {
-          document.getElementById('step2').classList.remove('active');
-          document.getElementById('step3').classList.add('active');
-        }, 1000);
-      } catch (err) {
-        msg2.textContent = '⚠️ ' + err.message;
+      function apiBase() {
+        return (window.ENV && window.ENV.VITE_API_BASE) || "";
       }
-    }
-  </script>
 
-<footer class="weall-footer">
-  <span>© WeAll</span>
-  &nbsp;•&nbsp;<a href="/frontend/privacy.html">Privacy</a>
-  &nbsp;•&nbsp;<a href="/frontend/terms.html">Terms</a>
-</footer>
+      async function createRecovery(userId, newPk, reason) {
+        const res = await fetch(apiBase() + "/recovery/request", {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+            "Accept": "application/json"
+          },
+          credentials: "include",
+          body: JSON.stringify({
+            user_id: userId,
+            new_account_pk_hex: newPk,
+            reason: reason
+          })
+        });
+        let data = {};
+        try { data = await res.json(); } catch {}
+        if (!res.ok) {
+          throw new Error(
+            data.detail || data.error || data.message || ("Request failed with " + res.status)
+          );
+        }
+        return data;
+      }
 
+      // Prefill user id from session if possible
+      (async () => {
+        try {
+          const sess = await weallAuth.getSession();
+          if (sess && sess.user_id) {
+            userIdEl.value = sess.user_id;
+          }
+        } catch (e) {
+          // not fatal
+        }
+      })();
 
-<script>
-/* WEALL_VERIFY_PATCH */
-document.addEventListener('DOMContentLoaded',()=>{
-  const btn=document.querySelector('button, #verifyBtn');
-  const input=document.querySelector('input[type=text],input[type=number]');
-  if(!btn||!input) return;
-  btn.addEventListener('click', async ()=>{
-    const code=(input.value||'').replace(/\D/g,'').slice(0,6);
-    if(code.length!==6){ alert('Enter the 6-digit code'); return; }
-    const email=localStorage.getItem('weall_email')||sessionStorage.getItem('weall_email');
-    try{
-      const res=await fetch('/auth/verify',{
-        method:'POST',
-        headers:{'Content-Type':'application/json'},
-        body:JSON.stringify({email,code})
+      submitBtn.addEventListener("click", async () => {
+        const userId = userIdEl.value.trim();
+        const newPk = pkEl.value.trim();
+        const reason = reasonEl.value.trim();
+
+        if (!userId) {
+          setStatus("Please enter your handle / user id.", "err");
+          return;
+        }
+        if (!newPk) {
+          setStatus("Please enter the new account public key (Ed25519 hex).", "err");
+          return;
+        }
+        if (!reason) {
+          setStatus("Please provide a short explanation.", "err");
+          return;
+        }
+
+        submitBtn.disabled = true;
+        setStatus("Submitting recovery request…");
+
+        try {
+          const data = await createRecovery(userId, newPk, reason);
+          const caseId = data && data.case && data.case.case_id;
+          if (!caseId) {
+            setStatus("Recovery request created, but no case id returned.", "ok");
+          } else {
+            setStatus(
+              "Recovery case created. Your case id is " +
+              caseId +
+              ". Save this for your records.",
+              "ok"
+            );
+          }
+        } catch (e) {
+          setStatus("Failed to submit recovery request: " + e.message, "err");
+        } finally {
+          submitBtn.disabled = false;
+        }
       });
-      const json=await res.json();
-      if(!res.ok||!json.ok){ alert('Verify failed: '+(json.detail||json.error||res.status)); return; }
-      location.href='/frontend/index.html';
-    }catch(e){ alert('Network error: '+e); }
-  });
-});
-</script>
+    })();
+  </script>
 </body>
-<script>(function(){document.addEventListener("DOMContentLoaded",function(){
-var b=document.querySelector("button");var i=document.querySelector("input[type=text],input[type=number]");
-if(!b||!i)return;
-b.addEventListener("click",async function(){
-var c=(i.value||"").replace(/\D/g,"").slice(0,6);
-if(c.length!==6){alert("Enter the 6-digit code");return;}
-var e=localStorage.getItem("weall_email")||sessionStorage.getItem("weall_email");
-try{var r=await fetch("/auth/verify",{method:"POST",headers:{"content-type":"application/json"},body:JSON.stringify({email:e,code:c})});
-var j=await r.json();if(!r.ok||!j.ok){alert("Verify failed: "+(j.detail||j.error||r.status));return;}
-location.href="/frontend/index.html";}catch(err){alert("Network error: "+err);}});});})();</script>
 </html>

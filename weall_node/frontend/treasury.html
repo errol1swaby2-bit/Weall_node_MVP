@@ -1,220 +1,385 @@
-<!DOCTYPE html>
+<!doctype html>
 <html lang="en">
 <head>
-  <meta charset="UTF-8">
-  <title>WeAll — Treasury Dashboard</title>
-  <meta name="viewport" content="width=device-width, initial-scale=1">
-  <link rel="stylesheet" href="/frontend/style.css?v=1762461479">
+  <meta charset="utf-8" />
+  <title>WeAll — Treasury</title>
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <link rel="stylesheet" href="/frontend/style.css" />
+  <script src="/frontend/env.js"></script>
+  <script src="/frontend/auth.js"></script>
   <style>
     body {
-      background:#000;
-      color:#fff;
-      font-family:Arial, sans-serif;
-      margin:0;
-      padding:0;
+      margin: 0;
+      padding: 1.3rem 1.1rem 1.8rem;
+      font-family: system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+      background: radial-gradient(circle at top, #22c55e22 0, #020617 55%, #020617 100%);
+      color: #e5e7eb;
+    }
+    .wrap {
+      max-width: 880px;
+      margin: 0 auto;
     }
     header {
-      background:#111;
-      padding:12px 16px;
-      display:flex;
-      align-items:center;
-      justify-content:space-between;
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 0.8rem;
+      margin-bottom: 1.1rem;
     }
-    header h2 { margin:0; font-size:1.2em; }
-    header a {
-      color:#2ecc71;
-      text-decoration:none;
-      font-weight:bold;
-      font-size:0.9em;
+    .back-link {
+      font-size: 0.8rem;
+      color: #9ca3af;
+      text-decoration: none;
     }
-    .container {
-      max-width:900px;
-      margin:auto;
-      padding:20px;
+    .back-link:hover { text-decoration: underline; }
+    h1 {
+      margin: 0;
+      font-size: 1.35rem;
+      letter-spacing: 0.03em;
+    }
+    .sub {
+      margin: 0.1rem 0 0;
+      font-size: 0.8rem;
+      color: #9ca3af;
+    }
+    .pill {
+      border-radius: 999px;
+      padding: 6px 11px;
+      font-size: 0.8rem;
+      border: 1px solid rgba(148,163,184,0.6);
+      background: rgba(15,23,42,0.95);
+      color: #e5e7eb;
+      cursor: pointer;
+    }
+    main {
+      display: grid;
+      grid-template-columns: minmax(0, 1.1fr) minmax(0, 0.9fr);
+      gap: 0.9rem;
+    }
+    @media (max-width: 840px) {
+      main { grid-template-columns: minmax(0, 1fr); }
     }
     .card {
-      background:#111;
-      border-radius:12px;
-      padding:16px;
-      margin-bottom:18px;
-      box-shadow:0 0 5px #222;
+      background: rgba(15,23,42,0.96);
+      border-radius: 16px;
+      padding: 14px 14px 13px;
+      border: 1px solid rgba(148,163,184,0.4);
+      box-shadow: 0 18px 50px rgba(15,23,42,0.9);
     }
-    h3 { color:#2ecc71; margin-top:0; }
-    .stat { display:flex; justify-content:space-between; margin-bottom:6px; }
-    .table {
-      width:100%;
-      border-collapse:collapse;
-      font-size:0.9em;
+    .card h2 {
+      margin: 0 0 0.35rem;
+      font-size: 0.95rem;
+      letter-spacing: 0.08em;
+      text-transform: uppercase;
+      color: #9ca3af;
     }
-    th, td {
-      border-bottom:1px solid #222;
-      padding:8px 6px;
-      text-align:left;
+    .card p {
+      margin: 0.12rem 0;
+      font-size: 0.86rem;
+      color: #cbd5f5;
     }
-    th { color:#2ecc71; }
-    tr:hover { background:#1a1a1a; }
-    button {
-      background:#2ecc71;
-      border:none;
-      color:#000;
-      border-radius:8px;
-      padding:8px 12px;
-      font-weight:bold;
-      cursor:pointer;
-      margin-top:8px;
+    .balance {
+      margin-top: 0.4rem;
+      font-size: 1.3rem;
+      font-weight: 600;
     }
-    button:hover { background:#27ae60; }
-    .msg { color:#aaa; font-size:0.85em; margin-top:8px; }
+    .status {
+      margin-top: 0.5rem;
+      font-size: 0.8rem;
+      color: #9ca3af;
+      min-height: 1.2em;
+    }
+    label {
+      display: block;
+      margin-top: 8px;
+      margin-bottom: 4px;
+      font-size: 0.78rem;
+      text-transform: uppercase;
+      letter-spacing: 0.06em;
+      color: #9ca3af;
+    }
+    input, textarea {
+      width: 100%;
+      border-radius: 10px;
+      padding: 8px 10px;
+      border: 1px solid rgba(148,163,184,0.6);
+      background: rgba(15,23,42,0.9);
+      color: #e5e7eb;
+      font-size: 0.9rem;
+      outline: none;
+    }
+    input:focus, textarea:focus {
+      border-color: #22c55e;
+      box-shadow: 0 0 0 1px rgba(34,197,94,0.5);
+    }
+    textarea {
+      resize: vertical;
+      min-height: 80px;
+    }
+    .btn-row {
+      margin-top: 12px;
+      display: flex;
+      gap: 0.6rem;
+      flex-wrap: wrap;
+    }
+    .btn {
+      border-radius: 999px;
+      padding: 8px 12px;
+      border: 1px solid rgba(148,163,184,0.7);
+      background: rgba(15,23,42,0.95);
+      color: #e5e7eb;
+      font-size: 0.86rem;
+      cursor: pointer;
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      gap: 6px;
+    }
+    .btn.primary {
+      border: none;
+      background: linear-gradient(135deg, #22c55e, #4ade80);
+      color: #020617;
+      font-weight: 600;
+      box-shadow: 0 14px 40px rgba(16, 185, 129, 0.8);
+    }
+    .btn:disabled {
+      opacity: 0.6;
+      cursor: wait;
+      box-shadow: none;
+    }
+    code {
+      font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", "Courier New", monospace;
+      font-size: 0.8rem;
+      padding: 2px 4px;
+      background: rgba(15,23,42,0.9);
+      border-radius: 4px;
+    }
+    a {
+      color: #22c55e;
+      text-decoration: none;
+    }
+    a:hover { text-decoration: underline; }
   </style>
-  <script src="env.js"></script>
-  <script src="api_shim.js"></script>
 </head>
 <body>
-<div id="toast" role="status" aria-live="polite"></div>
-  <header>
-    <h2>Treasury Dashboard</h2>
-    <a href="index.html">← Back to Feed</a>
-  </header>
-
-  <div class="container">
-    <!-- Treasury Summary -->
-    <div class="card">
-      <h3>Current Treasury Balance</h3>
-      <div class="stat">
-        <strong>Total:</strong>
-        <span id="balance">Loading...</span>
+  <div class="wrap">
+    <header>
+      <div>
+        <a href="/frontend/tiktok.html" class="back-link">&larr; Back to Feed</a>
+        <h1>Treasury</h1>
+        <p class="sub" id="treUser">Checking session…</p>
       </div>
-      <div class="stat">
-        <strong>Last Updated:</strong>
-        <span id="lastUpdate">—</span>
-      </div>
-      <button onclick="refreshBalance()">Refresh</button>
-      <div class="msg" id="balMsg"></div>
-    </div>
+      <button class="pill" id="logoutBtn">Log out</button>
+    </header>
 
-    <!-- Active Proposals -->
-    <div class="card">
-      <h3>Active Funding Proposals</h3>
-      <table class="table" id="propTable">
-        <thead>
-          <tr>
-            <th>ID</th>
-            <th>Title</th>
-            <th>Requester</th>
-            <th>Amount</th>
-            <th>Status</th>
-          </tr>
-        </thead>
-        <tbody></tbody>
-      </table>
-      <button onclick="refreshProposals()">Refresh</button>
-      <div class="msg" id="propMsg"></div>
-    </div>
+    <main>
+      <!-- Left: Treasury state -->
+      <section class="card">
+        <h2>Treasury account</h2>
+        <p>
+          The treasury is just another ledger account, governed by proposals and emissary
+          decisions. No tokens are ever burned here; all movements are simple transfers
+          between accounts.
+        </p>
+        <p style="margin-top:0.4rem;">
+          Treasury account id:
+          <code id="treAccount">loading…</code>
+        </p>
+        <p class="balance" id="treBalance">– WCN</p>
+        <p class="status" id="treMetaStatus"></p>
+      </section>
 
-    <!-- Transaction History -->
-    <div class="card">
-      <h3>Recent Treasury Transactions</h3>
-      <table class="table" id="txTable">
-        <thead>
-          <tr>
-            <th>Tx ID</th>
-            <th>Type</th>
-            <th>Amount</th>
-            <th>Timestamp</th>
-          </tr>
-        </thead>
-        <tbody></tbody>
-      </table>
-      <button onclick="refreshTx()">Refresh</button>
-      <div class="msg" id="txMsg"></div>
-    </div>
+      <!-- Right: Operator transfer form -->
+      <section class="card">
+        <h2>Operator transfer</h2>
+        <p>
+          This tool is only for Tier-2+ operators/emissaries. For production, it should be
+          wrapped by multi-sig and governance controls.
+        </p>
+
+        <label for="toAcct">Recipient account id</label>
+        <input id="toAcct" placeholder="e.g. user wallet id or group account" />
+
+        <label for="amount">Amount (WCN)</label>
+        <input id="amount" type="number" min="0" step="0.00000001" placeholder="0.0" />
+
+        <label for="reason">Reason / memo</label>
+        <textarea id="reason" placeholder="Explain why this transfer is happening (e.g., juror rewards, grant payout, ops budget)."></textarea>
+
+        <div class="btn-row">
+          <button class="btn primary" id="btnSend">Send from treasury</button>
+          <button class="btn" id="btnRefresh">Refresh balance</button>
+        </div>
+
+        <div class="status" id="treTransferStatus"></div>
+      </section>
+    </main>
   </div>
 
   <script>
-    async function refreshBalance() {
-      const b = document.getElementById('balance');
-      const t = document.getElementById('lastUpdate');
-      const m = document.getElementById('balMsg');
-      m.textContent = '';
-      b.textContent = '...';
-      try {
-        const res = await fetch('/treasury/balance');
-        const data = await res.json();
-        if (!res.ok) throw new Error(data.detail || 'Error fetching balance');
-        b.textContent = data.balance + ' WEC';
-        t.textContent = new Date().toLocaleString();
-      } catch (err) {
-        b.textContent = '⚠️';
-        m.textContent = err.message;
-      }
-    }
+    (function () {
+      const $ = (id) => document.getElementById(id);
 
-    async function refreshProposals() {
-      const table = document.querySelector('#propTable tbody');
-      const msg = document.getElementById('propMsg');
-      msg.textContent = '';
-      table.innerHTML = '<tr><td colspan="5">Loading...</td></tr>';
-      try {
-        const res = await fetch('/governance/proposals');
-        const data = await res.json();
-        if (!res.ok) throw new Error(data.detail || 'Error fetching proposals');
-        if (!data.length) {
-          table.innerHTML = '<tr><td colspan="5">No active proposals.</td></tr>';
+      function apiBase() {
+        return (window.ENV && window.ENV.VITE_API_BASE) || "";
+      }
+
+      async function jsonFetch(path, opts) {
+        const url = apiBase() + path;
+        const options = Object.assign(
+          {
+            headers: { "Accept": "application/json" },
+            credentials: "include",
+          },
+          opts || {}
+        );
+        if (options.body && typeof options.body !== "string") {
+          options.headers["Content-Type"] =
+            options.headers["Content-Type"] || "application/json";
+          options.body = JSON.stringify(options.body);
+        }
+        const res = await fetch(url, options);
+        let data = null;
+        try { data = await res.json(); } catch {}
+        if (!res.ok) {
+          const msg =
+            (data && (data.detail || data.error || data.message)) ||
+            ("Request failed with " + res.status);
+          throw new Error(msg);
+        }
+        return data;
+      }
+
+      async function hydrateHeader() {
+        const el = $("treUser");
+        if (!el) return;
+        try {
+          const sess = await weallAuth.getSession();
+          if (!sess || !sess.user_id) {
+            el.textContent = "Not signed in.";
+            return;
+          }
+          const poh = await weallAuth.getPohMe().catch(() => null);
+          const tier = poh && typeof poh.tier === "number" ? poh.tier : 0;
+          const status = poh && poh.status ? poh.status : "ok";
+          el.textContent =
+            "Signed in as " + sess.user_id + " · PoH Tier " + tier + " (" + status + ")";
+        } catch {
+          el.textContent = "Unable to load session.";
+        }
+      }
+
+      async function loadMeta() {
+        const acctEl = $("treAccount");
+        const balEl = $("treBalance");
+        const statusEl = $("treMetaStatus");
+        if (statusEl) {
+          statusEl.textContent = "Loading treasury meta…";
+        }
+
+        try {
+          const data = await jsonFetch("/treasury/meta", { method: "GET" });
+          if (acctEl) acctEl.textContent = data.account_id || "treasury-main";
+          if (balEl) {
+            const b = typeof data.balance_wcn === "number" ? data.balance_wcn : 0;
+            balEl.textContent = b.toFixed(8) + " WCN";
+          }
+          if (statusEl) {
+            statusEl.textContent = "Read-only view of treasury balance. All changes must come from explicit transfers.";
+          }
+        } catch (e) {
+          if (acctEl) acctEl.textContent = "error";
+          if (balEl) balEl.textContent = "– WCN";
+          if (statusEl) {
+            statusEl.textContent = "Failed to load treasury meta: " + e.message;
+          }
+        }
+      }
+
+      async function sendTransfer() {
+        const toAcctEl = $("toAcct");
+        const amountEl = $("amount");
+        const reasonEl = $("reason");
+        const statusEl = $("treTransferStatus");
+        const btn = $("btnSend");
+
+        if (!toAcctEl || !amountEl || !reasonEl || !statusEl || !btn) return;
+
+        const toAcct = toAcctEl.value.trim();
+        const amount = Number(amountEl.value || "0");
+        const reason = reasonEl.value.trim();
+
+        if (!toAcct) {
+          statusEl.textContent = "Please enter a recipient account id.";
+          statusEl.className = "status err";
           return;
         }
-        table.innerHTML = data.map(p => `
-          <tr>
-            <td>${p.id}</td>
-            <td>${p.title || '—'}</td>
-            <td>${p.requester || '—'}</td>
-            <td>${p.amount || '—'} WEC</td>
-            <td>${p.status}</td>
-          </tr>
-        `).join('');
-      } catch (err) {
-        table.innerHTML = '<tr><td colspan="5">⚠️ Error</td></tr>';
-        msg.textContent = err.message;
-      }
-    }
-
-    async function refreshTx() {
-      const table = document.querySelector('#txTable tbody');
-      const msg = document.getElementById('txMsg');
-      table.innerHTML = '<tr><td colspan="4">Loading...</td></tr>';
-      try {
-        const res = await fetch('/treasury/transactions');
-        const data = await res.json();
-        if (!res.ok) throw new Error(data.detail || 'Error fetching transactions');
-        if (!data.length) {
-          table.innerHTML = '<tr><td colspan="4">No recent transactions.</td></tr>';
+        if (!(amount > 0)) {
+          statusEl.textContent = "Please enter a positive amount.";
+          statusEl.className = "status err";
           return;
         }
-        table.innerHTML = data.map(tx => `
-          <tr>
-            <td>${tx.tx_id}</td>
-            <td>${tx.type}</td>
-            <td>${tx.amount} WEC</td>
-            <td>${new Date(tx.timestamp*1000).toLocaleString()}</td>
-          </tr>
-        `).join('');
-      } catch (err) {
-        table.innerHTML = '<tr><td colspan="4">⚠️ Error</td></tr>';
-        msg.textContent = err.message;
-      }
-    }
+        if (!reason) {
+          statusEl.textContent = "Please describe the reason for this transfer.";
+          statusEl.className = "status err";
+          return;
+        }
 
-    // Auto-init
-    refreshBalance();
-    refreshProposals();
-    refreshTx();
+        statusEl.textContent = "Submitting transfer…";
+        statusEl.className = "status";
+        btn.disabled = true;
+
+        try {
+          await jsonFetch("/treasury/transfer", {
+            method: "POST",
+            body: {
+              to_account_id: toAcct,
+              amount_wcn: amount,
+              reason: reason,
+            },
+          });
+          statusEl.textContent = "Transfer recorded successfully.";
+          statusEl.className = "status ok";
+          await loadMeta();
+        } catch (e) {
+          statusEl.textContent = "Transfer failed: " + e.message;
+          statusEl.className = "status err";
+        } finally {
+          btn.disabled = false;
+        }
+      }
+
+      async function init() {
+        // Gate: Tier-2 required (operator baseline)
+        const ok = await weallAuth.require({
+          minTier: 2,
+          redirectToLogin: "/frontend/login.html",
+        });
+        if (!ok) return;
+
+        const logoutBtn = $("logoutBtn");
+        if (logoutBtn) {
+          logoutBtn.onclick = async () => {
+            await weallAuth.logout();
+            window.location.replace("/frontend/login.html");
+          };
+        }
+
+        const sendBtn = $("btnSend");
+        const refreshBtn = $("btnRefresh");
+        if (sendBtn) sendBtn.onclick = sendTransfer;
+        if (refreshBtn) refreshBtn.onclick = loadMeta;
+
+        await hydrateHeader();
+        await loadMeta();
+      }
+
+      if (document.readyState === "loading") {
+        document.addEventListener("DOMContentLoaded", init);
+      } else {
+        init();
+      }
+    })();
   </script>
-  <script src="/static/footer.js"></script>
-
-<footer class="weall-footer">
-  <span>© WeAll</span>
-  &nbsp;•&nbsp;<a href="/frontend/privacy.html">Privacy</a>
-  &nbsp;•&nbsp;<a href="/frontend/terms.html">Terms</a>
-</footer>
-
 </body>
 </html>

@@ -5,98 +5,493 @@
   <title>WeAll — Juror Console</title>
   <meta name="viewport" content="width=device-width, initial-scale=1" />
   <link rel="icon" href="/frontend/favicon.svg" />
-  <link rel="stylesheet" href="/frontend/style.css?v=1762461479" />
-  <script src="/frontend/session.js?v=1762461479"></script>
-  <script>Session.ensure(true);</script>
-  <script src="env.js"></script>
-  <script src="api_shim.js"></script>
+  <link rel="stylesheet" href="/frontend/style.css" />
+  <style>
+    body {
+      margin: 0;
+      padding: 1.2rem 1.1rem 1.6rem;
+      font-family: system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+      background: radial-gradient(circle at top, #22c55e22 0, #020617 55%, #020617 100%);
+      color: #e5e7eb;
+    }
+    .wrap {
+      max-width: 880px;
+      margin: 0 auto;
+    }
+    header.page-header {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      margin-bottom: 1.1rem;
+      gap: 0.6rem;
+    }
+    .back-link {
+      font-size: 0.84rem;
+      color: #9ca3af;
+      text-decoration: none;
+    }
+    .back-link:hover { text-decoration: underline; }
+    h1 {
+      margin: 0;
+      font-size: 1.3rem;
+      letter-spacing: 0.03em;
+    }
+    .sub {
+      margin: 2px 0 0;
+      font-size: 0.8rem;
+      color: #9ca3af;
+    }
+    .pill {
+      border-radius: 999px;
+      padding: 6px 10px;
+      font-size: 0.8rem;
+      border: 1px solid rgba(148,163,184,0.6);
+      background: rgba(15,23,42,0.9);
+      color: #e5e7eb;
+    }
+    main {
+      display: grid;
+      grid-template-columns: minmax(0, 1.15fr) minmax(0, 0.9fr);
+      gap: 0.9rem;
+    }
+    @media (max-width: 800px) {
+      main { grid-template-columns: minmax(0, 1fr); }
+    }
+    .card {
+      background: rgba(15,23,42,0.96);
+      border-radius: 16px;
+      padding: 14px 14px 12px;
+      border: 1px solid rgba(148,163,184,0.4);
+      box-shadow: 0 18px 50px rgba(15,23,42,0.9);
+    }
+    .card h2 {
+      margin: 0 0 0.35rem;
+      font-size: 0.95rem;
+      letter-spacing: 0.08em;
+      text-transform: uppercase;
+      color: #9ca3af;
+    }
+    .card p {
+      margin: 0.1rem 0;
+      font-size: 0.86rem;
+      color: #cbd5f5;
+    }
+    label {
+      display: block;
+      margin-top: 8px;
+      margin-bottom: 4px;
+      font-size: 0.78rem;
+      text-transform: uppercase;
+      letter-spacing: 0.06em;
+      color: #9ca3af;
+    }
+    input, textarea, select {
+      width: 100%;
+      border-radius: 10px;
+      padding: 8px 10px;
+      border: 1px solid rgba(148,163,184,0.6);
+      background: rgba(15,23,42,0.9);
+      color: #e5e7eb;
+      font-size: 0.9rem;
+      outline: none;
+    }
+    input:focus, textarea:focus, select:focus {
+      border-color: #22c55e;
+      box-shadow: 0 0 0 1px rgba(34,197,94,0.5);
+    }
+    textarea {
+      resize: vertical;
+      min-height: 90px;
+    }
+    .btn-row {
+      margin-top: 10px;
+      display: flex;
+      gap: 0.55rem;
+      flex-wrap: wrap;
+    }
+    .btn {
+      border-radius: 999px;
+      padding: 8px 12px;
+      border: 1px solid rgba(148,163,184,0.7);
+      background: rgba(15,23,42,0.95);
+      color: #e5e7eb;
+      font-size: 0.86rem;
+      cursor: pointer;
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      gap: 6px;
+    }
+    .btn.primary {
+      border: none;
+      background: linear-gradient(135deg, #22c55e, #4ade80);
+      color: #020617;
+      font-weight: 600;
+      box-shadow: 0 14px 40px rgba(16, 185, 129, 0.8);
+    }
+    .btn:disabled {
+      opacity: 0.6;
+      cursor: wait;
+      box-shadow: none;
+    }
+    .status {
+      margin-top: 8px;
+      font-size: 0.8rem;
+      min-height: 1.1em;
+      color: #9ca3af;
+    }
+    .status.ok { color: #4ade80; }
+    .status.err { color: #f97373; }
+    .badge {
+      display: inline-flex;
+      align-items: center;
+      gap: 6px;
+      border-radius: 999px;
+      padding: 4px 10px;
+      font-size: 0.78rem;
+      background: rgba(15,23,42,0.9);
+      border: 1px solid rgba(148,163,184,0.6);
+      color: #e5e7eb;
+    }
+    .badge-dot {
+      width: 8px;
+      height: 8px;
+      border-radius: 999px;
+      background: #22c55e;
+    }
+    .badge-dot.open { background: #22c55e; }
+    .badge-dot.closed { background: #f97373; }
+    pre {
+      margin: 0.4rem 0 0;
+      padding: 8px 10px;
+      background: rgba(15,23,42,0.95);
+      border-radius: 10px;
+      border: 1px solid rgba(31,41,55,0.9);
+      font-size: 0.78rem;
+      max-height: 260px;
+      overflow: auto;
+      white-space: pre-wrap;
+      word-break: break-word;
+    }
+    .hint {
+      margin-top: 8px;
+      font-size: 0.8rem;
+      color: #9ca3af;
+    }
+    a {
+      color: #22c55e;
+      text-decoration: none;
+    }
+    a:hover { text-decoration: underline; }
+  </style>
 </head>
 <body>
-<div id="toast" role="status" aria-live="polite"></div>
-<script>
-(async () => {
-  const acct = localStorage.getItem('weall.account');
-  if (!acct) return location.href = '/frontend/login.html';
-  const r = await fetch(`/poh/status/${encodeURIComponent(acct)}`);
-  const s = await r.json();
-  const tier = (s.tier ?? s.poh_level ?? 0);
-  if (tier < 3) location.href = '/frontend/verify.html?reason=tier3_required';
-})();
-</script>
-
-  <header class="wa-topbar">
-    <div class="wa-left">
-      <a class="wa-link" href="/frontend/index.html">← Back</a>
-      <h1 class="wa-brand">Juror</h1>
-    </div>
-    <div class="wa-right">
-      <button class="wa-iconbtn" onclick="Session.logout()" title="Logout" aria-label="Logout">
-        <svg viewBox="0 0 24 24"><path d="M16 17l5-5-5-5M21 12H9M13 21H6a2 2 0 01-2-2V5a2 2 0 012-2h7"/></svg>
-      </button>
-    </div>
-  </header>
-
-  <main style="padding-top:60px;max-width:900px;margin:0 auto;padding:60px 16px 24px 16px">
-    <div class="wa-card">
-      <h3>Tier-2 Candidates</h3>
-      <div class="wa-row">
-        <button class="wa-btn" id="btnList">Refresh</button>
-        <input id="candId" placeholder="candidate id" />
-        <button class="wa-btn" id="btnItem">Details</button>
+  <div class="wrap">
+    <header class="page-header">
+      <a href="/frontend/tiktok.html" class="back-link">&larr; Back to Feed</a>
+      <div>
+        <h1>Juror Console</h1>
+        <p class="sub" id="jurorUser">Checking session…</p>
       </div>
-      <pre id="out" class="wa-pre"></pre>
-    </div>
+      <button class="pill" id="logoutBtn">Log out</button>
+    </header>
 
-    <div class="wa-card">
-      <h3>Vote</h3>
-      <div class="wa-row">
-        <input id="jurorId" placeholder="@juror123" />
-        <input id="voteCand" placeholder="candidate id" />
-        <label class="wa-row" style="gap:6px"><input type="checkbox" id="approve" /> approve</label>
-        <button class="wa-btn" id="btnVote">Submit</button>
-      </div>
-    </div>
-  </main>
+    <main>
+      <!-- Left: load & inspect case -->
+      <section class="card">
+        <h2>Load dispute case</h2>
+        <p>
+          Paste a <strong>case id</strong> from the disputes or recovery system.
+          For recovery cases, the <code>case_type</code> will be <code>"recovery"</code>.
+        </p>
 
+        <label for="caseId">Case id</label>
+        <input id="caseId" placeholder="disp-…" />
+
+        <div class="btn-row">
+          <button class="btn primary" id="btnLoad">Load case</button>
+        </div>
+
+        <div class="status" id="loadStatus"></div>
+
+        <div id="caseDetails" style="margin-top:10px;"></div>
+      </section>
+
+      <!-- Right: decision -->
+      <section class="card">
+        <h2>Decision</h2>
+        <p>
+          Only <strong>open</strong> cases can be decided. This console will call
+          <code>/disputes/cases/{case_id}/decide</code>, which triggers the correct
+          enforcement (for example, recovery key rebinding for recovery cases).
+        </p>
+
+        <label for="decisionSelect">Decision</label>
+        <select id="decisionSelect">
+          <option value="grant">grant (approve request)</option>
+          <option value="deny">deny</option>
+          <option value="uphold">uphold previous action</option>
+          <option value="reject">reject</option>
+        </select>
+
+        <label for="decidedBy">Decided by</label>
+        <input id="decidedBy" placeholder="@panel or @your-handle" />
+
+        <label for="evidenceRoot">Evidence root (optional)</label>
+        <textarea
+          id="evidenceRoot"
+          placeholder="IPFS CID, hash, or URL of the evidence bundle used for this decision."
+        ></textarea>
+
+        <div class="btn-row">
+          <button class="btn primary" id="btnDecide">Submit decision</button>
+        </div>
+
+        <div class="status" id="decideStatus"></div>
+
+        <div class="hint">
+          Decisions are final at this layer. Additional appeal or override flows
+          should be encoded in higher-level governance processes, not here.
+        </div>
+      </section>
+    </main>
+  </div>
+
+  <script src="/frontend/env.js"></script>
+  <script src="/frontend/auth.js"></script>
   <script>
-    const $ = s=>document.querySelector(s);
-    async function post(url, body) {
-      const r = await Session.authFetch(url, {method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify(body||{})});
-      return r.json();
-    }
-    $('#btnList').onclick = async ()=>{
-      const j = await post('/poh/t2/list', {});
-      $('#out').textContent = JSON.stringify(j,null,2);
-    };
-    $('#btnItem').onclick = async ()=>{
-      const j = await post('/poh/t2/item', {candidate_id: $('#candId').value.trim()});
-      $('#out').textContent = JSON.stringify(j,null,2);
-    };
-    $('#btnVote').onclick = async ()=>{
-      const j = await post('/poh/t2/vote', {
-        candidate_id: $('#voteCand').value.trim(),
-        juror_id: $('#jurorId').value.trim(),
-        approve: $('#approve').checked
-      });
-      alert('Vote submitted'); console.log(j);
-    };
+    (function () {
+      const $ = (id) => document.getElementById(id);
+
+      function apiBase() {
+        return (window.ENV && window.ENV.VITE_API_BASE) || "";
+      }
+
+      async function jsonFetch(path, opts) {
+        const url = apiBase() + path;
+        const options = Object.assign(
+          {
+            headers: { Accept: "application/json" },
+            credentials: "include",
+          },
+          opts || {}
+        );
+        if (options.body && typeof options.body !== "string") {
+          options.headers["Content-Type"] =
+            options.headers["Content-Type"] || "application/json";
+          options.body = JSON.stringify(options.body);
+        }
+        const res = await fetch(url, options);
+        let data = null;
+        try {
+          data = await res.json();
+        } catch {
+          data = null;
+        }
+        if (!res.ok) {
+          const msg =
+            (data && (data.detail || data.error || data.message)) ||
+            "Request failed with " + res.status;
+          throw new Error(msg);
+        }
+        return data;
+      }
+
+      function renderCaseDetails(rec) {
+        const host = $("caseDetails");
+        if (!host) return;
+        host.innerHTML = "";
+
+        if (!rec) {
+          return;
+        }
+
+        const status = rec.status || "unknown";
+        const type = rec.case_type || "unknown";
+
+        const badge = document.createElement("div");
+        badge.className = "badge";
+        const dot = document.createElement("span");
+        dot.className = "badge-dot " + (status === "open" ? "open" : "closed");
+        const txt = document.createElement("span");
+        txt.textContent = "Case " + rec.case_id + " · " + type + " · " + status;
+
+        badge.appendChild(dot);
+        badge.appendChild(txt);
+        host.appendChild(badge);
+
+        const meta = document.createElement("p");
+        meta.innerHTML =
+          "<strong>Subject user:</strong> " +
+          (rec.subject_user_id || "–") +
+          "<br><strong>Related recovery case id:</strong> " +
+          (rec.related_recovery_case_id || "–");
+        host.appendChild(meta);
+
+        const pre = document.createElement("pre");
+        pre.textContent = JSON.stringify(rec, null, 2);
+        host.appendChild(pre);
+      }
+
+      async function ensureTier3() {
+        const ok = await weallAuth.require({
+          minTier: 3,
+          redirectToLogin: "/frontend/login.html",
+        });
+        if (!ok) return null;
+        const sess = await weallAuth.getSession().catch(() => null);
+        return sess;
+      }
+
+      async function hydrateHeader() {
+        const el = $("jurorUser");
+        if (!el) return;
+        try {
+          const sess = await weallAuth.getSession();
+          if (sess && sess.user_id) {
+            const poh = await weallAuth.getPohMe().catch(() => null);
+            const tier = poh && typeof poh.tier === "number" ? poh.tier : 0;
+            const status = poh && poh.status ? poh.status : "ok";
+            el.textContent =
+              "Signed in as " +
+              sess.user_id +
+              " · PoH Tier " +
+              tier +
+              " (" +
+              status +
+              ")";
+          } else {
+            el.textContent = "Not signed in.";
+          }
+        } catch {
+          el.textContent = "Unable to load session.";
+        }
+      }
+
+      async function loadCase() {
+        const caseIdInput = $("caseId");
+        const statusEl = $("loadStatus");
+        if (!caseIdInput || !statusEl) return;
+
+        const caseId = caseIdInput.value.trim();
+        if (!caseId) {
+          statusEl.textContent = "Please enter a case id.";
+          statusEl.className = "status err";
+          return;
+        }
+
+        statusEl.textContent = "Loading case…";
+        statusEl.className = "status";
+
+        try {
+          const data = await jsonFetch("/disputes/cases/" + encodeURIComponent(caseId), {
+            method: "GET",
+          });
+          const rec = data && data.case;
+          if (!rec) {
+            statusEl.textContent = "No case found.";
+            statusEl.className = "status err";
+            return;
+          }
+          statusEl.textContent = "Case loaded.";
+          statusEl.className = "status ok";
+          renderCaseDetails(rec);
+        } catch (e) {
+          statusEl.textContent = "Failed to load case: " + e.message;
+          statusEl.className = "status err";
+          renderCaseDetails(null);
+        }
+      }
+
+      async function decideCase() {
+        const caseIdInput = $("caseId");
+        const statusLoad = $("loadStatus");
+        const statusDecide = $("decideStatus");
+        const decisionSel = $("decisionSelect");
+        const decidedByInput = $("decidedBy");
+        const evidenceInput = $("evidenceRoot");
+
+        if (!caseIdInput || !statusDecide) return;
+
+        const caseId = caseIdInput.value.trim();
+        if (!caseId) {
+          statusDecide.textContent = "Enter a case id first.";
+          statusDecide.className = "status err";
+          return;
+        }
+
+        const sess = await ensureTier3();
+        if (!sess) {
+          statusDecide.textContent =
+            "You must be Tier-3 PoH to decide cases.";
+          statusDecide.className = "status err";
+          return;
+        }
+
+        const decision = decisionSel ? decisionSel.value : "grant";
+        const decidedBy =
+          (decidedByInput && decidedByInput.value.trim()) || sess.user_id;
+        const evidence =
+          (evidenceInput && evidenceInput.value.trim()) || null;
+
+        statusDecide.textContent = "Submitting decision…";
+        statusDecide.className = "status";
+
+        try {
+          const payload = {
+            decision: decision,
+            decided_by: decidedBy,
+            evidence_root: evidence,
+          };
+          const data = await jsonFetch(
+            "/disputes/cases/" + encodeURIComponent(caseId) + "/decide",
+            {
+              method: "POST",
+              body: payload,
+            }
+          );
+          statusDecide.textContent = "Decision recorded.";
+          statusDecide.className = "status ok";
+          const rec = data && data.case;
+          if (rec) {
+            renderCaseDetails(rec);
+          }
+          if (statusLoad) {
+            statusLoad.textContent = "";
+          }
+        } catch (e) {
+          statusDecide.textContent = "Failed to submit decision: " + e.message;
+          statusDecide.className = "status err";
+        }
+      }
+
+      function wireEvents() {
+        const btnLoad = $("btnLoad");
+        const btnDecide = $("btnDecide");
+        const logoutBtn = $("logoutBtn");
+
+        if (btnLoad) btnLoad.onclick = loadCase;
+        if (btnDecide) btnDecide.onclick = decideCase;
+        if (logoutBtn) {
+          logoutBtn.onclick = async () => {
+            await weallAuth.logout();
+            window.location.replace("/frontend/login.html");
+          };
+        }
+      }
+
+      async function init() {
+        wireEvents();
+        await ensureTier3();
+        await hydrateHeader();
+      }
+
+      if (document.readyState === "loading") {
+        document.addEventListener("DOMContentLoaded", init);
+      } else {
+        init();
+      }
+    })();
   </script>
-<!-- CLIENT-ERROR-LISTENER -->
-<script>
-window.addEventListener('error', e => {
-  try { fetch('/content/client-log', {method:'POST', headers:{'content-type':'application/json'}, body: JSON.stringify({ msg:String(e.message||''), file:e.filename, line:e.lineno, col:e.colno })}); } catch(_) {}
-});
-window.addEventListener('unhandledrejection', e => {
-  try { fetch('/content/client-log', {method:'POST', headers:{'content-type':'application/json'}, body: JSON.stringify({ promise:true, reason:String(e.reason||'') })}); } catch(_) {}
-});
-</script>
-
-
-<footer class="weall-footer">
-  <span>© WeAll</span>
-  &nbsp;•&nbsp;<a href="/frontend/privacy.html">Privacy</a>
-  &nbsp;•&nbsp;<a href="/frontend/terms.html">Terms</a>
-</footer>
-
 </body>
 </html>
