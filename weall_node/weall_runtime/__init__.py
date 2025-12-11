@@ -42,7 +42,7 @@ from . import utils
 from . import crypto_utils as crypto
 from . import crypto_symmetric
 from .reputation import ReputationRuntime
-
+from . import reputation_jurors
 
 # ---------------------------------------------------------------------------
 # Optional dev-only symmetric backend

@@ -14,35 +14,27 @@ import time
 import ssl
 import smtplib
 import hashlib, binascii
+from email.message import EmailMessage
 from pathlib import Path
-from typing import List, Optional
-from .api import roles
+from typing import Optional, Dict
+
 from dotenv import load_dotenv
-from .api import disputes as disputes_api
-
-load_dotenv()
-
-try:
-    from nacl.signing import SigningKey  # type: ignore
-    from nacl.encoding import HexEncoder  # type: ignore
-    NACL_AVAILABLE = True
-except Exception:
-    SigningKey = None  # type: ignore
-    HexEncoder = None  # type: ignore
-    NACL_AVAILABLE = False
 
 from fastapi import FastAPI, HTTPException, Request, Body
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
 from fastapi.responses import RedirectResponse, FileResponse, JSONResponse
 from pydantic import BaseModel, Field
-from .api.wallet import wallet_router, faucet_router
+
 from .settings import Settings
 from .redirect_legacy_frontend import router as legacy_frontend_router
 from .routers import auth_session_apply
+from .api.wallet import wallet_router, faucet_router
 
 from weall_node.weall_executor import executor
 
+from .api import roles
+from .api import disputes as disputes_api
 from .api import (  # noqa: E402
     poh,
     governance,
@@ -50,6 +42,7 @@ from .api import (  # noqa: E402
     rewards,
     storage,
     health as health_router,
+    health_ready,
     content,
     sync,
     ledger,
@@ -66,17 +59,16 @@ from .api import (  # noqa: E402
     recovery,
     faucet,
     p2p_overlay,
-    roles,
-    groups)
+    groups,
+    node_meta,
+    ops_ledger,
+)
+
+
+load_dotenv()
 
 BASE_DIR = Path(__file__).resolve().parent
 FRONTEND_DIR = BASE_DIR / "frontend"
-
-
-# ---------------------------------------------------------------------------
-# Settings and app init
-# ---------------------------------------------------------------------------
-
 
 settings = Settings()
 
@@ -86,19 +78,16 @@ app = FastAPI(
     version="1.1.0",
 )
 
+# ------------------------------------------------------------
+# CORS
+# ------------------------------------------------------------
 
-# ---------------------------------------------------------------------------
-# CORS and middleware
-# ---------------------------------------------------------------------------
-
-
-# Allow local dev + simple mobile debugging; can be tightened later.
 origins = [
     "http://localhost",
     "http://localhost:8000",
     "http://127.0.0.1",
     "http://127.0.0.1:8000",
-    "http://0.0.0.0:8000",
+    "capacitor://localhost",
 ]
 
 app.add_middleware(
@@ -109,38 +98,82 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
+# ------------------------------------------------------------
+# Middleware (fixed for FastAPI)
+# ------------------------------------------------------------
 
 @app.middleware("http")
-async def add_request_id_and_security_headers(request: Request, call_next):
+async def add_request_id(request: Request, call_next):
     """
-    Attach a simple request ID and some basic security headers to all responses.
+    Attach X-Request-ID to incoming requests and responses for easier tracing.
     """
-    request_id = str(uuid.uuid4())
-    request.state.request_id = request_id
-
+    req_id = uuid.uuid4().hex[:16]
+    request.state.request_id = req_id
     response = await call_next(request)
-    response.headers["X-Request-ID"] = request_id
-    response.headers.setdefault("X-Content-Type-Options", "nosniff")
-    response.headers.setdefault("X-Frame-Options", "DENY")
-    response.headers.setdefault("X-XSS-Protection", "1; mode=block")
+    response.headers["X-Request-ID"] = req_id
     return response
 
 
-# ---------------------------------------------------------------------------
+@app.middleware("http")
+async def add_security_headers(request: Request, call_next):
+    """
+    Attach a minimal security header set that shouldn't break local dev.
+    """
+    response = await call_next(request)
+
+    response.headers.setdefault(
+        "Content-Security-Policy",
+        "default-src 'self' 'unsafe-inline' data: blob:; img-src * data: blob:; media-src *",
+    )
+    response.headers.setdefault("X-Content-Type-Options", "nosniff")
+    response.headers.setdefault("X-Frame-Options", "DENY")
+    response.headers.setdefault("X-XSS-Protection", "1; mode=block")
+
+    return response
+
+
+# ------------------------------------------------------------
 # Frontend static files and SPA routing
-# ---------------------------------------------------------------------------
+# ------------------------------------------------------------
 
-
-# Mount /frontend static files
 app.mount(
     "/frontend",
     StaticFiles(directory=str(FRONTEND_DIR), html=True),
     name="frontend",
 )
 
-
-# Legacy redirect handler for older entrypoints (index.html → /frontend/index.html)
+# Routers
+app.include_router(ops_ledger.router)
+app.include_router(health_ready.router)
 app.include_router(legacy_frontend_router)
+app.include_router(auth_session_apply.router, prefix="/auth")
+app.include_router(poh.router)
+app.include_router(governance.router)
+app.include_router(treasury.router)
+app.include_router(rewards.router)
+app.include_router(reputation.router, prefix="/reputation")
+app.include_router(validators.router)
+app.include_router(operators.router)
+app.include_router(consensus.router)
+app.include_router(recovery.router)
+app.include_router(faucet_router)
+app.include_router(wallet_router)
+app.include_router(roles.router)
+app.include_router(disputes_api.router)
+app.include_router(groups.router)
+app.include_router(messaging.router)    # /messaging/... + legacy /content alias
+app.include_router(sync.router)         # sync / p2p wiring
+app.include_router(ledger.router)       # ledger inspection endpoints
+app.include_router(storage.router)      # /storage/... (IPFS / local)
+app.include_router(p2p_overlay.router)  # /p2p/... identity & peers
+app.include_router(content.router)
+app.include_router(disputes.router)
+app.include_router(pinning.router)
+app.include_router(verification.router)
+app.include_router(chain.router)
+app.include_router(compat.router)
+app.include_router(node_meta.router)
+app.include_router(health_router.router, prefix="/api/health")
 
 
 @app.get("/")
@@ -163,225 +196,140 @@ async def serve_env_js():
     return FileResponse(path, media_type="application/javascript")
 
 
-@app.get("/api_shim.js")
-async def serve_api_shim_js():
-    """
-    Compatibility shim: some frontend entrypoints request /api_shim.js at the root.
-    This file wires window.API_BASE etc. for the SPA.
-    """
-    path = FRONTEND_DIR / "api_shim.js"
-    if not path.exists():
-        raise HTTPException(status_code=404, detail="api_shim.js not found")
-    return FileResponse(path, media_type="application/javascript")
+# ------------------------------------------------------------
+# /auth/email – dev email-code login
+# ------------------------------------------------------------
 
-
-# ---------------------------------------------------------------------------
-# Include API routers
-# ---------------------------------------------------------------------------
-
-app.include_router(auth_session_apply.router, prefix="/auth")
-
-# Core protocol / governance
-app.include_router(poh.router)
-app.include_router(governance.router)
-app.include_router(treasury.router)
-app.include_router(rewards.router)
-app.include_router(reputation.router, prefix="/reputation")
-app.include_router(validators.router)
-app.include_router(operators.router)
-app.include_router(consensus.router)
-app.include_router(recovery.router)
-app.include_router(faucet_router)
-app.include_router(wallet_router)
-app.include_router(roles.router, prefix="/roles", tags=["roles"])
-app.include_router(disputes_api.router)
-app.include_router(groups.router)
-
-# Messaging / sync / ledger / storage
-app.include_router(messaging.router)    # /messaging/... + legacy /content alias
-app.include_router(sync.router)         # sync / p2p wiring
-app.include_router(ledger.router)       # ledger inspection endpoints
-app.include_router(storage.router)      # /storage/... (IPFS / local)
-app.include_router(p2p_overlay.router)  # /p2p/... identity & peers
-
-# Content / disputes / pinning / verification
-app.include_router(content.router)
-app.include_router(disputes.router)
-app.include_router(pinning.router)
-app.include_router(verification.router)
-
-# Chain / compatibility / health
-app.include_router(chain.router)
-app.include_router(compat.router)
-app.include_router(health_router.router, prefix="/api/health")
-
-
-# ---------------------------------------------------------------------------
-# Node / meta info
-# ---------------------------------------------------------------------------
-
-
-class MetaResponse(BaseModel):
-    ok: bool = True
-    data: dict = Field(default_factory=dict)
-
-
-@app.get("/api/meta", response_model=MetaResponse)
-async def api_meta():
-    """
-    Lightweight node metadata for the frontend:
-
-        {
-          "ok": true,
-          "data": {
-            "node_id": "...",
-            "roles": ["validator", "operator"],
-            "load": 0.12,
-            "peers": 3
-          }
-        }
-    """
-    # Executor node id and roles
-    node_id = getattr(executor, "node_id", None) or "node:unknown"
-    roles: List[str] = []
-
-    try:
-        if getattr(executor, "validator_enabled", False):
-            roles.append("validator")
-    except Exception:
-        pass
-
-    try:
-        if getattr(executor, "operator_enabled", False):
-            roles.append("operator")
-    except Exception:
-        pass
-
-    # Basic node load metric: 1-minute system load or 0.0
-    try:
-        load_val = os.getloadavg()[0]
-    except Exception:
-        load_val = 0.0
-
-    # Peer info from executor.p2p, if available
-    peers = []
-    try:
-        p2p = getattr(executor, "p2p", None)
-        if p2p is not None:
-            get_peer_list = getattr(p2p, "get_peer_list", None)
-            if callable(get_peer_list):
-                peers = get_peer_list() or []
-    except Exception:
-        peers = []
-
-    return {
-        "ok": True,
-        "data": {
-            "node_id": node_id,
-            "roles": roles,
-            "load": load_val,
-            "peers": len(peers),
-        },
-    }
-
-
-# ---------------------------------------------------------------------------
-# Minimal auth email code path (dev-friendly)
-# ---------------------------------------------------------------------------
-
-# NOTE: This is intentionally simple and not production-hardened. For Genesis,
-# email "verification" is purely for convenience and developer testing.
-
-
-class AuthEmailRequest(BaseModel):
+class EmailAuthStart(BaseModel):
     email: str = Field(..., max_length=320)
 
 
-class AuthEmailVerify(BaseModel):
+class EmailAuthVerify(BaseModel):
     email: str = Field(..., max_length=320)
-    code: str = Field(..., max_length=6)
+    code: str = Field(..., min_length=4, max_length=12)
 
 
-_AUTH_CODES: dict = {}
-_AUTH_CODES_EXPIRY: dict = {}
+class LoggingConf(BaseModel):
+    json: bool = False
 
 
-def _send_email_smtp(to_email: str, subject: str, body: str) -> None:
+_AUTH_CODES: Dict[str, str] = {}
+_AUTH_CODES_EXPIRY: Dict[str, float] = {}
+
+
+def _hash_code(code: str, salt: Optional[str] = None) -> str:
+    if salt is None:
+        salt = secrets.token_hex(16)
+    dk = hashlib.pbkdf2_hmac("sha256", code.encode(), salt.encode(), 100_000)
+    return salt + ":" + binascii.hexlify(dk).decode()
+
+
+def _verify_code(code: str, stored: str) -> bool:
+    try:
+        salt, hex_hash = stored.split(":", 1)
+    except ValueError:
+        return False
+    dk = hashlib.pbkdf2_hmac("sha256", code.encode(), salt.encode(), 100_000)
+    return binascii.hexlify(dk).decode() == hex_hash
+
+
+def _send_email_dev_logger(to: str, subject: str, body: str) -> None:
     """
-    Very minimal SMTP client for sending auth codes.
-    Reads SMTP settings from environment variables:
-
-        SMTP_HOST, SMTP_PORT, SMTP_USER, SMTP_PASS, SMTP_FROM, SMTP_TLS
-
-    In dev environments where these are not set, this becomes a no-op and just logs.
+    Dev fallback: log auth email instead of sending real mail.
     """
-    host = os.getenv("SMTP_HOST")
-    port = int(os.getenv("SMTP_PORT", "587"))
-    user = os.getenv("SMTP_USER")
-    password = os.getenv("SMTP_PASS")
-    sender = os.getenv("SMTP_FROM") or user
+    print(f"[DEV EMAIL] To: {to}\nSubject: {subject}\n\n{body}\n")
 
-    if not host or not sender:
-        print(f"[AUTH EMAIL] Would send to {to_email}: {subject} — {body}")
+
+def _send_email_smtp(
+    to: str,
+    subject: str,
+    body: str,
+    host: str,
+    port: int,
+    username: Optional[str] = None,
+    password: Optional[str] = None,
+    use_tls: bool = True,
+) -> None:
+    msg = EmailMessage()
+    msg["From"] = username or "no-reply@weall.local"
+    msg["To"] = to
+    msg["Subject"] = subject
+    msg.set_content(body)
+
+    context = ssl.create_default_context()
+    if use_tls:
+        with smtplib.SMTP_SSL(host, port, context=context) as server:
+            if username and password:
+                server.login(username, password)
+            server.send_message(msg)
+    else:
+        with smtplib.SMTP(host, port) as server:
+            if username and password:
+                server.login(username, password)
+            server.send_message(msg)
+
+
+def _send_email(to: str, subject: str, body: str) -> None:
+    host = os.getenv("WEALL_SMTP_HOST")
+    port = os.getenv("WEALL_SMTP_PORT")
+    user = os.getenv("WEALL_SMTP_USER")
+    pw = os.getenv("WEALL_SMTP_PASS")
+
+    if not host or not port:
+        _send_email_dev_logger(to, subject, body)
         return
 
-    use_tls = os.getenv("SMTP_TLS", "true").lower() in ("1", "true", "yes")
     try:
-        if use_tls:
-            context = ssl.create_default_context()
-            server = smtplib.SMTP(host, port)
-            server.starttls(context=context)
-        else:
-            server = smtplib.SMTP(host, port)
-
-        if user and password:
-            server.login(user, password)
-
-        msg = f"From: {sender}\r\nTo: {to_email}\r\nSubject: {subject}\r\n\r\n{body}"
-        server.sendmail(sender, [to_email], msg)
-        server.quit()
-    except Exception as exc:
-        print(f"[AUTH EMAIL] Failed to send email: {exc}")
+        _send_email_smtp(
+            to=to,
+            subject=subject,
+            body=body,
+            host=host,
+            port=int(port),
+            username=user,
+            password=pw,
+        )
+    except Exception as e:
+        print(f"[SMTP ERROR] {e}")
+        _send_email_dev_logger(to, subject, body)
 
 
-@app.post("/auth/send-code")
-async def auth_start(payload: AuthEmailRequest):
-    """
-    Start email-based dev auth: generate a 6-digit code and send it via email.
-    """
+@app.post("/auth/email/start", response_model=dict)
+async def auth_start(payload: EmailAuthStart):
     email = payload.email.strip().lower()
     if not email or "@" not in email:
-        raise HTTPException(status_code=400, detail="invalid_email")
+        raise HTTPException(status_code=400, detail="Invalid email")
 
-    # Simple 6-digit code
     code = f"{secrets.randbelow(1_000_000):06d}"
-    _AUTH_CODES[email] = code
-    _AUTH_CODES_EXPIRY[email] = time.time() + 15 * 60  # 15 minutes
+    _AUTH_CODES[email] = _hash_code(code)
+    _AUTH_CODES_EXPIRY[email] = time.time() + 15 * 60
 
-    _send_email_smtp(
-        to_email=email,
-        subject="Your WeAll verification code",
-        body=f"Your verification code is: {code}",
-    )
+    subject = "Your WeAll sign-in code"
+    body = f"Your sign-in code is: {code}\n\nThis code will expire in 15 minutes."
+    _send_email(email, subject, body)
 
     return {"ok": True}
 
 
-@app.post("/auth/verify")
-async def auth_verify(payload: AuthEmailVerify):
-    """
-    Complete email-based dev auth: verify the code and return a fake session cookie.
-    """
+@app.post("/auth/email/verify", response_model=dict)
+async def auth_verify(payload: EmailAuthVerify):
     email = payload.email.strip().lower()
     code = payload.code.strip()
 
-    expected = _AUTH_CODES.get(email)
+    if not email or not code:
+        raise HTTPException(status_code=400, detail="Missing email or code")
+
+    stored = _AUTH_CODES.get(email)
+    if not stored:
+        raise HTTPException(status_code=400, detail="No code issued for this email")
+
     expiry = _AUTH_CODES_EXPIRY.get(email, 0)
+    if time.time() > expiry:
+        raise HTTPException(status_code=400, detail="Code expired")
 
-    if not expected or expected != code or time.time() > expiry:
-        raise HTTPException(status_code=400, detail="invalid_code")
+    if not _verify_code(code, stored):
+        raise HTTPException(status_code=400, detail="Invalid code")
 
-    # Clear code and issue a simple dev session id
     _AUTH_CODES.pop(email, None)
     _AUTH_CODES_EXPIRY.pop(email, None)
 

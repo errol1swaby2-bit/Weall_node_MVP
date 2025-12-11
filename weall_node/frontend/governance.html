@@ -1,81 +1,736 @@
-<!DOCTYPE html>
+<!doctype html>
 <html lang="en">
 <head>
-  <meta charset="UTF-8" />
-  <title>WeAll Governance</title>
+  <meta charset="utf-8" />
+  <title>WeAll — Governance</title>
   <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <link rel="icon" href="/frontend/favicon.svg" />
   <link rel="stylesheet" href="/frontend/style.css" />
+  <style>
+    body {
+      margin: 0;
+      padding: 1.2rem 1.1rem 1.6rem;
+      font-family: system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+      background: radial-gradient(circle at top, #38bdf822 0, #020617 55%, #020617 100%);
+      color: #e5e7eb;
+    }
+    .wrap {
+      max-width: 1040px;
+      margin: 0 auto;
+    }
+    .page-header {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 1rem;
+      margin-bottom: 1.3rem;
+    }
+    .page-header h1 {
+      margin: 0;
+      font-size: 1.4rem;
+      letter-spacing: 0.06em;
+      text-transform: uppercase;
+      color: #f9fafb;
+    }
+    .page-header .sub {
+      margin: 0.35rem 0 0;
+      font-size: 0.85rem;
+      color: #9ca3af;
+      max-width: 460px;
+    }
+    .back-link {
+      font-size: 0.82rem;
+      color: #9ca3af;
+      text-decoration: none;
+    }
+    .back-link:hover {
+      text-decoration: underline;
+    }
+    .signed-in-banner {
+      font-size: 0.78rem;
+      letter-spacing: 0.03em;
+      text-transform: uppercase;
+      color: #9ca3af;
+      text-align: right;
+    }
+    .signed-in-banner strong {
+      font-weight: 600;
+    }
+
+    main {
+      display: grid;
+      grid-template-columns: minmax(0, 1.7fr) minmax(0, 1.2fr);
+      gap: 1.1rem;
+    }
+    @media (max-width: 900px) {
+      main {
+        grid-template-columns: minmax(0, 1fr);
+      }
+    }
+
+    .card {
+      background: radial-gradient(circle at top left, rgba(56,189,248,0.12), transparent 55%),
+                  radial-gradient(circle at bottom right, rgba(129,140,248,0.16), transparent 50%),
+                  rgba(15,23,42,0.96);
+      border-radius: 0.9rem;
+      border: 1px solid rgba(148,163,184,0.35);
+      padding: 1rem 1.05rem 1.2rem;
+      box-shadow:
+        0 18px 40px rgba(15,23,42,0.9),
+        0 0 0 1px rgba(15,23,42,0.92);
+    }
+    .card h2 {
+      margin: 0 0 0.35rem;
+      font-size: 0.96rem;
+      letter-spacing: 0.08em;
+      text-transform: uppercase;
+      color: #e5e7eb;
+    }
+    .card p {
+      margin: 0.15rem 0;
+      font-size: 0.86rem;
+      color: #cbd5f5;
+    }
+
+    label {
+      display: block;
+      margin-top: 0.6rem;
+      margin-bottom: 0.12rem;
+      font-size: 0.78rem;
+      text-transform: uppercase;
+      letter-spacing: 0.08em;
+      color: #9ca3af;
+    }
+    input, textarea, select {
+      width: 100%;
+      border-radius: 0.6rem;
+      border: 1px solid rgba(30,41,59,0.9);
+      padding: 0.45rem 0.6rem;
+      background: rgba(15,23,42,0.98);
+      color: #e5e7eb;
+      font-size: 0.9rem;
+      outline: none;
+    }
+    input:focus, textarea:focus, select:focus {
+      border-color: #38bdf8;
+      box-shadow: 0 0 0 1px rgba(56,189,248,0.6);
+    }
+    textarea {
+      min-height: 120px;
+      resize: vertical;
+    }
+
+    .btn-row {
+      margin-top: 0.7rem;
+      display: flex;
+      gap: 0.5rem;
+      flex-wrap: wrap;
+    }
+    .btn {
+      border-radius: 999px;
+      border: 1px solid rgba(148,163,184,0.85);
+      padding: 0.45rem 0.95rem;
+      font-size: 0.8rem;
+      font-weight: 500;
+      text-transform: uppercase;
+      letter-spacing: 0.12em;
+      background: rgba(15,23,42,0.96);
+      color: #e5e7eb;
+      cursor: pointer;
+    }
+    .btn.primary {
+      border-color: rgba(59,130,246,0.9);
+      background: radial-gradient(circle at top left,
+                  rgba(59,130,246,0.5), rgba(15,23,42,0.98));
+      color: #eff6ff;
+    }
+    .btn:disabled {
+      opacity: 0.5;
+      cursor: default;
+    }
+
+    .status {
+      margin-top: 0.4rem;
+      font-size: 0.8rem;
+      color: #9ca3af;
+    }
+    .status.ok { color: #4ade80; }
+    .status.err { color: #fb7185; }
+
+    .pill-small {
+      border-radius: 999px;
+      border: 1px solid rgba(148,163,184,0.8);
+      padding: 0.1rem 0.5rem;
+      font-size: 0.72rem;
+      text-transform: uppercase;
+      letter-spacing: 0.11em;
+      color: #e5e7eb;
+      display: inline-flex;
+      align-items: center;
+      gap: 0.3rem;
+    }
+    .pill-small .dot {
+      width: 0.4rem;
+      height: 0.4rem;
+      border-radius: 999px;
+      background: #22c55e;
+    }
+
+    .prop-list {
+      margin-top: 0.4rem;
+    }
+    .prop-card {
+      border-radius: 0.8rem;
+      border: 1px solid rgba(31,41,55,0.9);
+      padding: 0.6rem 0.75rem 0.7rem;
+      background: rgba(15,23,42,0.98);
+      margin-top: 0.5rem;
+      font-size: 0.85rem;
+    }
+    .prop-title {
+      font-weight: 600;
+      margin-bottom: 0.1rem;
+      color: #e5e7eb;
+    }
+    .prop-meta {
+      font-size: 0.78rem;
+      color: #9ca3af;
+      margin-bottom: 0.3rem;
+    }
+    .prop-desc {
+      font-size: 0.85rem;
+      color: #cbd5f5;
+      margin-bottom: 0.25rem;
+      white-space: pre-wrap;
+    }
+    .prop-options {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 0.35rem;
+      margin-top: 0.3rem;
+    }
+    .prop-option {
+      border-radius: 999px;
+      border: 1px solid rgba(75,85,99,0.9);
+      padding: 0.18rem 0.55rem;
+      font-size: 0.78rem;
+      cursor: pointer;
+      background: rgba(15,23,42,0.96);
+      color: #e5e7eb;
+    }
+    .prop-option.selected {
+      border-color: rgba(59,130,246,0.95);
+      background: radial-gradient(circle at top left,
+                  rgba(59,130,246,0.4), rgba(15,23,42,0.98));
+      color: #eff6ff;
+    }
+    .prop-tallies {
+      font-size: 0.78rem;
+      color: #9ca3af;
+      margin-top: 0.2rem;
+    }
+    .prop-footer {
+      margin-top: 0.35rem;
+      font-size: 0.75rem;
+      color: #6b7280;
+    }
+
+    footer.weall-footer {
+      border-top: 1px solid rgba(31,41,55,0.9);
+      padding: 0.75rem 0.1rem 1.1rem;
+      margin-top: 1.6rem;
+      font-size: 0.78rem;
+      color: #6b7280;
+      text-align: center;
+    }
+    footer.weall-footer a {
+      color: #9ca3af;
+      text-decoration: none;
+    }
+    footer.weall-footer a:hover { text-decoration: underline; }
+  </style>
 </head>
-<body class="page">
-  <header class="page-header">
-    <a href="/frontend/tiktok.html" class="back-link">&larr; Back to Feed</a>
-    <div>
-      <h1>WeAll Governance</h1>
-      <p id="gov-current-user" class="dim">Current user: loading…</p>
-    </div>
-  </header>
-
-  <main class="page-main">
-    <section class="section">
-      <h2>Create a proposal</h2>
-      <p class="section-intro">
-        Proposals are lightweight, signal-style votes. Creating or voting on a proposal
-        requires at least <strong>PoH Tier&nbsp;1</strong>.
-      </p>
-      <div class="form">
-        <div class="form-field">
-          <label for="gov-title">Title</label>
-          <input
-            id="gov-title"
-            type="text"
-            placeholder="Short description of what should change"
-          />
-        </div>
-
-        <div class="form-field">
-          <label for="gov-desc">Description</label>
-          <textarea
-            id="gov-desc"
-            rows="4"
-            placeholder="Explain the proposal in more detail. What problem does it solve? Who is affected?"
-          ></textarea>
-        </div>
-
-        <div class="form-field">
-          <label for="gov-options">
-            Options (comma-separated, leave blank for yes / no / abstain)
-          </label>
-          <input
-            id="gov-options"
-            type="text"
-            placeholder="yes,no,abstain"
-          />
-        </div>
-
-        <div class="form-field">
-          <label for="gov-duration">Duration (days)</label>
-          <input id="gov-duration" type="number" min="1" value="7" />
-        </div>
-
-        <div class="form-actions">
-          <button id="gov-submit" class="btn-primary">
-            Submit proposal
-          </button>
-          <div id="gov-create-status" class="status"></div>
-        </div>
+<body>
+  <div class="wrap">
+    <header class="page-header">
+      <a href="/frontend/index.html" class="back-link">&larr; Back to Feed</a>
+      <div>
+        <h1>Governance</h1>
+        <p class="sub">
+          Propose, signal, and track protocol changes. This MVP page
+          exposes the core proposal + voting surface defined in the spec.
+        </p>
       </div>
-    </section>
+      <p id="signedIn" class="signed-in-banner">Checking session…</p>
+    </header>
 
-    <section class="section">
-      <h2>Open &amp; recent proposals</h2>
-      <div id="gov-list-status" class="status">Loading…</div>
-      <div id="gov-proposals" class="proposal-list"></div>
-    </section>
-  </main>
+    <main>
+      <!-- Left: proposal list + voting -->
+      <section class="card">
+        <h2>Open proposals</h2>
+        <p>
+          Each proposal is one on-chain decision object. For this MVP, voting
+          is one-account-one-vote over a small option set.
+        </p>
 
-  <!-- Scripts -->
+        <div class="btn-row">
+          <button class="btn" id="btnRefreshList">Refresh</button>
+        </div>
+
+        <div class="status" id="listStatus"></div>
+        <div class="prop-list" id="proposalList"></div>
+      </section>
+
+      <!-- Right: create proposal -->
+      <section class="card">
+        <h2>New proposal</h2>
+        <p>
+          For Genesis mode, anyone with a basic account can create a
+          <code>signal</code> proposal. Binding changes should be limited
+          to emissary / operator groups as the network matures.
+        </p>
+
+        <label for="propTitle">Title</label>
+        <input id="propTitle" maxlength="200" placeholder="Short, descriptive title" />
+
+        <label for="propDesc">Description</label>
+        <textarea id="propDesc" maxlength="4000"
+          placeholder="Explain what this proposal does and why it matters."></textarea>
+
+        <label for="propType">Type</label>
+        <select id="propType">
+          <option value="signal">signal (non-binding)</option>
+          <option value="param_change">param_change</option>
+          <option value="upgrade">upgrade</option>
+        </select>
+
+        <label for="propOptions">Options (comma-separated)</label>
+        <input
+          id="propOptions"
+          placeholder="yes,no,abstain"
+        />
+
+        <label for="propDuration">Duration (seconds)</label>
+        <input
+          id="propDuration"
+          type="number"
+          min="60"
+          max="31536000"
+          value="604800"
+        />
+
+        <div class="btn-row">
+          <button class="btn primary" id="btnCreate">Create proposal</button>
+        </div>
+        <div class="status" id="createStatus"></div>
+      </section>
+    </main>
+
+    <footer class="weall-footer">
+      <span>© <span id="footer-year">2024</span> WeAll</span>
+      &nbsp;•&nbsp;<a href="/frontend/privacy.html">Privacy</a>
+      &nbsp;•&nbsp;<a href="/frontend/terms.html">Terms</a>
+    </footer>
+  </div>
+
   <script src="/frontend/env.js"></script>
   <script src="/frontend/auth.js"></script>
-  <script src="/frontend/governance.js"></script>
+  <script src="/frontend/session.js"></script>
+  <script src="/frontend/nav.js"></script>
+  <script src="/frontend/footer.js"></script>
+  <script>
+    (function () {
+      const $ = (id) => document.getElementById(id);
+
+      function apiBase() {
+        return (window.ENV && window.ENV.VITE_API_BASE) || "";
+      }
+
+      async function jsonFetch(path, opts) {
+        const url = apiBase() + path;
+        const options = Object.assign(
+          {
+            headers: { Accept: "application/json" },
+            credentials: "include",
+          },
+          opts || {}
+        );
+        if (options.body && typeof options.body !== "string") {
+          options.headers["Content-Type"] =
+            options.headers["Content-Type"] || "application/json";
+          options.body = JSON.stringify(options.body);
+        }
+        const res = await fetch(url, options);
+        let data = null;
+        try {
+          data = await res.json();
+        } catch {
+          data = null;
+        }
+        if (!res.ok) {
+          const msg =
+            (data && (data.detail || data.error || data.message)) ||
+            "Request failed with " + res.status;
+          throw new Error(msg);
+        }
+        return data;
+      }
+
+      function escapeHtml(str) {
+        if (str === null || str === undefined) return "";
+        return String(str)
+          .replace(/&/g, "&amp;")
+          .replace(/</g, "&lt;")
+          .replace(/>/g, "&gt;")
+          .replace(/"/g, "&quot;")
+          .replace(/'/g, "&#39;");
+      }
+
+      function buildRoleBanner(userId, roles, nodeMeta, poh) {
+        const parts = [];
+
+        const tier =
+          (roles && (roles.poh_tier ?? roles.pohTier)) ||
+          (poh && typeof poh.tier === "number" ? poh.tier : 0) ||
+          0;
+        const status = (poh && poh.status) || "ok";
+
+        parts.push("PoH Tier " + tier + " (" + status + ")");
+
+        const flags = (roles && roles.flags) || {};
+        const caps = (roles && roles.capabilities) || [];
+        const tags = [];
+
+        if (flags.wants_emissary || caps.includes("act_as_emissary")) {
+          tags.push("Emissary");
+        }
+        if (flags.wants_operator || caps.includes("operator_duties")) {
+          tags.push("Operator");
+        }
+        if (flags.wants_validator || caps.includes("validator_duties")) {
+          tags.push("Validator");
+        }
+        if (flags.wants_juror || caps.includes("serve_juror_panel")) {
+          tags.push("Juror");
+        }
+        if (flags.wants_creator || caps.includes("earn_creator_rewards")) {
+          tags.push("Creator");
+        }
+
+        if (tags.length) {
+          parts.push(tags.join(" · "));
+        }
+
+        const nodeKind = (nodeMeta && nodeMeta.node_kind) || "public_gateway";
+        if (nodeKind === "validator_node") {
+          parts.push("Validator node");
+        } else if (nodeKind === "private_node") {
+          parts.push("Private node");
+        } else {
+          parts.push("Gateway node");
+        }
+
+        return "Signed in as " + userId + " · " + parts.join(" · ");
+      }
+
+      async function hydrateHeader() {
+        const el = $("signedIn");
+        if (!el) return;
+
+        try {
+          const sess = await weallAuth.getSession();
+          if (!sess || !sess.user_id) {
+            el.textContent = "Not signed in.";
+            return;
+          }
+
+          const [poh, roles, nodeMeta] = await Promise.all([
+            weallAuth.getPohMe().catch(() => null),
+            jsonFetch("/roles/effective/me", {
+              headers: { "X-WeAll-User": sess.user_id },
+            }).catch(() => null),
+            jsonFetch("/node/meta").catch(() => null),
+          ]);
+
+          el.textContent = buildRoleBanner(sess.user_id, roles, nodeMeta, poh);
+        } catch (err) {
+          console.error("Failed to hydrate header:", err);
+          el.textContent = "Unable to load session.";
+        }
+      }
+
+      function renderProposalList(data, accountId) {
+        const host = $("proposalList");
+        const statusEl = $("listStatus");
+        if (!host) return;
+        host.innerHTML = "";
+
+        const proposals = (data && data.proposals) || [];
+        if (!Array.isArray(proposals) || proposals.length === 0) {
+          host.textContent = "No proposals yet.";
+          if (statusEl) {
+            statusEl.textContent = "";
+          }
+          return;
+        }
+
+        proposals.forEach((p) => {
+          const card = document.createElement("div");
+          card.className = "prop-card";
+
+          const title = document.createElement("div");
+          title.className = "prop-title";
+          title.textContent = p.title || "(untitled proposal)";
+          card.appendChild(title);
+
+          const meta = document.createElement("div");
+          meta.className = "prop-meta";
+          const createdBy = p.created_by || "unknown";
+          const type = p.type || "signal";
+          const status = p.status || "open";
+          const createdAt = p.created_at
+            ? new Date(p.created_at * 1000).toLocaleString()
+            : "–";
+          const closesAt = p.closes_at
+            ? new Date(p.closes_at * 1000).toLocaleString()
+            : "–";
+
+          meta.innerHTML =
+            "<span class=\"pill-small\"><span class=\"dot\"></span><span>" +
+            escapeHtml(type) +
+            "</span></span>" +
+            " &nbsp; created by <strong>" +
+            escapeHtml(createdBy) +
+            "</strong>" +
+            " · status: <strong>" +
+            escapeHtml(status) +
+            "</strong>" +
+            "<br><span>Created:</span> " +
+            escapeHtml(createdAt) +
+            " · <span>Closes:</span> " +
+            escapeHtml(closesAt);
+          card.appendChild(meta);
+
+          if (p.description) {
+            const desc = document.createElement("div");
+            desc.className = "prop-desc";
+            desc.textContent = p.description;
+            card.appendChild(desc);
+          }
+
+          const optionsHost = document.createElement("div");
+          optionsHost.className = "prop-options";
+          const options = p.options || ["yes", "no", "abstain"];
+          const tallies = p.tallies || {};
+          const myVote = p.votes && accountId ? p.votes[accountId] : null;
+
+          options.forEach((opt) => {
+            const btn = document.createElement("button");
+            btn.type = "button";
+            btn.className =
+              "prop-option" +
+              (myVote === opt ? " selected" : "");
+            btn.textContent = opt;
+
+            if (status !== "open") {
+              btn.disabled = true;
+            }
+
+            btn.addEventListener("click", () => {
+              voteOnProposal(p.id, opt);
+            });
+            optionsHost.appendChild(btn);
+          });
+          card.appendChild(optionsHost);
+
+          const talliesText = Object.keys(tallies)
+            .map((k) => k + ": " + tallies[k])
+            .join(" · ");
+
+          const talliesEl = document.createElement("div");
+          talliesEl.className = "prop-tallies";
+          talliesEl.textContent =
+            talliesText || "No votes recorded yet.";
+          card.appendChild(talliesEl);
+
+          const footer = document.createElement("div");
+          footer.className = "prop-footer";
+          footer.textContent =
+            "Proposal id: " + (p.id || "unknown-id");
+          card.appendChild(footer);
+
+          host.appendChild(card);
+        });
+
+        if (statusEl) {
+          statusEl.textContent = "";
+        }
+      }
+
+      async function loadProposals() {
+        const statusEl = $("listStatus");
+        if (statusEl) {
+          statusEl.textContent = "Loading proposals…";
+          statusEl.className = "status";
+        }
+
+        try {
+          const sess = await weallAuth.getSession();
+          const accountId = (sess && sess.user_id) || null;
+          const data = await jsonFetch("/governance/proposals");
+          renderProposalList(data, accountId);
+        } catch (err) {
+          console.error("Failed to load proposals:", err);
+          if ($("listStatus")) {
+            $("listStatus").textContent = "Failed to load proposals: " + err.message;
+            $("listStatus").className = "status err";
+          }
+        }
+      }
+
+      async function voteOnProposal(id, option) {
+        const statusEl = $("listStatus");
+        if (!id || !option) return;
+
+        try {
+          const sess = await weallAuth.getSession();
+          if (!sess || !sess.user_id) {
+            throw new Error("Not signed in.");
+          }
+
+          if (statusEl) {
+            statusEl.textContent = "Submitting vote…";
+            statusEl.className = "status";
+          }
+
+          await jsonFetch(
+            "/governance/proposals/" + encodeURIComponent(id) + "/vote",
+            {
+              method: "POST",
+              body: { choice: option, voter: sess.user_id },
+            }
+          );
+
+          if (statusEl) {
+            statusEl.textContent = "Vote recorded.";
+            statusEl.className = "status ok";
+          }
+          await loadProposals();
+        } catch (err) {
+          console.error("Vote error:", err);
+          if (statusEl) {
+            statusEl.textContent = "Failed to submit vote: " + err.message;
+            statusEl.className = "status err";
+          }
+        }
+      }
+
+      async function createProposal() {
+        const titleEl = $("propTitle");
+        const descEl = $("propDesc");
+        const typeEl = $("propType");
+        const optsEl = $("propOptions");
+        const durEl = $("propDuration");
+        const statusEl = $("createStatus");
+
+        if (!titleEl || !descEl || !typeEl || !optsEl || !durEl || !statusEl) {
+          return;
+        }
+
+        const title = titleEl.value.trim();
+        const description = descEl.value.trim();
+        const type = typeEl.value || "signal";
+
+        const optionsRaw = optsEl.value.trim();
+        const options = optionsRaw
+          ? optionsRaw.split(",").map((s) => s.trim()).filter(Boolean)
+          : ["yes", "no", "abstain"];
+
+        const duration = parseInt(durEl.value || "0", 10);
+        if (!title) {
+          statusEl.textContent = "Enter a title.";
+          statusEl.className = "status err";
+          return;
+        }
+        if (!duration || duration < 60) {
+          statusEl.textContent = "Duration must be at least 60 seconds.";
+          statusEl.className = "status err";
+          return;
+        }
+
+        try {
+          const sess = await weallAuth.getSession();
+          if (!sess || !sess.user_id) {
+            throw new Error("Not signed in.");
+          }
+
+          statusEl.textContent = "Creating proposal…";
+          statusEl.className = "status";
+
+          const payload = {
+            title,
+            description,
+            type,
+            options,
+            created_by: sess.user_id,
+            duration_sec: duration,
+          };
+
+          await jsonFetch("/governance/proposals", {
+            method: "POST",
+            body: payload,
+          });
+
+          statusEl.textContent = "Proposal created.";
+          statusEl.className = "status ok";
+
+          titleEl.value = "";
+          descEl.value = "";
+          optsEl.value = "yes,no,abstain";
+          durEl.value = "604800";
+
+          await loadProposals();
+        } catch (err) {
+          console.error("Create proposal error:", err);
+          statusEl.textContent =
+            "Failed to create proposal: " + err.message;
+          statusEl.className = "status err";
+        }
+      }
+
+      function wireEvents() {
+        const refreshBtn = $("btnRefreshList");
+        if (refreshBtn) {
+          refreshBtn.onclick = loadProposals;
+        }
+        const createBtn = $("btnCreate");
+        if (createBtn) {
+          createBtn.onclick = createProposal;
+        }
+      }
+
+      async function init() {
+        // 1) Require PoH Tier 1+ for governance page
+        const ok = await weallAuth.require({
+          minTier: 1,
+          redirectToLogin: "/frontend/login.html",
+        });
+        if (!ok) return;
+
+        // 2) Hydrate header banner
+        await hydrateHeader();
+
+        // 3) Wire UI + load proposals
+        wireEvents();
+        await loadProposals();
+      }
+
+      if (document.readyState === "loading") {
+        document.addEventListener("DOMContentLoaded", init);
+      } else {
+        init();
+      }
+    })();
+  </script>
 </body>
 </html>

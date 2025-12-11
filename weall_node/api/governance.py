@@ -1,50 +1,140 @@
 """
 weall_node/api/governance.py
 --------------------------------------------------
-MVP governance for WeAll Node.
+Clean MVP governance module for WeAll Node, with role gating.
 
-- Stores proposals + votes in executor.ledger["governance"]["proposals"].
-- Simple yes/no/abstain-style voting (configurable per proposal).
-- Adds optional group scoping + audience gating:
+Implements proposals and voting as described in the Full Scope:
 
-    group_id: optional group/DAO this proposal belongs to
-    audience:
-        "global"            -> anyone may vote
-        "group_members"     -> only members of group_id
-        "group_emissaries"  -> only emissaries of group_id
+    - Tier 3 humans (with appropriate roles) can create proposals.
+    - Tier 2+ humans can vote.
+    - Proposals can be scoped to the global network or a specific group.
 
-Public API:
+JSON shape is intentionally kept compatible with the existing
+frontend example:
 
-    GET  /governance/meta
-    GET  /governance/proposals
-    POST /governance/proposals
-    GET  /governance/proposals/{proposal_id}
-    POST /governance/proposals/{proposal_id}/vote
+    {
+      "id": "4c0d20099a00fd35",
+      "title": "Hello",
+      "description": "Yup",
+      "created_by": "@errol1swaby2",
+      "type": "signal",
+      "options": ["yes", "no", "abstain"],
+      "created_at": 1764976536,
+      "closes_at": 1765581336,
+      "status": "open",
+      "votes": {
+        "@errol1swaby2": "yes"
+      },
+      "tallies": {
+        "yes": 1
+      }
+    }
 """
+
+from __future__ import annotations
 
 import secrets
 import time
-from typing import Dict, List, Optional, Any
+from typing import Any, Dict, List, Optional
 
-from fastapi import APIRouter, HTTPException
+from fastapi import APIRouter, Depends, Header, HTTPException, status
 from pydantic import BaseModel, Field
 
 from ..weall_executor import executor
+from ..weall_runtime import roles as runtime_roles
 
-router = APIRouter(prefix="/governance", tags=["governance"])
+router = APIRouter()
 
 
-# ---------------------------------------------------------------------------
+# ============================================================
+# Ledger helpers
+# ============================================================
+
+def _gov_state() -> Dict[str, Any]:
+    return executor.ledger.setdefault("governance", {"proposals": {}})
+
+
+def _proposals() -> Dict[str, Dict[str, Any]]:
+    st = _gov_state()
+    return st.setdefault("proposals", {})
+
+
+def _lookup_poh_record(user_id: str) -> Optional[dict]:
+    poh_root = executor.ledger.setdefault("poh", {})
+    records = poh_root.setdefault("records", {})
+    return records.get(user_id)
+
+
+def _extract_flags_from_record(record: dict) -> runtime_roles.HumanRoleFlags:
+    flags = record.get("flags") or {}
+    return runtime_roles.HumanRoleFlags(
+        wants_juror=bool(flags.get("wants_juror", False)),
+        wants_validator=bool(flags.get("wants_validator", False)),
+        wants_operator=bool(flags.get("wants_operator", False)),
+        wants_emissary=bool(flags.get("wants_emissary", False)),
+        wants_creator=bool(flags.get("wants_creator", True)),
+    )
+
+
+def _effective_profile(user_id: str) -> runtime_roles.EffectiveRoleProfile:
+    rec = _lookup_poh_record(user_id)
+    if not rec:
+        return runtime_roles.compute_effective_role_profile(
+            poh_tier=int(runtime_roles.PoHTier.OBSERVER),
+            flags=runtime_roles.HumanRoleFlags(
+                wants_creator=False,
+                wants_juror=False,
+                wants_validator=False,
+                wants_operator=False,
+                wants_emissary=False,
+            ),
+        )
+
+    tier = int(rec.get("tier", 0))
+    flags = _extract_flags_from_record(rec)
+    return runtime_roles.compute_effective_role_profile(tier, flags)
+
+
+def _require_profile_with_cap(
+    capability: runtime_roles.Capability,
+):
+    """
+    Factory returning a FastAPI dependency that both:
+        - Ensures a valid X-WeAll-User header is present
+        - Ensures the effective role profile contains the given capability
+    """
+
+    async def dependency(
+        x_weall_user: str = Header(
+            ...,
+            alias="X-WeAll-User",
+            description="WeAll user identifier (e.g. '@handle' or wallet id).",
+        )
+    ) -> str:
+        profile = _effective_profile(x_weall_user)
+        if capability not in profile.capabilities:
+            raise HTTPException(
+                status_code=status.HTTP_403_FORBIDDEN,
+                detail=f"Missing required capability: {capability.value}",
+            )
+        return x_weall_user
+
+    return dependency
+
+
+# ============================================================
 # Models
-# ---------------------------------------------------------------------------
-
+# ============================================================
 
 class ProposalCreate(BaseModel):
     title: str = Field(..., max_length=200)
     description: str = Field("", max_length=4000)
     created_by: str = Field(..., description="@handle of the proposer")
-    type: str = Field("signal")
-    options: Optional[List[str]] = None
+    type: str = Field("signal", description="Type: 'signal', 'param_change', etc.")
+    options: Optional[List[str]] = Field(
+        default=None,
+        description="Options for voting; default ['yes','no','abstain']",
+    )
     duration_sec: int = Field(
         7 * 24 * 3600,
         ge=60,
@@ -53,18 +143,15 @@ class ProposalCreate(BaseModel):
     )
     group_id: Optional[str] = Field(
         default=None,
-        description="Optional group id this proposal belongs to.",
+        description="Optional group this proposal is scoped to.",
     )
     audience: str = Field(
-        "global",
-        description="Who can vote: global, group_members, group_emissaries",
-        pattern="^(global|group_members|group_emissaries)$",
+        default="global",
+        description=(
+            "Who is allowed to vote: 'global', 'group_members', 'group_emissaries'. "
+            "For now, this is informational only; a later pass can enforce group scope."
+        ),
     )
-
-
-class VoteRequest(BaseModel):
-    voter: str = Field(..., description="@handle or PoH id of voter")
-    choice: str = Field(..., description="One of the proposal options.")
 
 
 class Proposal(BaseModel):
@@ -74,282 +161,187 @@ class Proposal(BaseModel):
     created_by: str
     type: str
     options: List[str]
-    created_at: int
-    closes_at: int
+    created_at: float
+    closes_at: float
     status: str
-    votes: Dict[str, str]
-    tallies: Dict[str, int]
     group_id: Optional[str] = None
     audience: str = "global"
+    votes: Dict[str, str]
+    tallies: Dict[str, int]
 
 
-class ProposalListResponse(BaseModel):
-    ok: bool
+class ProposalsListResponse(BaseModel):
+    ok: bool = True
     proposals: List[Proposal]
 
 
-# ---------------------------------------------------------------------------
-# Internal helpers
-# ---------------------------------------------------------------------------
+class ProposalSingleResponse(BaseModel):
+    ok: bool = True
+    proposal: Proposal
 
 
-def _root() -> Dict[str, Any]:
-    ledger = executor.ledger
-    root = ledger.setdefault("governance", {})
-    root.setdefault("proposals", {})
-    return root
+class ProposalVoteRequest(BaseModel):
+    choice: str = Field(..., description="One of the proposal's options.")
 
 
-def _proposals() -> Dict[str, Dict[str, Any]]:
-    return _root().setdefault("proposals", {})  # type: ignore[return-value]
+# ============================================================
+# Routes
+# ============================================================
 
-
-def _save():
-    try:
-        executor.save_state()
-    except Exception:
-        pass
-
-
-def _serialize(rec: Dict[str, Any]) -> Proposal:
-    # Ensure all keys exist and are of the right types.
-    options = rec.get("options") or ["yes", "no", "abstain"]
-    votes = rec.get("votes") or {}
-    tallies = rec.get("tallies") or {}
-    group_id = rec.get("group_id")
-    audience = rec.get("audience") or "global"
-
-    return Proposal(
-        id=str(rec["id"]),
-        title=str(rec["title"]),
-        description=str(rec.get("description", "")),
-        created_by=str(rec.get("created_by", "")),
-        type=str(rec.get("type", "signal")),
-        options=list(options),
-        created_at=int(rec.get("created_at", 0)),
-        closes_at=int(rec.get("closes_at", 0)),
-        status=str(rec.get("status", "open")),
-        votes=dict(votes),
-        tallies={str(k): int(v) for k, v in tallies.items()},
-        group_id=group_id,
-        audience=audience,
-    )
-
-
-def _lookup_group(group_id: str) -> Optional[Dict[str, Any]]:
+@router.get("/proposals", response_model=ProposalsListResponse)
+def list_proposals() -> Dict[str, Any]:
     """
-    Minimal group lookup to avoid importing the whole groups API.
-
-    executor.ledger["groups"] layout (from api.groups):
-
-        {
-          "groups": {
-            "<group_id>": {...}
-          },
-          "by_member": {...}
-        }
+    Public, read-only view of all proposals.
     """
-    groups_root = executor.ledger.get("groups") or {}
-    gmap = groups_root.get("groups") or {}
-    return gmap.get(group_id)
-
-
-def _check_audience(rec: Dict[str, Any], voter: str) -> None:
-    """
-    Enforce audience rules for group-scoped proposals.
-
-    - global: anyone may vote
-    - group_members: only group members
-    - group_emissaries: only group emissaries
-    """
-    audience = rec.get("audience", "global")
-    group_id = rec.get("group_id")
-
-    if audience == "global" or not group_id:
-        return
-
-    group = _lookup_group(group_id)
-    if not group:
-        raise HTTPException(status_code=400, detail="group_not_found_for_proposal")
-
-    voter = str(voter)
-    members = {str(m) for m in group.get("members") or []}
-    emissaries = {str(e) for e in group.get("emissaries") or []}
-
-    if audience == "group_members":
-        if voter not in members:
-            raise HTTPException(status_code=403, detail="not_in_group_members")
-    elif audience == "group_emissaries":
-        if voter not in emissaries:
-            raise HTTPException(status_code=403, detail="not_in_group_emissaries")
-
-
-def _update_status_for_time(rec: Dict[str, Any]) -> None:
-    """
-    Close proposals whose time has elapsed.
-    """
-    if rec.get("status") != "open":
-        return
-    closes_at = int(rec.get("closes_at") or 0)
-    if closes_at and int(time.time()) >= closes_at:
-        rec["status"] = "closed"
-
-
-# ---------------------------------------------------------------------------
-# API endpoints
-# ---------------------------------------------------------------------------
-
-
-@router.get("/meta")
-def get_meta() -> Dict[str, Any]:
     props = _proposals()
-    total = len(props)
-    open_count = 0
-    closed_count = 0
-    now = int(time.time())
-
-    for p in props.values():
-        _update_status_for_time(p)
-        if p.get("status") == "open":
-            open_count += 1
-        else:
-            closed_count += 1
-
     return {
         "ok": True,
-        "total": total,
-        "open": open_count,
-        "closed": closed_count,
-        "now": now,
+        "proposals": [Proposal(**p) for p in props.values()],
     }
 
 
-@router.get("/proposals", response_model=ProposalListResponse)
-def list_proposals(
-    status: Optional[str] = None,
-    group_id: Optional[str] = None,
-) -> ProposalListResponse:
-    """
-    List proposals.
-
-    Query params:
-        status   -> "open" or "closed" (optional)
-        group_id -> filter to a specific group (optional)
-    """
+@router.get("/proposals/{proposal_id}", response_model=ProposalSingleResponse)
+def get_proposal(proposal_id: str) -> Dict[str, Any]:
     props = _proposals()
-    out: List[Proposal] = []
-
-    for rec in props.values():
-        _update_status_for_time(rec)
-
-        if status and rec.get("status") != status:
-            continue
-        if group_id and rec.get("group_id") != group_id:
-            continue
-
-        out.append(_serialize(rec))
-
-    return ProposalListResponse(ok=True, proposals=out)
+    if proposal_id not in props:
+        raise HTTPException(status_code=404, detail="Proposal not found")
+    return {"ok": True, "proposal": Proposal(**props[proposal_id])}
 
 
-@router.get("/proposals/{proposal_id}", response_model=Proposal)
-def get_proposal(proposal_id: str) -> Proposal:
-    props = _proposals()
-    rec = props.get(proposal_id)
-    if not rec:
-        raise HTTPException(status_code=404, detail="proposal_not_found")
-
-    _update_status_for_time(rec)
-    return _serialize(rec)
-
-
-@router.post("/proposals", response_model=Proposal)
-def create_proposal(payload: ProposalCreate) -> Proposal:
+@router.post(
+    "/proposals",
+    response_model=ProposalSingleResponse,
+)
+def create_proposal(
+    payload: ProposalCreate,
+    proposer_id: str = Depends(
+        _require_profile_with_cap(runtime_roles.Capability.CREATE_GOVERNANCE_PROPOSAL)
+    ),
+) -> Dict[str, Any]:
     """
-    Create a new proposal.
+    Create a new governance proposal.
 
-    - options default to ["yes", "no", "abstain"] if omitted.
-    - If group_id is provided, we ensure that group exists.
+    Requirements:
+
+        - Caller must have CREATE_GOVERNANCE_PROPOSAL capability
+          (Tier 3 + appropriate role flags).
+        - created_by in payload must match X-WeAll-User, to prevent spoofing.
     """
-    if payload.group_id:
-        if not _lookup_group(payload.group_id):
-            raise HTTPException(status_code=400, detail="group_not_found")
+    if payload.created_by != proposer_id:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="created_by must match the authenticated user",
+        )
 
     props = _proposals()
-    now = int(time.time())
-    pid = secrets.token_hex(8)
+    prop_id = secrets.token_hex(8)
+    now = time.time()
+    closes_at = now + payload.duration_sec
 
     options = payload.options or ["yes", "no", "abstain"]
-    options = [str(o) for o in options]
-    if len(options) == 0:
-        raise HTTPException(status_code=400, detail="options_required")
 
-    closes_at = now + int(payload.duration_sec)
+    proposal = Proposal(
+        id=prop_id,
+        title=payload.title,
+        description=payload.description,
+        created_by=payload.created_by,
+        type=payload.type,
+        options=options,
+        created_at=now,
+        closes_at=closes_at,
+        status="open",
+        group_id=payload.group_id,
+        audience=payload.audience,
+        votes={},
+        tallies={opt: 0 for opt in options},
+    ).dict()
 
-    rec: Dict[str, Any] = {
-        "id": pid,
-        "title": payload.title,
-        "description": payload.description,
-        "created_by": payload.created_by,
-        "type": payload.type,
-        "options": options,
-        "created_at": now,
-        "closes_at": closes_at,
-        "status": "open",
-        "votes": {},            # voter_id -> option
-        "tallies": {o: 0 for o in options},
-        "group_id": payload.group_id,
-        "audience": payload.audience,
-    }
+    props[prop_id] = proposal
 
-    props[pid] = rec
-    _save()
-    return _serialize(rec)
+    return {"ok": True, "proposal": Proposal(**proposal)}
 
 
-@router.post("/proposals/{proposal_id}/vote", response_model=Proposal)
-def vote_on_proposal(proposal_id: str, payload: VoteRequest) -> Proposal:
+@router.post(
+    "/proposals/{proposal_id}/vote",
+    response_model=ProposalSingleResponse,
+)
+def vote_proposal(
+    proposal_id: str,
+    payload: ProposalVoteRequest,
+    voter_id: str = Depends(
+        _require_profile_with_cap(runtime_roles.Capability.VOTE_GOVERNANCE)
+    ),
+) -> Dict[str, Any]:
     """
-    Cast or change a vote on a proposal.
+    Cast a vote on a proposal.
 
-    - Enforces proposal status (must be open and within time).
-    - Enforces group audience rules if group_id/audience are set.
-    - One-vote-per-voter semantics; changing vote moves tallies accordingly.
+    Requirements:
+
+        - Caller must have VOTE_GOVERNANCE capability (Tier 2+).
+        - Choice must be one of the proposal's options.
     """
     props = _proposals()
-    rec = props.get(proposal_id)
-    if not rec:
-        raise HTTPException(status_code=404, detail="proposal_not_found")
+    if proposal_id not in props:
+        raise HTTPException(status_code=404, detail="Proposal not found")
 
-    _update_status_for_time(rec)
-    if rec.get("status") != "open":
-        raise HTTPException(status_code=400, detail="proposal_closed")
+    proposal = props[proposal_id]
+
+    if proposal.get("status") != "open":
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Proposal is not open for voting",
+        )
 
     choice = payload.choice
-    options = rec.get("options") or []
+    options = proposal.get("options", [])
     if choice not in options:
-        raise HTTPException(status_code=400, detail="invalid_choice")
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=f"Choice '{choice}' is not a valid option",
+        )
 
-    voter = str(payload.voter)
+    # Record vote
+    votes = proposal.setdefault("votes", {})
+    tallies = proposal.setdefault("tallies", {opt: 0 for opt in options})
 
-    # Enforce audience rules for group-scoped proposals
-    _check_audience(rec, voter)
+    # If the user has already voted, decrement their previous choice
+    prev_choice = votes.get(voter_id)
+    if prev_choice is not None and prev_choice in tallies:
+        tallies[prev_choice] = max(0, tallies.get(prev_choice, 0) - 1)
 
-    votes: Dict[str, str] = rec.setdefault("votes", {})
-    tallies: Dict[str, int] = rec.setdefault("tallies", {})
+    votes[voter_id] = choice
+    tallies[choice] = tallies.get(choice, 0) + 1
 
-    prev = votes.get(voter)
-    if prev == choice:
-        # idempotent
-        return _serialize(rec)
+    props[proposal_id] = proposal
 
-    # Decrement previous choice
-    if prev is not None and prev in tallies:
-        tallies[prev] = max(0, int(tallies.get(prev, 0)) - 1)
+    return {"ok": True, "proposal": Proposal(**proposal)}
 
-    # Record new choice
-    votes[voter] = choice
-    tallies[choice] = int(tallies.get(choice, 0)) + 1
 
-    _save()
-    return _serialize(rec)
+@router.post(
+    "/proposals/{proposal_id}/close",
+    response_model=ProposalSingleResponse,
+)
+def close_proposal(
+    proposal_id: str,
+    _closer_id: str = Depends(
+        _require_profile_with_cap(runtime_roles.Capability.CREATE_GOVERNANCE_PROPOSAL)
+    ),
+) -> Dict[str, Any]:
+    """
+    Manually close a proposal.
+
+    For now, any user who can *create* proposals can also close them.
+    Later we can refine this to:
+        - automatic close on `closes_at`, and/or
+        - special governance roles, and/or
+        - proposal-type-specific close logic.
+    """
+    props = _proposals()
+    if proposal_id not in props:
+        raise HTTPException(status_code=404, detail="Proposal not found")
+
+    proposal = props[proposal_id]
+    proposal["status"] = "closed"
+    props[proposal_id] = proposal
+
+    return {"ok": True, "proposal": Proposal(**proposal)}

@@ -1,128 +1,212 @@
 """
-weall_node/api/ledger.py
---------------------------------------------------
-Read-only ledger + balances + cryptographic proofs.
+API: /ledger
 
-- Return a full ledger snapshot
-- Get a user's token balance
-- List commitments signed by the node (epoch Merkle roots)
-- Retrieve a Merkle proof for a specific account
+Read-only endpoints exposing WeCoin monetary policy, balances, and
+reward pool configuration.
+
+This is intentionally "thin": all actual monetary logic lives in
+weall_runtime.ledger.WeCoinLedger and is driven by WeAllExecutor.
 """
+
+from __future__ import annotations
+
+from typing import Dict, Any
 
 from fastapi import APIRouter, HTTPException
 
-from ..weall_executor import executor
+from weall_node.weall_executor import executor
+from weall_node.weall_runtime.ledger import (
+    MAX_SUPPLY,
+    INITIAL_BLOCK_REWARD,
+    BLOCK_INTERVAL_SECONDS,
+    HALVING_INTERVAL_SECONDS,
+    BLOCKS_PER_HALVING,
+)
 
-# All routes under /ledger/...
 router = APIRouter(prefix="/ledger", tags=["ledger"])
 
 
-def _ledger():
-    """Safe access to the executor's ledger dict."""
-    led = getattr(executor, "ledger", None)
-    if led is None:
-        led = {}
-        executor.ledger = led
-    return led
+# -------------------------------------------------------------------
+# Internal helpers
+# -------------------------------------------------------------------
 
 
-@router.get("/")
-def get_full_ledger():
+def _wecoin() -> Any:
     """
-    Full ledger snapshot plus a couple of convenience fields.
+    Return the WeCoin runtime attached to the executor, or raise 503
+    if the runtime is not available.
 
-    This is intentionally read-only and light:
-    - block_height is derived from len(chain)
-    - epoch falls back to 0 if the runtime hasn't started tracking it yet
+    This uses the global executor facade defined in weall_executor.py,
+    which exposes .wecoin as an attribute.
     """
-    try:
-        ledger = _ledger()
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=f"ledger_unavailable:{e!s}")
+    wc = getattr(executor, "wecoin", None)
+    if wc is None:
+        raise HTTPException(
+            status_code=503, detail="wecoin_runtime_unavailable"
+        )
+    return wc
 
-    chain = ledger.get("chain") or []
+
+def _chain() -> list:
+    return executor.ledger.get("chain", []) or []
+
+
+# -------------------------------------------------------------------
+# Endpoints
+# -------------------------------------------------------------------
+
+
+@router.get("/health")
+async def ledger_health() -> Dict[str, Any]:
+    """
+    Lightweight health check for the ledger / WeCoin runtime.
+    """
+    chain = _chain()
     height = len(chain)
+    latest = chain[-1] if chain else None
 
-    epoch = 0
-    try:
-        epoch = int(getattr(executor, "current_epoch", 0))
-    except Exception:
-        epoch = 0
+    wc = getattr(executor, "wecoin", None)
+    wecoin_ok = wc is not None
 
     return {
         "ok": True,
-        "block_height": int(height),
-        "epoch": epoch,
-        "ledger": ledger,
+        "has_chain": bool(chain),
+        "height": height,
+        "latest_block_id": latest["id"] if latest else None,
+        "wecoin_attached": wecoin_ok,
     }
 
 
-@router.get("/balance/{user_id}")
-def get_balance(user_id: str):
+@router.get("/params")
+async def ledger_params() -> Dict[str, Any]:
     """
-    Return the user's token balance, defaulting to 0.
+    Return the global monetary policy parameters.
 
-    Profile calls this endpoint as /ledger/balance/{email}.
+    These reflect the Full Scope v2 spec (21M cap, 100 WCN initial
+    block reward, 10-minute blocks, ~2-year halving).
     """
-    user_id = (user_id or "").strip()
-    if not user_id:
-        raise HTTPException(status_code=400, detail="user_id_required")
+    wc = _wecoin()
 
-    # Prefer the executor helper if present (keeps WeCoin in sync)
+    # Allow runtime to override the global constants; fall back to
+    # module-level defaults if attributes are missing.
+    max_supply = getattr(wc, "max_supply", MAX_SUPPLY)
+    initial_reward = getattr(wc, "initial_block_reward", INITIAL_BLOCK_REWARD)
+    block_interval = getattr(wc, "block_interval_seconds", BLOCK_INTERVAL_SECONDS)
+    halving_secs = getattr(wc, "halving_interval_seconds", HALVING_INTERVAL_SECONDS)
+
+    return {
+        "ok": True,
+        "max_supply": float(max_supply),
+        "initial_block_reward": float(initial_reward),
+        "block_interval_seconds": int(block_interval),
+        "halving_interval_seconds": int(halving_secs),
+        "blocks_per_halving": int(BLOCKS_PER_HALVING),
+    }
+
+
+@router.get("/supply")
+async def supply_meta() -> Dict[str, Any]:
+    """
+    Return supply information: total issued so far and headroom
+    to the max supply.
+    """
+    wc = _wecoin()
+
+    max_supply = float(getattr(wc, "max_supply", MAX_SUPPLY))
+    total_issued = float(getattr(wc, "total_issued", 0.0))
+    remaining = max(0.0, max_supply - total_issued)
+
+    return {
+        "ok": True,
+        "max_supply": max_supply,
+        "total_issued": total_issued,
+        "remaining": remaining,
+    }
+
+
+@router.get("/balance/{account_id}")
+async def get_balance(account_id: str) -> Dict[str, Any]:
+    """
+    Return the balance of a single account in WCN.
+    """
+    wc = _wecoin()
     try:
-        bal = executor.get_balance(user_id)
-    except AttributeError:
-        # Legacy behaviour: read from ledger.balances / ledger.accounts
-        ledger = _ledger()
-        balances = ledger.get("balances") or ledger.get("accounts") or {}
+        balance = float(wc.get_balance(account_id))
+    except Exception:
+        balance = 0.0
+
+    return {
+        "ok": True,
+        "account_id": account_id,
+        "balance": balance,
+    }
+
+
+@router.get("/pools")
+async def pools_meta() -> Dict[str, Any]:
+    """
+    Return the current reward pool split and, if available, each
+    pool's tickets snapshot and membership.
+
+    This exposes the five canonical pools:
+
+        validators, jurors, creators, operators, treasury
+    """
+    wc = _wecoin()
+
+    pool_split = getattr(wc, "pool_split", {}) or {}
+    pools = getattr(wc, "pools", {}) or {}
+    tickets = getattr(wc, "tickets", {}) or {}
+
+    formatted: Dict[str, Any] = {}
+    for pool_name, fraction in pool_split.items():
+        members = []
         try:
-            bal = balances.get(user_id, 0)
-        except AttributeError:
-            bal = 0
+            members = sorted(list(pools.get(pool_name, {}).get("members", [])))
+        except Exception:
+            members = []
 
-    try:
-        bal = float(bal)
-    except Exception:
-        bal = 0.0
+        pool_tickets = tickets.get(pool_name, {}) or {}
+        # Only return non-zero tickets for readability
+        nonzero_tickets = {
+            aid: float(w)
+            for aid, w in pool_tickets.items()
+            if float(w or 0.0) > 0.0
+        }
 
-    # Attach wallet metadata if present (derived from email+password at signup)
-    wallet = None
-    try:
-        led_full = getattr(executor, "ledger", {}) or {}
-        accounts = led_full.get("accounts") or {}
-        acct = accounts.get(user_id) or {}
-        wallet = acct.get("wallet")
-    except Exception:
-        wallet = None
+        formatted[pool_name] = {
+            "fraction": float(fraction),
+            "members": members,
+            "tickets": nonzero_tickets,
+        }
 
-    return {"ok": True, "user_id": user_id, "balance": bal, "wallet": wallet}
-
-
-@router.get("/commitments")
-def get_commitments():
-    """Signed epoch commitments (Merkle roots) with signatures and pubkey."""
-    try:
-        commits = executor.get_commitments()
-    except AttributeError:
-        # Older runtimes may not expose commitments yet
-        commits = []
-    return {"ok": True, "commitments": commits}
+    return {
+        "ok": True,
+        "pools": formatted,
+    }
 
 
-@router.get("/proof/{user_id}")
-def merkle_proof(user_id: str):
-    """Return Merkle proof for the user's balance under the latest snapshot."""
-    user_id = (user_id or "").strip()
-    if not user_id:
-        raise HTTPException(status_code=400, detail="user_id_required")
+@router.get("/chain")
+async def chain_meta() -> Dict[str, Any]:
+    """
+    Return high-level chain metadata useful for UIs:
 
-    try:
-        proof = executor.get_merkle_proof(user_id)
-    except AttributeError:
-        raise HTTPException(
-            status_code=501, detail="merkle_proofs_not_implemented"
-        )
-    except KeyError:
-        raise HTTPException(status_code=404, detail="user_not_in_snapshot")
+    - height
+    - latest block header
+    - simple halving schedule hints
+    """
+    chain = _chain()
+    height = len(chain)
+    latest = chain[-1] if chain else None
 
-    return {"ok": True, "user_id": user_id, "proof": proof}
+    wc = getattr(executor, "wecoin", None)
+    max_supply = float(getattr(wc, "max_supply", MAX_SUPPLY)) if wc else MAX_SUPPLY
+    total_issued = float(getattr(wc, "total_issued", 0.0)) if wc else 0.0
+
+    return {
+        "ok": True,
+        "height": height,
+        "latest_block": latest,
+        "max_supply": max_supply,
+        "total_issued": total_issued,
+    }

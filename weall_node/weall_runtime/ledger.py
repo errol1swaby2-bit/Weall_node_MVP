@@ -17,47 +17,32 @@ reward is split evenly across the five reward pools:
     validators, jurors, creators, operators, treasury
 
 Within each pool, a weighted lottery picks one winner based on tickets
-recorded during that block/epoch.
+recorded during that block / epoch.
 
-This module is intentionally self-contained and pure-Python so it can
-run on low-end Termux / Android devices.
+Production invariants:
+
+- `total_issued` always equals the sum of all WeCoin actually credited.
+- No reward share is ever "lost": if a non-treasury pool has no winner,
+  its share is redirected to the treasury account.
 """
 
 from __future__ import annotations
 
-from dataclasses import dataclass, field
-from typing import Any, Dict, Optional
-
 import math
-import random
+from dataclasses import dataclass, field
+from typing import Dict, List, Optional, Tuple
 
 # ---------------------------------------------------------------------------
 # Monetary policy constants
 # ---------------------------------------------------------------------------
 
-TREASURY_ACCOUNT: str = "treasury"
-
-# Total coin supply (WeCoin) – capped like Bitcoin.
-MAX_SUPPLY: float = 21_000_000.0
-
-# Per-block base reward before halvings.
-INITIAL_BLOCK_REWARD: float = 100.0
-
-# Target time per block (10 minutes).
+MAX_SUPPLY: float = 21_000_000.0  # total WeCoin (WCN) that can ever exist
+INITIAL_BLOCK_REWARD: float = 100.0  # WCN per block at height 0
 BLOCK_INTERVAL_SECONDS: int = 600
 
 # Time between halvings (~2 years) and equivalent blocks-per-halving.
 HALVING_INTERVAL_SECONDS: int = 2 * 365 * 24 * 60 * 60  # 2 years
 BLOCKS_PER_HALVING: int = max(1, HALVING_INTERVAL_SECONDS // BLOCK_INTERVAL_SECONDS)
-
-# ---------------------------------------------------------------------------
-# Backwards-compat exports
-# ---------------------------------------------------------------------------
-
-# These names are imported by older modules (api/chain.py, etc.).  We keep
-# them as aliases so those modules continue to work without modification.
-INITIAL_EPOCH_REWARD: float = INITIAL_BLOCK_REWARD
-HALVING_INTERVAL: int = HALVING_INTERVAL_SECONDS
 
 # Default pool split (must sum to 1.0)
 DEFAULT_POOL_SPLIT: Dict[str, float] = {
@@ -90,6 +75,9 @@ def _normalize_pool_split(split: Dict[str, float]) -> Dict[str, float]:
     return cleaned
 
 
+TREASURY_ACCOUNT = "@weall_treasury"
+
+
 @dataclass
 class WeCoinLedger:
     """
@@ -114,50 +102,65 @@ class WeCoinLedger:
     # Monetary policy (can be overridden in tests or by future genesis wiring)
     max_supply: float = MAX_SUPPLY
     initial_block_reward: float = INITIAL_BLOCK_REWARD
-    blocks_per_halving: int = BLOCKS_PER_HALVING
+    block_interval_seconds: int = BLOCK_INTERVAL_SECONDS
+    halving_interval_seconds: int = HALVING_INTERVAL_SECONDS
 
-    # Pool configuration
-    pool_split: Dict[str, float] = field(default_factory=lambda: dict(DEFAULT_POOL_SPLIT))
-
-    # State
+    # Reward pools + balances
     balances: Dict[str, float] = field(default_factory=dict)
+    pool_split: Dict[str, float] = field(
+        default_factory=lambda: dict(DEFAULT_POOL_SPLIT)
+    )
     pools: Dict[str, Dict[str, set]] = field(
-        default_factory=lambda: {name: {"members": set()} for name in DEFAULT_POOL_SPLIT.keys()}
+        default_factory=lambda: {
+            name: {"members": set()} for name in DEFAULT_POOL_SPLIT.keys()
+        }
     )
     tickets: Dict[str, Dict[str, float]] = field(
         default_factory=lambda: {name: {} for name in DEFAULT_POOL_SPLIT.keys()}
     )
+
     total_issued: float = 0.0
-    last_block_height: int = -1
-    blocks_per_epoch: int = 0
 
     # ------------------------------------------------------------------
-    # Helpers
+    # Internal helpers
     # ------------------------------------------------------------------
-
-    def set_pool_split(self, split: Dict[str, float]) -> None:
-        """Override the pool split (values will be normalized to sum to 1.0)."""
-        normalized = _normalize_pool_split(split)
-        self.pool_split = normalized
-
-        # Ensure pools/tickets dictionaries cover the same keys
-        for name in list(self.pools.keys()):
-            if name not in normalized:
-                self.pools.pop(name, None)
-        for name in list(self.tickets.keys()):
-            if name not in normalized:
-                self.tickets.pop(name, None)
-        for name in normalized.keys():
-            self.pools.setdefault(name, {"members": set()})
-            self.tickets.setdefault(name, {})
 
     def _ensure_pool(self, pool: str) -> None:
-        if pool not in self.pool_split:
-            return
-        self.pools.setdefault(pool, {"members": set()})
-        self.tickets.setdefault(pool, {})
+        if pool not in self.pools:
+            self.pools[pool] = {"members": set()}
+        if pool not in self.tickets:
+            self.tickets[pool] = {}
 
-    def add_ticket(self, pool: str, account_id: str, weight: float = 1.0) -> None:
+    def set_pool_split(self, new_split: Dict[str, float]) -> None:
+        """
+        Update the reward pool split.
+
+        The executor or genesis wiring can call this to override the default
+        20/20/20/20/20 split. Values are normalized to sum to 1.0.
+        """
+        self.pool_split = _normalize_pool_split(new_split)
+
+        # Ensure pools/tickets dictionaries have entries for all pools
+        for name in self.pool_split.keys():
+            self._ensure_pool(name)
+
+    # ------------------------------------------------------------------
+    # Ticket management
+    # ------------------------------------------------------------------
+
+    def add_member(self, pool: str, account_id: str) -> None:
+        """
+        Record that an account is a member of a given rewards pool.
+
+        This is mostly a convenience method; the actual lottery uses tickets,
+        but we keep membership sets handy for potential future logic.
+        """
+        if not account_id:
+            return
+        self._ensure_pool(pool)
+        self.pools[pool]["members"].add(account_id)
+
+    def add_ticket(self, pool: str, account_id: str, weight: float) -> None:
         """
         Add a weighted ticket for an account in a given pool for the current lottery.
 
@@ -185,64 +188,89 @@ class WeCoinLedger:
         """
         Compute the base reward for a given block height, applying halvings.
 
-        Halvings occur every `blocks_per_halving` blocks.  After N halvings,
+        Halvings occur every `blocks_per_halving` blocks. After N halvings,
         the reward is INITIAL_BLOCK_REWARD / 2**N.
+
+        We also clamp the reward so that total_issued never exceeds max_supply.
         """
+        # Already at or above max supply: no more emission.
         if self.total_issued >= self.max_supply:
             return 0.0
 
-        height = max(0, int(block_height))
-        blocks_per_halving = max(1, int(self.blocks_per_halving or 1))
-        halvings = height // blocks_per_halving
-        reward = self.initial_block_reward / float(2 ** int(halvings))
+        blocks_per_halving = max(
+            1, self.halving_interval_seconds // self.block_interval_seconds
+        )
 
-        if reward <= 0.0:
+        if block_height < 0:
+            block_height = 0
+
+        halving_count = block_height // blocks_per_halving
+        base_reward = self.initial_block_reward / float(2**halving_count)
+
+        # No negative/zero rewards.
+        if base_reward <= 0:
             return 0.0
 
-        remaining = max(0.0, self.max_supply - self.total_issued)
-        if reward > remaining:
-            reward = remaining
-        return reward
-
-    def current_epoch_reward(self) -> float:
-        """
-        Backwards-compat helper for API modules that want a single number.
-
-        Approximate the epoch reward as:
-            epoch_reward ≈ current_block_reward * blocks_per_epoch
-
-        This method **does not** mutate state.
-        """
-        if self.blocks_per_epoch <= 0:
+        # Do not exceed remaining headroom to max_supply.
+        remaining = self.max_supply - self.total_issued
+        if remaining <= 0:
             return 0.0
-        # Use last seen block height (or height=0 if none yet).
-        h = self.last_block_height if self.last_block_height >= 0 else 0
-        per_block = self._current_block_reward(h)
-        return per_block * float(self.blocks_per_epoch)
 
-    # ------------------------------------------------------------------
-    # Distribution
-    # ------------------------------------------------------------------
+        return float(min(base_reward, remaining))
 
-    def _choose_weighted_winner(self, pool: str) -> Optional[str]:
-        """Pick a weighted random winner within a reward pool."""
-        tickets = self.tickets.get(pool) or {}
+    def _lottery_winner(
+        self, pool: str, tickets: Dict[str, float]
+    ) -> Optional[str]:
+        """
+        Deterministically pick a lottery winner from the tickets in a pool.
+
+        NOTE: For now, we just pick the highest-weight ticket. In the future,
+        we may wire this to a deterministic VRF or on-chain randomness beacon.
+        """
         if not tickets:
             return None
+        # Pick the account with the highest ticket weight
+        best_account, best_weight = None, -1.0
+        for account_id, weight in tickets.items():
+            try:
+                w = float(weight)
+            except Exception:
+                continue
+            if w > best_weight:
+                best_account, best_weight = account_id, w
+        return best_account
 
-        # Deterministic order for stable randomness in tests
-        items = list(tickets.items())
-        items.sort(key=lambda kv: kv[0])
+    def _weighted_random_choice(
+        self, items: List[Tuple[str, float]]
+    ) -> Optional[str]:
+        """
+        Placeholder for a future VRF-based lottery.
 
-        total_weight = sum(max(0.0, float(w)) for _, w in items)
-        if total_weight <= 0:
+        Right now, we do not call this method; _lottery_winner() simply picks
+        the highest-weight ticket. This exists to make it easy to switch to
+        a more principled lottery mechanism later.
+        """
+        if not items:
+            return None
+        total = 0.0
+        for _, w in items:
+            try:
+                total += float(w)
+            except Exception:
+                continue
+        if total <= 0:
             return None
 
-        r = random.random() * total_weight
+        # Very simple deterministic choice based on rounding cumulative weights.
+        # This is not cryptographically secure; it is a placeholder.
+        r = total / 2.0
         cumulative = 0.0
-        for account_id, weight in items:
-            w = max(0.0, float(weight))
-            cumulative += w
+        for account_id, w in items:
+            try:
+                fw = float(w)
+            except Exception:
+                continue
+            cumulative += fw
             if r <= cumulative:
                 return account_id
         # Fallback – should not normally reach here
@@ -265,25 +293,34 @@ class WeCoinLedger:
     # Epoch + block reward interfaces used by the executor
     # ------------------------------------------------------------------
 
-    def distribute_epoch_rewards(self, epoch: int, bootstrap_mode: bool = False) -> Dict[str, Optional[str]]:
+    def distribute_epoch_rewards(
+        self, epoch: int, bootstrap_mode: bool = False
+    ) -> Dict[str, Optional[str]]:
         """
         Backwards-compat shim.
 
         The executor calls this at epoch boundaries to log "epoch winners".
         To avoid double-minting, this method **does not** change balances.
         Instead, it returns, for each pool, the account with the highest
-        accumulated ticket weight (if any).  Callers can treat this as a
-        purely informational view.
+        ticket weight during that epoch.
+
+        In bootstrap_mode, it may return None for certain pools; the executor
+        can use that as a hint to avoid over-rewarding a single validator or
+        small cartel while the network is small.
         """
-        winners: Dict[str, Optional[str]] = {}
-        for pool, tickets in (self.tickets or {}).items():
+        results: Dict[str, Optional[str]] = {}
+        for pool, split in self.pool_split.items():
+            tickets = self.tickets.get(pool, {}) or {}
             if not tickets:
-                winners[pool] = None
+                results[pool] = None
                 continue
-            # Pick the account with max weight as the "epoch winner"
-            winner = max(tickets.items(), key=lambda kv: float(kv[1]))[0]
-            winners[pool] = winner
-        return winners
+            # In bootstrap mode, we *could* down-weight "too dominant" accounts;
+            # for now we simply pick the top ticket as in normal mode.
+            winner = self._lottery_winner(pool, tickets)
+            results[pool] = winner
+        # Note: we do **not** clear tickets or mint here; that is the job of
+        # distribute_block_rewards.
+        return results
 
     def distribute_block_rewards(
         self,
@@ -293,51 +330,75 @@ class WeCoinLedger:
         bootstrap_mode: bool = False,
     ) -> Dict[str, Optional[str]]:
         """
-        Per-block reward distribution across all pools.
+        Distribute WeCoin for a **single committed block**.
 
-        Called by the executor for every finalized block.  Uses the current
-        pool_split to carve the block reward into slices, then runs a
-        weighted lottery on tickets for each pool.
+        Called by the executor on each committed block with the current
+        block_height, epoch index, and blocks_per_epoch.
 
-        Returns a mapping of pool -> winner (or None if no winner).
+        For each reward pool:
+        - Compute the per-pool block reward = base_block_reward * pool_split[pool]
+        - Select a pool winner via tickets (if any)
+        - Credit the winner's balance
+        - If a non-treasury pool has no winner, its share is redirected to the
+          treasury account instead of being burned or lost.
+        - Reset tickets at the end of an epoch (so that the next epoch starts fresh)
+
+        Invariants:
+        - The total amount credited across all pools equals base_block_reward.
+        - total_issued is increased by exactly base_block_reward.
         """
-        self.last_block_height = max(self.last_block_height, int(block_height))
-        if blocks_per_epoch:
-            self.blocks_per_epoch = int(blocks_per_epoch)
-
-        reward = self._current_block_reward(block_height)
-        if reward <= 0.0:
-            return {}
-
-        # Bootstrap mode: send all rewards to treasury to avoid weird early skew.
-        if bootstrap_mode:
-            self.total_issued += reward
-            self._credit(TREASURY_ACCOUNT, reward)
-            return {pool: TREASURY_ACCOUNT for pool in self.pool_split.keys()}
-
-        # Normal operation: split reward across pools and pick winners
         winners: Dict[str, Optional[str]] = {}
-        self.total_issued += reward
 
-        for pool, fraction in self.pool_split.items():
-            pool_amount = reward * float(fraction or 0.0)
-            if pool_amount <= 0.0:
+        base_reward = self._current_block_reward(block_height)
+        if base_reward <= 0.0:
+            # No more emission – just clear tickets at epoch boundaries
+            if (block_height + 1) % max(1, blocks_per_epoch) == 0:
+                self.clear_tickets()
+            for pool in self.pool_split.keys():
                 winners[pool] = None
+            return winners
+
+        # Per-pool rewards (shares add up to base_reward by construction)
+        for pool, fraction in self.pool_split.items():
+            amount = base_reward * float(fraction)
+
+            # Treasury pool is special: it always credits the treasury account
+            if pool == "treasury":
+                self._credit(TREASURY_ACCOUNT, amount)
+                winners[pool] = TREASURY_ACCOUNT
                 continue
 
-            winner = self._choose_weighted_winner(pool)
-            if winner is None:
-                # No eligible tickets for this pool – route to treasury
-                winner = TREASURY_ACCOUNT
+            tickets = self.tickets.get(pool, {}) or {}
+            winner = None
+            if tickets:
+                winner = self._lottery_winner(pool, tickets)
 
-            winners[pool] = winner
-            self._credit(winner, pool_amount)
-            self._ensure_pool(pool)
-            self.pools[pool]["members"].add(winner)
+            if not winner:
+                # No valid winner for this pool → redirect share to treasury
+                self._credit(TREASURY_ACCOUNT, amount)
+                winners[pool] = TREASURY_ACCOUNT
+            else:
+                self._credit(winner, amount)
+                winners[pool] = winner
 
-        # Tickets are consumed after each block distribution
-        self.clear_tickets()
+        # Track issuance: all pool shares (including redirected ones) sum to base_reward
+        self.total_issued += base_reward
+
+        # End-of-epoch cleanup: reset tickets so next epoch starts fresh
+        if (block_height + 1) % max(1, blocks_per_epoch) == 0:
+            self.clear_tickets()
+
         return winners
+
+
+# ---------------------------------------------------------------------------
+# Backwards-compat exports
+# ---------------------------------------------------------------------------
+
+# These names are imported by older modules (api/chain.py, etc.). We keep
+# them as aliases so those modules continue to work without modification.
+INITIAL_EPOCH_REWARD: float = INITIAL_BLOCK_REWARD
+HALVING_INTERVAL: int = HALVING_INTERVAL_SECONDS
 
 
 # ---------------------------------------------------------------------------
@@ -352,4 +413,5 @@ class LedgerRuntime(WeCoinLedger):
     Existing code that imports LedgerRuntime will now use the same implementation
     as WeCoinLedger (block rewards, pool_split, balances, tickets, etc.).
     """
+
     pass

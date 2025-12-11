@@ -2,382 +2,531 @@
 <html lang="en">
 <head>
   <meta charset="utf-8" />
-  <title>WeAll – Onboarding</title>
+  <title>WeAll — Onboarding & Proof of Humanity</title>
   <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <link rel="icon" href="/frontend/favicon.svg" />
   <link rel="stylesheet" href="/frontend/style.css" />
-  <script src="/frontend/env.js"></script>
-  <script src="/frontend/auth.js"></script>
   <style>
     body {
       margin: 0;
-      padding: 1.4rem 1.1rem 1.8rem;
+      padding: 1.2rem 1.1rem 1.6rem;
       font-family: system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
-      background: radial-gradient(circle at top, #22c55e22 0, #020617 55%, #020617 100%);
+      background:
+        radial-gradient(circle at top, #22c55e22 0, #020617 55%, #020617 100%);
       color: #e5e7eb;
     }
+
     .wrap {
-      max-width: 980px;
+      max-width: 1040px;
       margin: 0 auto;
     }
-    header {
+
+    .page-header {
       display: flex;
+      flex-wrap: wrap;
       align-items: flex-start;
       justify-content: space-between;
-      gap: 0.8rem;
+      gap: 1rem;
       margin-bottom: 1.3rem;
     }
+
+    .page-header h1 {
+      margin: 0;
+      font-size: 1.4rem;
+      letter-spacing: 0.06em;
+      text-transform: uppercase;
+      color: #f9fafb;
+    }
+
+    .page-header .sub {
+      margin: 0.35rem 0 0;
+      font-size: 0.86rem;
+      color: #9ca3af;
+      max-width: 520px;
+    }
+
     .back-link {
-      font-size: 0.8rem;
+      font-size: 0.82rem;
       color: #9ca3af;
       text-decoration: none;
     }
-    .back-link:hover { text-decoration: underline; }
-    h1 {
-      margin: 0;
-      font-size: 1.4rem;
+    .back-link:hover {
+      text-decoration: underline;
+    }
+
+    .signed-in-banner {
+      font-size: 0.78rem;
       letter-spacing: 0.03em;
-    }
-    .sub {
-      margin: 0.1rem 0 0;
-      font-size: 0.82rem;
-      color: #9ca3af;
-    }
-    .pill {
-      border-radius: 999px;
-      padding: 6px 10px;
-      font-size: 0.8rem;
-      border: 1px solid rgba(148,163,184,0.6);
-      background: rgba(15,23,42,0.95);
-      color: #e5e7eb;
-    }
-    main {
-      display: grid;
-      grid-template-columns: minmax(0, 1.3fr) minmax(0, 1fr);
-      gap: 1rem;
-    }
-    @media (max-width: 840px) {
-      main { grid-template-columns: minmax(0, 1fr); }
-    }
-    .card {
-      background: rgba(15,23,42,0.96);
-      border-radius: 16px;
-      padding: 14px 14px 13px;
-      border: 1px solid rgba(148,163,184,0.4);
-      box-shadow: 0 18px 50px rgba(15,23,42,0.9);
-    }
-    .card h2 {
-      margin: 0 0 0.4rem;
-      font-size: 0.95rem;
-      letter-spacing: 0.08em;
       text-transform: uppercase;
       color: #9ca3af;
+      text-align: right;
     }
+    .signed-in-banner strong {
+      font-weight: 600;
+    }
+
+    main {
+      display: grid;
+      grid-template-columns: minmax(0, 1.5fr) minmax(0, 1.3fr);
+      gap: 1.1rem;
+    }
+
+    @media (max-width: 900px) {
+      main {
+        grid-template-columns: minmax(0, 1fr);
+      }
+    }
+
+    .card {
+      background:
+        radial-gradient(circle at top left, rgba(56,189,248,0.12), transparent 55%),
+        radial-gradient(circle at bottom right, rgba(34,197,94,0.16), transparent 50%),
+        rgba(15,23,42,0.96);
+      border-radius: 0.9rem;
+      border: 1px solid rgba(148,163,184,0.35);
+      padding: 1rem 1.05rem 1.2rem;
+      box-shadow:
+        0 18px 40px rgba(15,23,42,0.9),
+        0 0 0 1px rgba(15,23,42,0.92);
+    }
+
+    .card h2 {
+      margin: 0 0 0.35rem;
+      font-size: 0.96rem;
+      letter-spacing: 0.08em;
+      text-transform: uppercase;
+      color: #e5e7eb;
+    }
+
     .card p {
-      margin: 0.12rem 0;
+      margin: 0.15rem 0;
       font-size: 0.86rem;
       color: #cbd5f5;
     }
-    .tier-grid {
-      display: grid;
-      grid-template-columns: repeat(2, minmax(0, 1fr));
-      gap: 0.6rem;
-    }
-    @media (max-width: 660px) {
-      .tier-grid { grid-template-columns: minmax(0, 1fr); }
-    }
-    .tier-card {
-      border-radius: 14px;
-      padding: 10px 11px;
-      border: 1px solid rgba(148,163,184,0.5);
-      background: rgba(15,23,42,0.95);
-      position: relative;
-    }
-    .tier-title {
-      font-size: 0.9rem;
-      font-weight: 600;
-      margin-bottom: 3px;
-    }
-    .tier-tag {
+
+    .pill-small {
+      border-radius: 999px;
+      border: 1px solid rgba(148,163,184,0.8);
+      padding: 0.12rem 0.55rem;
+      font-size: 0.72rem;
+      text-transform: uppercase;
+      letter-spacing: 0.11em;
+      color: #e5e7eb;
       display: inline-flex;
       align-items: center;
-      gap: 6px;
-      border-radius: 999px;
-      padding: 3px 9px;
-      font-size: 0.72rem;
-      background: rgba(15,23,42,0.9);
-      border: 1px solid rgba(148,163,184,0.6);
+      gap: 0.3rem;
+      margin-bottom: 0.4rem;
     }
-    .tier-dot {
-      width: 8px;
-      height: 8px;
+
+    .pill-small .dot {
+      width: 0.4rem;
+      height: 0.4rem;
       border-radius: 999px;
-      background: #64748b;
+      background: #22c55e;
     }
-    .tier-dot.active { background: #22c55e; }
-    .tier-dot.future { background: #facc15; }
-    .tier-desc {
-      font-size: 0.82rem;
+
+    .metric-row {
+      display: flex;
+      justify-content: space-between;
+      align-items: baseline;
+      margin-top: 0.3rem;
+      font-size: 0.86rem;
+    }
+
+    .metric-key {
       color: #9ca3af;
-      margin-top: 3px;
     }
-    .step-list {
-      margin: 0.3rem 0 0;
-      padding-left: 1.05rem;
-      font-size: 0.82rem;
+
+    .metric-value {
       color: #e5e7eb;
+      font-weight: 500;
     }
-    .step-list li {
-      margin-bottom: 2px;
-    }
+
     .status {
+      margin-top: 0.45rem;
+      font-size: 0.8rem;
+      color: #9ca3af;
+    }
+    .status.ok { color: #4ade80; }
+    .status.err { color: #fb7185; }
+
+    .btn-row {
+      margin-top: 0.7rem;
+      display: flex;
+      flex-wrap: wrap;
+      gap: 0.5rem;
+    }
+
+    .btn {
+      border-radius: 999px;
+      border: 1px solid rgba(148,163,184,0.85);
+      padding: 0.45rem 0.95rem;
+      font-size: 0.8rem;
+      font-weight: 500;
+      text-transform: uppercase;
+      letter-spacing: 0.12em;
+      background: rgba(15,23,42,0.96);
+      color: #e5e7eb;
+      cursor: pointer;
+    }
+
+    .btn.primary {
+      border-color: rgba(34,197,94,0.9);
+      background: radial-gradient(circle at top left,
+                  rgba(34,197,94,0.5), rgba(15,23,42,0.98));
+      color: #ecfeff;
+    }
+
+    .btn:disabled {
+      opacity: 0.5;
+      cursor: default;
+    }
+
+    ul.tier-steps {
+      margin: 0.5rem 0 0;
+      padding-left: 1.1rem;
+      font-size: 0.85rem;
+      color: #cbd5f5;
+    }
+
+    ul.tier-steps li {
+      margin-bottom: 0.25rem;
+    }
+
+    .hint {
       margin-top: 0.5rem;
       font-size: 0.8rem;
       color: #9ca3af;
-      min-height: 1.2em;
     }
-    a {
-      color: #22c55e;
+
+    footer.weall-footer {
+      border-top: 1px solid rgba(31,41,55,0.9);
+      padding: 0.75rem 0.1rem 1.1rem;
+      margin-top: 1.6rem;
+      font-size: 0.78rem;
+      color: #6b7280;
+      text-align: center;
+    }
+
+    footer.weall-footer a {
+      color: #9ca3af;
       text-decoration: none;
     }
-    a:hover { text-decoration: underline; }
-    .rep-score {
-      font-size: 1.3rem;
-      font-weight: 600;
+
+    footer.weall-footer a:hover {
+      text-decoration: underline;
     }
   </style>
 </head>
 <body>
   <div class="wrap">
-    <header>
+    <header class="page-header">
+      <a href="/frontend/index.html" class="back-link">&larr; Back to Feed</a>
       <div>
-        <a href="/frontend/tiktok.html" class="back-link">&larr; Back to Feed</a>
-        <h1>Onboarding & Proof-of-Humanity</h1>
-        <p class="sub" id="onbUser">Checking session…</p>
+        <h1>Onboarding &amp; PoH</h1>
+        <p class="sub">
+          This page reflects your current Proof-of-Humanity (PoH) tier and
+          explains how Tier&nbsp;1 → Tier&nbsp;2 → Tier&nbsp;3 unfold in the
+          Genesis network. All checks run against your local node.
+        </p>
       </div>
-      <button class="pill" id="onbProfileBtn">Open profile</button>
+      <p id="signedIn" class="signed-in-banner">
+        Checking session…
+      </p>
     </header>
 
     <main>
-      <!-- Left: Your current status-->
+      <!-- Left: live PoH status from backend -->
       <section class="card">
-        <h2>Your status</h2>
-        <p id="onbPohLine">Loading PoH status…</p>
-        <p id="onbRepLine">Reputation: –</p>
-        <p class="status" id="onbStatus"></p>
+        <h2>Current PoH status</h2>
+        <p>
+          The node reports your active PoH record. In Genesis mode this is a
+          simple record in the node’s ledger; in production this becomes a
+          verifiable chain of decisions and liveness checks.
+        </p>
 
-        <div class="tier-grid" style="margin-top: 0.7rem;">
-          <div class="tier-card" id="tier0Card">
-            <div class="tier-title">Tier 0 – Guest</div>
-            <div class="tier-tag">
-              <span class="tier-dot" id="tier0Dot"></span>
-              <span>Default state</span>
-            </div>
-            <p class="tier-desc">
-              You can browse the feed and read public content, but you can’t create posts
-              or participate in governance.
-            </p>
-            <ul class="step-list">
-              <li>Step 1: <a href="/frontend/login.html">Create an account</a>.</li>
-            </ul>
-          </div>
-
-          <div class="tier-card" id="tier1Card">
-            <div class="tier-title">Tier 1 – Verified account</div>
-            <div class="tier-tag">
-              <span class="tier-dot" id="tier1Dot"></span>
-              <span>Required for posting & voting</span>
-            </div>
-            <p class="tier-desc">
-              Tier 1 lets you post to the feed and create or vote on proposals.
-            </p>
-            <ul class="step-list">
-              <li>Sign in and complete basic verification from your <a href="/frontend/profile.html">profile</a>.</li>
-            </ul>
-          </div>
-
-          <div class="tier-card" id="tier2Card">
-            <div class="tier-title">Tier 2 – Strong liveness</div>
-            <div class="tier-tag">
-              <span class="tier-dot" id="tier2Dot"></span>
-              <span>Higher trust</span>
-            </div>
-            <p class="tier-desc">
-              Tier 2 adds asynchronous liveness checks. This tier is preferred for operators
-              and heavier protocol access.
-            </p>
-            <ul class="step-list">
-              <li>Complete additional liveness steps when they are available in your region.</li>
-            </ul>
-          </div>
-
-          <div class="tier-card" id="tier3Card">
-            <div class="tier-title">Tier 3 – Juror-ready</div>
-            <div class="tier-tag">
-              <span class="tier-dot" id="tier3Dot"></span>
-              <span>Required for jurors & validators</span>
-            </div>
-            <p class="tier-desc">
-              Tier 3 includes juror-backed checks. It unlocks juror duties, validator
-              eligibility, and operator roles where reputation matters most.
-            </p>
-            <ul class="step-list">
-              <li>Once available, complete the juror onboarding flow and panel interview.</li>
-            </ul>
-          </div>
+        <div class="pill-small" id="tierPill">
+          <span class="dot"></span>
+          <span id="tierLabel">Tier –</span>
         </div>
+
+        <div class="metric-row">
+          <span class="metric-key">Tier</span>
+          <span class="metric-value" id="metricTier">–</span>
+        </div>
+        <div class="metric-row">
+          <span class="metric-key">Status</span>
+          <span class="metric-value" id="metricStatus">–</span>
+        </div>
+        <div class="metric-row">
+          <span class="metric-key">Last updated</span>
+          <span class="metric-value" id="metricUpdated">–</span>
+        </div>
+        <div class="metric-row">
+          <span class="metric-key">Juror-eligible</span>
+          <span class="metric-value" id="metricJurorEligible">–</span>
+        </div>
+
+        <div class="btn-row">
+          <button class="btn primary" id="btnRefreshPoh">
+            Refresh status
+          </button>
+          <button class="btn" id="btnOpenJuror">
+            Open juror console
+          </button>
+        </div>
+
+        <div class="status" id="pohStatus"></div>
       </section>
 
-      <!-- Right: How reputation fits in -->
+      <!-- Right: tier overview / education -->
       <section class="card">
-        <h2>Reputation & roles</h2>
+        <h2>PoH tiers overview</h2>
         <p>
-          Reputation is a separate score that grows with constructive participation and
-          shrinks when juror-backed disputes confirm harmful behavior. It never burns WCN,
-          only changes what you can access.
+          All rewards and most governance powers in WeAll are gated behind
+          Proof-of-Humanity. The tiers are intentionally slow and explicit
+          to keep Sybil attacks expensive and human spam low.
         </p>
-        <p style="margin-top:0.4rem;">
-          Current reputation:
-          <span class="rep-score" id="repScore">–</span>
-        </p>
-        <p class="status" id="repStatus"></p>
 
-        <p style="margin-top:0.5rem;">
-          Rough guidance:
-        </p>
-        <ul class="step-list">
-          <li>Any reputation: basic access after PoH Tier 1.</li>
-          <li>Higher reputation: better odds to join juror pools, validator sets, and operator roles.</li>
-          <li>Severe, juror-backed bans: your PoH record is marked as <strong>banned</strong>, and your access is removed, but your past WCN doesn’t disappear — it’s re-routed according to governance rules.</li>
+        <h3 style="margin-top:0.6rem;font-size:0.86rem;text-transform:uppercase;letter-spacing:0.08em;color:#e5e7eb;">
+          Tier 1 — Account bootstrap
+        </h3>
+        <ul class="tier-steps">
+          <li>Email-based account creation and basic liveness heuristics.</li>
+          <li>Eligible to use the feed, messaging, and basic governance.</li>
+          <li>Not yet eligible for juror or high-stakes roles.</li>
         </ul>
 
-        <p class="status" id="onbHint"></p>
+        <h3 style="margin-top:0.7rem;font-size:0.86rem;text-transform:uppercase;letter-spacing:0.08em;color:#e5e7eb;">
+          Tier 2 — Asynchronous liveness
+        </h3>
+        <ul class="tier-steps">
+          <li>Asynchronous video / selfie checks with rotating prompts.</li>
+          <li>Enables participation in higher-value reward tracks.</li>
+          <li>Can be orchestrated entirely by the node and juror panels.</li>
+        </ul>
+
+        <h3 style="margin-top:0.7rem;font-size:0.86rem;text-transform:uppercase;letter-spacing:0.08em;color:#e5e7eb;">
+          Tier 3 — Juror-grade verification
+        </h3>
+        <ul class="tier-steps">
+          <li>Live, multi-party juror verification with dispute history.</li>
+          <li>Unlocks juror rewards, recovery panel work, and sensitive roles.</li>
+          <li>Negative scores can eventually lock or delete the account.</li>
+        </ul>
+
+        <p class="hint">
+          This MVP page is intentionally read-only: it mirrors your current
+          PoH record. The actual Tier 2 / Tier 3 upgrade flows are mediated by
+          the disputes &amp; recovery subsystems using the same node API.
+        </p>
       </section>
     </main>
+
+    <footer class="weall-footer">
+      <span>© <span id="footer-year">2024</span> WeAll</span>
+      &nbsp;•&nbsp;<a href="/frontend/privacy.html">Privacy</a>
+      &nbsp;•&nbsp;<a href="/frontend/terms.html">Terms</a>
+    </footer>
   </div>
 
+  <script src="/frontend/env.js"></script>
+  <script src="/frontend/auth.js"></script>
+  <script src="/frontend/session.js"></script>
+  <script src="/frontend/nav.js"></script>
+  <script src="/frontend/footer.js"></script>
   <script>
-    (async function () {
+    (function () {
       const $ = (id) => document.getElementById(id);
 
       function apiBase() {
         return (window.ENV && window.ENV.VITE_API_BASE) || "";
       }
 
-      async function getReputation(userId) {
-        const res = await fetch(apiBase() + "/reputation/" + encodeURIComponent(userId), {
-          method: "GET",
-          headers: { "Accept": "application/json" },
-          credentials: "include"
-        });
-        let data = {};
-        try { data = await res.json(); } catch {}
+      async function jsonFetch(path, opts) {
+        const url = apiBase() + path;
+        const options = Object.assign(
+          {
+            headers: { Accept: "application/json" },
+            credentials: "include",
+          },
+          opts || {}
+        );
+        if (options.body && typeof options.body !== "string") {
+          options.headers["Content-Type"] =
+            options.headers["Content-Type"] || "application/json";
+          options.body = JSON.stringify(options.body);
+        }
+        const res = await fetch(url, options);
+        let data = null;
+        try {
+          data = await res.json();
+        } catch {
+          data = null;
+        }
         if (!res.ok) {
-          throw new Error(data.detail || data.error || "Request failed");
+          const msg =
+            (data && (data.detail || data.error || data.message)) ||
+            "Request failed with " + res.status;
+          throw new Error(msg);
         }
         return data;
       }
 
-      const onbUser = $("onbUser");
-      const onbPohLine = $("onbPohLine");
-      const onbRepLine = $("onbRepLine");
-      const onbStatus = $("onbStatus");
-      const repScoreEl = $("repScore");
-      const repStatus = $("repStatus");
-      const onbHint = $("onbHint");
+      function buildRoleBanner(userId, roles, nodeMeta, poh) {
+        const parts = [];
 
-      const tierDots = {
-        0: $("tier0Dot"),
-        1: $("tier1Dot"),
-        2: $("tier2Dot"),
-        3: $("tier3Dot")
-      };
+        const tier =
+          (roles && (roles.poh_tier ?? roles.pohTier)) ||
+          (poh && typeof poh.tier === "number" ? poh.tier : 0) ||
+          0;
+        const status = (poh && poh.status) || "ok";
 
-      const profileBtn = $("onbProfileBtn");
-      if (profileBtn) {
-        profileBtn.onclick = () => {
-          window.location.href = "/frontend/profile.html";
-        };
-      }
+        parts.push("PoH Tier " + tier + " (" + status + ")");
 
-      // Session + PoH
-      let userId = null;
-      try {
-        const sess = await weallAuth.getSession();
-        if (sess && sess.user_id) {
-          userId = sess.user_id;
-          onbUser.textContent = "Signed in as " + userId;
-        } else {
-          onbUser.textContent = "Not signed in. You’re viewing the public onboarding view.";
+        const flags = (roles && roles.flags) || {};
+        const caps = (roles && roles.capabilities) || [];
+        const tags = [];
+
+        if (flags.wants_creator || caps.includes("earn_creator_rewards")) {
+          tags.push("Creator");
         }
-      } catch {
-        onbUser.textContent = "Not signed in. You’re viewing the public onboarding view.";
-      }
-
-      if (!userId) {
-        onbPohLine.textContent = "PoH: Tier 0 (guest). Sign in to begin verification.";
-        onbRepLine.textContent = "Reputation: –";
-        onbStatus.textContent = "Create an account to start moving through Tier 1 and beyond.";
-        if (tierDots[0]) tierDots[0].classList.add("active");
-        if (tierDots[1]) tierDots[1].classList.add("future");
-        if (tierDots[2]) tierDots[2].classList.add("future");
-        if (tierDots[3]) tierDots[3].classList.add("future");
-        repStatus.textContent = "Reputation will start tracking once you have a verified account.";
-        onbHint.textContent = "Next step: open the login page, pick a handle, and sign in.";
-        return;
-      }
-
-      // We have a user; load PoH
-      try {
-        const poh = await weallAuth.getPohMe();
-        const tier = typeof poh.tier === "number" ? poh.tier : 0;
-        const status = (poh.status || "ok").toLowerCase();
-        const pohId = poh.poh_id || userId;
-
-        onbPohLine.textContent =
-          "PoH: Tier " + tier + " (" + status + "), linked to " + pohId + ".";
-
-        if (status === "banned") {
-          onbStatus.textContent =
-            "Your PoH record is banned. You can’t advance tiers or access most protocol features.";
-        } else if (status === "suspended") {
-          onbStatus.textContent =
-            "Your PoH record is temporarily suspended. Some actions may be blocked.";
-        } else {
-          onbStatus.textContent =
-            "You can move up tiers as verification pipelines come online.";
+        if (flags.wants_juror || caps.includes("serve_juror_panel")) {
+          tags.push("Juror");
+        }
+        if (flags.wants_validator || caps.includes("validator_duties")) {
+          tags.push("Validator");
+        }
+        if (flags.wants_operator || caps.includes("operator_duties")) {
+          tags.push("Operator");
+        }
+        if (flags.wants_emissary || caps.includes("act_as_emissary")) {
+          tags.push("Emissary");
         }
 
-        Object.keys(tierDots).forEach((k) => {
-          const dot = tierDots[k];
-          if (!dot) return;
-          dot.classList.remove("active", "future");
-        });
-        const curDot = tierDots[tier] || tierDots[0];
-        if (curDot) curDot.classList.add("active");
-        [1, 2, 3].forEach((t) => {
-          if (t > tier && tierDots[t]) tierDots[t].classList.add("future");
-        });
-      } catch (e) {
-        onbPohLine.textContent = "Failed to load PoH status: " + e.message;
-        onbStatus.textContent = "";
+        if (tags.length) {
+          parts.push(tags.join(" · "));
+        }
+
+        const nodeKind = (nodeMeta && nodeMeta.node_kind) || "public_gateway";
+        if (nodeKind === "validator_node") {
+          parts.push("Validator node");
+        } else if (nodeKind === "private_node") {
+          parts.push("Private node");
+        } else {
+          parts.push("Gateway node");
+        }
+
+        return "Signed in as " + userId + " · " + parts.join(" · ");
       }
 
-      // Reputation
-      try {
-        const data = await getReputation(userId);
-        const rep = typeof data.reputation === "number" ? data.reputation : 0;
-        repScoreEl.textContent = rep.toFixed(2);
-        onbRepLine.textContent = "Reputation: " + rep.toFixed(2);
-        repStatus.textContent =
-          "Higher reputation will unlock juror, validator, and operator roles as the protocol matures.";
-        onbHint.textContent =
-          "Next step: participate constructively — post, vote, and help moderate where appropriate.";
-      } catch (e) {
-        repScoreEl.textContent = "–";
-        onbRepLine.textContent = "Reputation: unavailable.";
-        repStatus.textContent = "Unable to load reputation: " + e.message;
-        onbHint.textContent =
-          "You can still use core features while the node’s reputation module is warming up.";
+      async function hydrateHeaderAndPoh() {
+        const bannerEl = $("signedIn");
+        const statusEl = $("pohStatus");
+
+        try {
+          const sess = await weallAuth.getSession();
+          if (!sess || !sess.user_id) {
+            if (bannerEl) bannerEl.textContent = "Not signed in.";
+            if (statusEl) {
+              statusEl.textContent = "Please log in to see your PoH status.";
+              statusEl.className = "status err";
+            }
+            return null;
+          }
+
+          const [poh, roles, nodeMeta] = await Promise.all([
+            weallAuth.getPohMe().catch(() => null),
+            jsonFetch("/roles/effective/me", {
+              headers: { "X-WeAll-User": sess.user_id },
+            }).catch(() => null),
+            jsonFetch("/node/meta").catch(() => null),
+          ]);
+
+          if (bannerEl) {
+            bannerEl.textContent = buildRoleBanner(
+              sess.user_id,
+              roles,
+              nodeMeta,
+              poh
+            );
+          }
+
+          // Hydrate PoH card
+          const tier = poh && typeof poh.tier === "number" ? poh.tier : 0;
+          const pohStatus = (poh && poh.status) || "unknown";
+          const updatedAt = poh && poh.updated_at
+            ? new Date(poh.updated_at * 1000).toLocaleString()
+            : "–";
+
+          const metricTier = $("metricTier");
+          const metricStatus = $("metricStatus");
+          const metricUpdated = $("metricUpdated");
+          const metricJuror = $("metricJurorEligible");
+          const tierLabel = $("tierLabel");
+
+          if (metricTier) metricTier.textContent = String(tier || "0");
+          if (metricStatus) metricStatus.textContent = pohStatus;
+          if (metricUpdated) metricUpdated.textContent = updatedAt;
+          if (tierLabel) tierLabel.textContent = "Tier " + (tier || "0");
+
+          const jurorEligible = tier >= 3 && pohStatus === "ok";
+          if (metricJuror) {
+            metricJuror.textContent = jurorEligible
+              ? "Yes (Tier 3, status ok)"
+              : "No (requires Tier 3 & good standing)";
+          }
+
+          if (statusEl) {
+            statusEl.textContent = "Status from node /poh/me and roles profile.";
+            statusEl.className = "status ok";
+          }
+
+          return { sess, poh, roles, nodeMeta };
+        } catch (err) {
+          console.error("hydrateHeaderAndPoh error:", err);
+          if (bannerEl) bannerEl.textContent = "Unable to load session.";
+          if (statusEl) {
+            statusEl.textContent = "Failed to load PoH status: " + err.message;
+            statusEl.className = "status err";
+          }
+          return null;
+        }
+      }
+
+      function wireButtons() {
+        const refreshBtn = $("btnRefreshPoh");
+        const jurorBtn = $("btnOpenJuror");
+
+        if (refreshBtn) {
+          refreshBtn.addEventListener("click", () => {
+            hydrateHeaderAndPoh();
+          });
+        }
+
+        if (jurorBtn) {
+          jurorBtn.addEventListener("click", () => {
+            window.location.href = "/frontend/juror.html";
+          });
+        }
+      }
+
+      async function init() {
+        // Require at least Tier 1 (basic account) to see onboarding details
+        const ok = await weallAuth.require({
+          minTier: 1,
+          redirectToLogin: "/frontend/login.html",
+        });
+        if (!ok) return;
+
+        wireButtons();
+        await hydrateHeaderAndPoh();
+      }
+
+      if (document.readyState === "loading") {
+        document.addEventListener("DOMContentLoaded", init);
+      } else {
+        init();
       }
     })();
   </script>

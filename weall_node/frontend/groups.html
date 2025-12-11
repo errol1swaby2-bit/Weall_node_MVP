@@ -1,356 +1,1291 @@
-<!DOCTYPE html>
+<!doctype html>
 <html lang="en">
 <head>
-<meta charset="UTF-8">
-<title>WeAll • Groups, Emissaries, Proposals & Treasury</title>
-<meta name="viewport" content="width=device-width, initial-scale=1">
-<style>
-  :root { --bg:#0b0d10; --card:#0f1319; --line:#16202b; --ink:#e8eef7; --mut:#a8b3c2; --btn:#1f2937; --btnh:#374151; --ok:#49d49d; --warn:#f6c56c; --err:#ff7f7f; }
-  html,body { height:100% }
-  body{margin:0;font-family:system-ui,-apple-system,Segoe UI,Roboto,Arial,Helvetica,sans-serif;background:var(--bg);color:var(--ink)}
-  header{padding:12px 16px;border-bottom:1px solid var(--line);background:#0e1218}
-  h2{margin:0;font-size:18px}
-  main{display:grid;grid-template-columns:360px 1fr;gap:12px;padding:12px}
-  .card{background:var(--card);border:1px solid var(--line);border-radius:12px;padding:12px}
-  label{display:block;font-size:12px;color:var(--mut);margin:8px 0 4px}
-  input,textarea,select,button{width:100%;background:#0c1117;color:var(--ink);border:1px solid #223243;border-radius:8px;padding:8px 10px}
-  textarea{min-height:70px}
-  button{cursor:pointer;background:var(--btn);border-color:#2b3a4a}
-  button:hover{background:var(--btnh)}
-  .row{display:flex;gap:8px;align-items:center}
-  .row>*{flex:1}
-  .pill{display:inline-block;font-size:11px;padding:2px 6px;border-radius:999px;border:1px solid #243242;background:#0c1117;margin:2px 6px 2px 0}
-  .mut{color:var(--mut)} .ok{color:var(--ok)} .warn{color:var(--warn)} .err{color:var(--err)}
-  .grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(260px,1fr));gap:10px}
-  .kvs{font-family:ui-monospace,Menlo,Consolas,monospace;background:#0a0c10;border:1px solid #223243;border-radius:8px;padding:8px;font-size:12px;white-space:pre-wrap;word-break:break-word}
-  .section{margin-bottom:12px}
-  .list{display:grid;grid-template-columns:repeat(auto-fit,minmax(280px,1fr));gap:10px}
-  .tag{display:inline-block;border:1px solid #314457;border-radius:10px;font-size:11px;padding:2px 6px;margin-right:6px}
-  details > summary { cursor:pointer; }
-</style>
-  <script src="env.js"></script>
-  <script src="api_shim.js"></script>
+  <meta charset="utf-8" />
+  <title>WeAll — Groups, Emissaries & Treasury</title>
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <link rel="icon" href="/frontend/favicon.svg" />
+  <link rel="stylesheet" href="/frontend/style.css" />
+  <style>
+    body {
+      margin: 0;
+      padding: 1.2rem 1.1rem 1.6rem;
+      font-family: system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+      background:
+        radial-gradient(circle at top, #22c55e22 0, #020617 55%, #020617 100%);
+      color: #e5e7eb;
+    }
+
+    .wrap {
+      max-width: 1120px;
+      margin: 0 auto;
+    }
+
+    .page-header {
+      display: flex;
+      flex-wrap: wrap;
+      align-items: flex-start;
+      justify-content: space-between;
+      gap: 1rem;
+      margin-bottom: 1.3rem;
+    }
+
+    .page-header h1 {
+      margin: 0;
+      font-size: 1.4rem;
+      letter-spacing: 0.06em;
+      text-transform: uppercase;
+      color: #f9fafb;
+    }
+
+    .page-header .sub {
+      margin: 0.35rem 0 0;
+      font-size: 0.86rem;
+      color: #9ca3af;
+      max-width: 540px;
+    }
+
+    .back-link {
+      font-size: 0.82rem;
+      color: #9ca3af;
+      text-decoration: none;
+    }
+    .back-link:hover {
+      text-decoration: underline;
+    }
+
+    .signed-in-banner {
+      font-size: 0.78rem;
+      letter-spacing: 0.03em;
+      text-transform: uppercase;
+      color: #9ca3af;
+      text-align: right;
+    }
+
+    main {
+      display: grid;
+      grid-template-columns: minmax(0, 1.2fr) minmax(0, 1.6fr);
+      gap: 1.1rem;
+    }
+
+    @media (max-width: 960px) {
+      main {
+        grid-template-columns: minmax(0, 1fr);
+      }
+    }
+
+    .card {
+      background:
+        radial-gradient(circle at top left, rgba(56,189,248,0.14), transparent 55%),
+        radial-gradient(circle at bottom right, rgba(34,197,94,0.18), transparent 50%),
+        rgba(15,23,42,0.96);
+      border-radius: 0.9rem;
+      border: 1px solid rgba(148,163,184,0.35);
+      padding: 1rem 1.05rem 1.2rem;
+      box-shadow:
+        0 18px 40px rgba(15,23,42,0.9),
+        0 0 0 1px rgba(15,23,42,0.92);
+    }
+
+    .card h2 {
+      margin: 0 0 0.4rem;
+      font-size: 0.96rem;
+      letter-spacing: 0.08em;
+      text-transform: uppercase;
+      color: #e5e7eb;
+    }
+
+    .card h3 {
+      margin: 0.7rem 0 0.4rem;
+      font-size: 0.9rem;
+      letter-spacing: 0.08em;
+      text-transform: uppercase;
+      color: #e5e7eb;
+    }
+
+    .card p {
+      margin: 0.15rem 0;
+      font-size: 0.86rem;
+      color: #cbd5f5;
+    }
+
+    label {
+      display: block;
+      font-size: 0.78rem;
+      text-transform: uppercase;
+      letter-spacing: 0.08em;
+      color: #9ca3af;
+      margin: 0.6rem 0 0.15rem;
+    }
+
+    input, textarea, select {
+      width: 100%;
+      border-radius: 0.6rem;
+      border: 1px solid rgba(30,41,59,0.9);
+      padding: 0.45rem 0.6rem;
+      background: rgba(15,23,42,0.98);
+      color: #e5e7eb;
+      font-size: 0.9rem;
+      outline: none;
+    }
+    input:focus, textarea:focus, select:focus {
+      border-color: #38bdf8;
+      box-shadow: 0 0 0 1px rgba(56,189,248,0.6);
+    }
+    textarea {
+      min-height: 78px;
+      resize: vertical;
+    }
+
+    .row {
+      display: flex;
+      gap: 0.5rem;
+      align-items: center;
+      flex-wrap: wrap;
+    }
+    .row > * {
+      flex: 1;
+      min-width: 0;
+    }
+
+    .btn {
+      border-radius: 999px;
+      border: 1px solid rgba(148,163,184,0.85);
+      padding: 0.42rem 0.9rem;
+      font-size: 0.8rem;
+      font-weight: 500;
+      text-transform: uppercase;
+      letter-spacing: 0.12em;
+      background: rgba(15,23,42,0.96);
+      color: #e5e7eb;
+      cursor: pointer;
+      flex: 0 0 auto;
+    }
+    .btn.primary {
+      border-color: rgba(34,197,94,0.9);
+      background: radial-gradient(circle at top left,
+                  rgba(34,197,94,0.5), rgba(15,23,42,0.98));
+      color: #ecfeff;
+    }
+    .btn.small {
+      padding: 0.3rem 0.7rem;
+      font-size: 0.76rem;
+    }
+    .btn:disabled {
+      opacity: 0.5;
+      cursor: default;
+    }
+
+    .pill {
+      display: inline-flex;
+      align-items: center;
+      gap: 0.3rem;
+      font-size: 0.72rem;
+      padding: 0.1rem 0.55rem;
+      border-radius: 999px;
+      border: 1px solid rgba(148,163,184,0.85);
+      text-transform: uppercase;
+      letter-spacing: 0.08em;
+      color: #e5e7eb;
+    }
+    .pill .dot {
+      width: 0.38rem;
+      height: 0.38rem;
+      border-radius: 999px;
+      background: #22c55e;
+    }
+    .pill.muted {
+      border-color: rgba(75,85,99,0.9);
+      color: #9ca3af;
+    }
+
+    .section {
+      margin-top: 0.9rem;
+      padding-top: 0.5rem;
+      border-top: 1px dashed rgba(31,41,55,0.9);
+    }
+
+    .groups-list {
+      margin-top: 0.4rem;
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(240px, 1fr));
+      gap: 0.55rem;
+    }
+    .group-card {
+      border-radius: 0.75rem;
+      border: 1px solid rgba(31,41,55,0.95);
+      background: rgba(15,23,42,0.98);
+      padding: 0.55rem 0.65rem 0.65rem;
+      font-size: 0.84rem;
+    }
+    .group-card-title {
+      display: flex;
+      justify-content: space-between;
+      gap: 0.4rem;
+      align-items: center;
+      margin-bottom: 0.2rem;
+      font-weight: 600;
+      color: #e5e7eb;
+    }
+
+    .group-card-id {
+      font-size: 0.72rem;
+      color: #9ca3af;
+      max-width: 8rem;
+      overflow: hidden;
+      text-overflow: ellipsis;
+      white-space: nowrap;
+    }
+
+    .group-card-desc {
+      font-size: 0.8rem;
+      color: #cbd5f5;
+      margin-bottom: 0.2rem;
+    }
+
+    .tag-row {
+      margin: 0.1rem 0 0.25rem;
+    }
+    .tag {
+      display: inline-block;
+      border-radius: 999px;
+      border: 1px solid rgba(51,65,85,0.9);
+      padding: 0.06rem 0.45rem;
+      font-size: 0.72rem;
+      color: #9ca3af;
+      margin: 0 0.25rem 0.18rem 0;
+    }
+
+    .group-card-meta {
+      font-size: 0.76rem;
+      color: #9ca3af;
+      margin-bottom: 0.2rem;
+    }
+
+    .json-box {
+      margin-top: 0.5rem;
+      border-radius: 0.65rem;
+      border: 1px solid rgba(15,23,42,0.9);
+      background: rgba(15,23,42,0.98);
+      padding: 0.45rem 0.6rem;
+      font-family: ui-monospace, Menlo, Consolas, monospace;
+      font-size: 0.78rem;
+      white-space: pre-wrap;
+      word-break: break-word;
+      max-height: 260px;
+      overflow: auto;
+      color: #e5e7eb;
+    }
+
+    .status {
+      margin-top: 0.4rem;
+      font-size: 0.78rem;
+      color: #9ca3af;
+    }
+    .status.ok { color: #4ade80; }
+    .status.err { color: #fb7185; }
+
+    details {
+      margin-top: 0.6rem;
+      border-radius: 0.65rem;
+      border: 1px solid rgba(31,41,55,0.95);
+      background: rgba(15,23,42,0.96);
+      padding: 0.45rem 0.6rem 0.6rem;
+    }
+
+    details > summary {
+      cursor: pointer;
+      list-style: none;
+      font-size: 0.83rem;
+      font-weight: 500;
+      color: #e5e7eb;
+    }
+    details > summary::-webkit-details-marker {
+      display: none;
+    }
+
+    details[open] {
+      border-color: rgba(56,189,248,0.75);
+    }
+
+    footer.weall-footer {
+      border-top: 1px solid rgba(31,41,55,0.9);
+      padding: 0.75rem 0.1rem 1.1rem;
+      margin-top: 1.6rem;
+      font-size: 0.78rem;
+      color: #6b7280;
+      text-align: center;
+    }
+    footer.weall-footer a {
+      color: #9ca3af;
+      text-decoration: none;
+    }
+    footer.weall-footer a:hover {
+      text-decoration: underline;
+    }
+  </style>
 </head>
 <body>
-<div id="toast" role="status" aria-live="polite"></div>
-<header>
-  <h2>WeAll • Groups → Emissaries (≤5) → Polls/Proposals → Treasury (multisig)</h2>
-</header>
-
-<main>
-  <!-- LEFT: identity and group mgmt -->
-  <section class="card">
-    <h3>Your Identity</h3>
-    <label>Account ID</label>
-    <input id="acct" placeholder="acct_..." />
-    <div class="row" style="margin-top:6px">
-      <button id="btnPoh" class="inline" style="width:auto">Check PoH</button>
-      <span id="tierBadge" class="pill">tier: ?</span>
-    </div>
-    <div id="pohBox" class="kvs" style="margin-top:8px"></div>
-
-    <div class="section" style="margin-top:12px">
-      <h3>Create Group</h3>
-      <label>Name</label><input id="gName" placeholder="e.g., Commons Builders" />
-      <label>Description</label><textarea id="gDesc" placeholder="What is this group about?"></textarea>
-      <label>Tags (comma-separated)</label><input id="gTags" placeholder="commons, dev, arts" />
-      <label>Visibility</label>
-      <select id="gVis">
-        <option value="public">public</option>
-        <option value="private">private</option>
-      </select>
-      <button id="btnCreate" style="margin-top:6px">Create</button>
-    </div>
-
-    <div class="section" style="margin-top:12px">
-      <h3>My Groups</h3>
-      <div class="row">
-        <button id="btnList">Refresh</button>
+  <div class="wrap">
+    <header class="page-header">
+      <a href="/frontend/index.html" class="back-link">&larr; Back to Feed</a>
+      <div>
+        <h1>Groups &amp; Emissaries</h1>
+        <p class="sub">
+          This page surfaces the Genesis groups flow: create groups, join/leave,
+          manage emissaries and multisig, and inspect polls, proposals, and
+          treasury for your selected group.
+        </p>
       </div>
-      <div id="myGroups" class="list" style="margin-top:8px"></div>
-    </div>
-  </section>
+      <p id="signedIn" class="signed-in-banner">Checking session…</p>
+    </header>
 
-  <!-- RIGHT: selected group details -->
-  <section class="card">
-    <h3>Group</h3>
-    <div class="row">
-      <input id="selGroupId" placeholder="group_id..." />
-      <button id="btnLoad">Load</button>
-      <button id="btnJoin">Join</button>
-      <button id="btnLeave">Leave</button>
-    </div>
-    <div id="groupBox" class="kvs" style="margin-top:8px"></div>
+    <main>
+      <!-- LEFT: identity + groups management -->
+      <section class="card">
+        <h2>Identity &amp; groups</h2>
+        <p>
+          Your account is pulled from the current auth session and re-used
+          across all group actions. You can override the account id if you
+          are testing flows locally.
+        </p>
 
-    <details open class="section" style="margin-top:12px">
-      <summary><strong>Emissaries (up to 5 seats)</strong></summary>
-      <div class="row" style="margin-top:6px">
-        <input id="emNominee" placeholder="candidate_account_id" />
-        <button id="btnNominate">Nominate</button>
-      </div>
-      <div class="row">
-        <input id="emBallot" placeholder="ranked list: acct1,acct2,..." />
-        <button id="btnBallot">Submit Ranked Ballot</button>
-      </div>
-      <div id="emissaryBox" class="kvs" style="margin-top:8px"></div>
-    </details>
+        <div class="section">
+          <h3>Your identity</h3>
+          <label for="acct">Account ID</label>
+          <input id="acct" placeholder="@handle or account id" />
 
-    <details class="section">
-      <summary><strong>Multisig (proposal execution gate)</strong></summary>
-      <div class="row" style="margin-top:6px">
-        <input id="msSigners" placeholder="signers: acct1,acct2,..." />
-        <input id="msThresh" placeholder="threshold (e.g. 3)" />
-      </div>
-      <button id="btnMultisigSet" style="margin-top:6px">Set Multisig</button>
-      <div id="msBox" class="kvs" style="margin-top:8px"></div>
-    </details>
+          <div class="row" style="margin-top:0.5rem">
+            <button id="btnPoh" class="btn small">Check PoH</button>
+            <span class="pill muted" id="tierBadge">
+              <span class="dot"></span>
+              <span>tier: ?</span>
+            </span>
+          </div>
 
-    <details class="section">
-      <summary><strong>Polls (IRV/RCV single-winner)</strong></summary>
-      <label>Title</label><input id="plTitle" placeholder="e.g., Choose facilitator" />
-      <label>Options (comma-separated account IDs or labels)</label><input id="plOptions" placeholder="acct1,acct2,acct3" />
-      <div class="row"><button id="btnPollCreate">Create Poll</button><button id="btnPollList">List Polls</button></div>
-      <div class="row"><input id="plVotePoll" placeholder="poll_id" /><input id="plRanking" placeholder="ranked: opt1,opt2,..." /><button id="btnPollVote">Vote</button></div>
-      <div id="pollBox" class="kvs" style="margin-top:8px"></div>
-    </details>
+          <div id="pohBox" class="json-box" style="margin-top:0.45rem">
+            PoH status will appear here.
+          </div>
+        </div>
 
-    <details class="section">
-      <summary><strong>Proposals (budget + execution)</strong></summary>
-      <label>Title</label><input id="prTitle" placeholder="e.g., Fund community tooling" />
-      <label>Summary</label><textarea id="prSummary" placeholder="Short description"></textarea>
-      <label>Budget (number)</label><input id="prBudget" placeholder="100.0" />
-      <label>Payload (JSON)</label><textarea id="prPayload" placeholder='{"action":"grant","target":"acct_x"}'></textarea>
-      <div class="row"><button id="btnPropCreate">Create Proposal</button><button id="btnPropList">List Proposals</button></div>
-      <div class="row"><input id="prVoteId" placeholder="proposal_id" />
-        <select id="prVoteChoice"><option>yes</option><option>no</option><option>abstain</option></select>
-        <button id="btnPropVote">Vote</button></div>
-      <div class="row"><input id="prExecId" placeholder="proposal_id (passed)" /><button id="btnPropExec">Execute (multisig)</button></div>
-      <div id="propBox" class="kvs" style="margin-top:8px"></div>
-    </details>
+        <div class="section">
+          <h3>Create group</h3>
+          <label for="gName">Name</label>
+          <input id="gName" placeholder="e.g., Commons Builders" />
 
-    <details class="section">
-      <summary><strong>Treasury</strong></summary>
-      <div class="row"><button id="btnTreasuryInfo">Node Treasury</button><button id="btnGroupTreasury">Group Treasury</button></div>
-      <div id="treBox" class="kvs" style="margin-top:8px"></div>
-    </details>
-  </section>
-</main>
+          <label for="gDesc">Description</label>
+          <textarea id="gDesc" placeholder="What is this group about?"></textarea>
 
-<script>
-(() => {
-  const $ = s => document.querySelector(s);
-  const J = (x) => JSON.stringify(x,null,2);
+          <label for="gTags">Tags (comma-separated)</label>
+          <input id="gTags" placeholder="commons, dev, arts" />
 
-  async function post(url, body){
-    const r=await fetch(url,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(body||{})});
-    const t=await r.text(); let j={}; try{ j=t?JSON.parse(t):{}; }catch{ j={raw:t}; }
-    if(!r.ok) throw new Error(j.error||String(r.status)); return j;
-  }
-  async function get(url){ const r=await fetch(url); if(!r.ok) throw new Error(String(r.status)); return r.json(); }
+          <label for="gVis">Visibility</label>
+          <select id="gVis">
+            <option value="public">public</option>
+            <option value="private">private</option>
+          </select>
 
-  // ----- Identity / PoH -----
-  async function pohStatus(){
-    const acct = $('#acct').value.trim(); if(!acct){ $('#pohBox').textContent='Enter account id'; return; }
-    try{
-      const r = await getJSON();
-      $('#tierBadge').textContent = `tier: ${r.tier}`;
-      $('#pohBox').textContent = J(r);
-    }catch(e){ $('#tierBadge').textContent='tier: ?'; $('#pohBox').textContent='Error: '+e.message; }
-  }
+          <div class="row" style="margin-top:0.6rem">
+            <button id="btnCreate" class="btn primary">Create group</button>
+          </div>
+        </div>
 
-  // ----- Groups: list/create/load/join/leave -----
-  async function groupsList(){
-    const res = await get('/groups/list');
-    const acct = $('#acct').value.trim();
-    const box = $('#myGroups'); box.innerHTML='';
-    for(const g of (res.groups||[])){
-      const div=document.createElement('div'); div.className='card';
-      const isMember = (g.members||[]).includes(acct);
-      div.innerHTML = `
-        <div><strong>${g.name}</strong> <span class="pill">${g.id}</span></div>
-        <div class="mut">${g.description||''}</div>
-        <div>${(g.tags||[]).map(t=>`<span class="tag">${t}</span>`).join('')}</div>
-        <div class="mut">members: ${(g.members||[]).length} • status: ${g.status}</div>
-        <div style="margin-top:6px"><button data-gid="${g.id}" class="btnSel">Select</button>
-        ${isMember?'<span class="pill ok">member</span>':''}</div>`;
-      box.appendChild(div);
-    }
-    box.querySelectorAll('.btnSel').forEach(b=>{
-      b.onclick = ()=>{ $('#selGroupId').value = b.getAttribute('data-gid'); loadGroup(); };
-    });
-  }
+        <div class="section">
+          <h3>My groups</h3>
+          <div class="row" style="margin-bottom:0.4rem">
+            <button id="btnList" class="btn small">Refresh</button>
+          </div>
+          <div id="myGroups" class="groups-list"></div>
+        </div>
+      </section>
 
-  async function groupCreate(){
-    const acct=$('#acct').value.trim(); if(!acct) return alert('Enter account id first');
-    const name=$('#gName').value.trim(); if(!name) return alert('Name required');
-    const desc=$('#gDesc').value.trim();
-    const tags=($('#gTags').value||'').split(',').map(s=>s.trim()).filter(Boolean);
-    const vis=$('#gVis').value;
-    const r = await post('/groups/create',{name: name, description: desc, tags, visibility: vis, created_by: acct});
-    $('#selGroupId').value = r.group.id;
-    await groupsList(); await loadGroup();
-  }
+      <!-- RIGHT: selected group + emissaries, multisig, polls, proposals, treasury -->
+      <section class="card">
+        <h2>Selected group</h2>
+        <p>
+          Group-level actions (emissaries, polls, proposals, treasury) all
+          operate on the current <strong>Group ID</strong> below.
+        </p>
 
-  async function loadGroup(){
-    const gid=$('#selGroupId').value.trim(); if(!gid) return;
-    const r = await post('/groups/get',{group_id:gid});
-    $('#groupBox').textContent = J(r.group||r);
-    // preload emissary + multisig + polls + proposals summaries if available
-    await emissaryStatus();
-    await multisigShow();
-    await pollsList();
-    await propsList();
-  }
+        <div class="row" style="margin-top:0.4rem">
+          <input id="selGroupId" placeholder="group_id…" />
+          <button id="btnLoad" class="btn small">Load</button>
+          <button id="btnJoin" class="btn small">Join</button>
+          <button id="btnLeave" class="btn small">Leave</button>
+        </div>
 
-  async function joinGroup(){
-    const acct=$('#acct').value.trim(); if(!acct) return alert('Enter account id');
-    const gid=$('#selGroupId').value.trim(); if(!gid) return alert('Enter group id');
-    const r = await post('/groups/join',{group_id:gid, account_id:acct});
-    await loadGroup(); await groupsList();
-  }
-  async function leaveGroup(){
-    const acct=$('#acct').value.trim(); if(!acct) return alert('Enter account id');
-    const gid=$('#selGroupId').value.trim(); if(!gid) return alert('Enter group id');
-    const r = await post('/groups/leave',{group_id:gid, account_id:acct});
-    await loadGroup(); await groupsList();
-  }
+        <div id="groupBox" class="json-box" style="margin-top:0.45rem">
+          Group metadata will appear here when loaded.
+        </div>
 
-  // ----- Emissaries (≤5 seats)
-  async function emissaryStatus(){
-    const gid=$('#selGroupId').value.trim(); if(!gid) return;
-    const r = await post('/groups/emissaries/status',{group_id:gid});
-    $('#emissaryBox').textContent = J(r);
-  }
-  async function nominate(){
-    const gid=$('#selGroupId').value.trim(); if(!gid) return alert('Enter group id');
-    const nominator=$('#acct').value.trim(); if(!nominator) return alert('Enter your account id');
-    const cand=$('#emNominee').value.trim(); if(!cand) return alert('Enter candidate id');
-    const r = await post('/groups/emissaries/nominate',{group_id:gid, nominator_id:nominator, candidate_id:cand});
-    await emissaryStatus();
-  }
-  async function ballot(){
-    const gid=$('#selGroupId').value.trim(); if(!gid) return alert('Enter group id');
-    const voter=$('#acct').value.trim(); if(!voter) return alert('Enter your account id');
-    const ranking = ($('#emBallot').value||'').split(',').map(s=>s.trim()).filter(Boolean).slice(0,5);
-    if(ranking.length===0) return alert('Enter a ranked list (up to 5)');
-    const r = await post('/groups/emissaries/ballot',{group_id:gid, voter_id:voter, ranking});
-    await emissaryStatus();
-  }
+        <!-- Emissaries -->
+        <details class="section" open>
+          <summary>Emissaries (up to 5 seats)</summary>
+          <p style="margin-top:0.4rem;font-size:0.82rem;color:#9ca3af;">
+            Emissaries are group-level representatives elected via an IRV ballot.
+          </p>
 
-  // ----- Multisig
-  async function multisigShow(){
-    const gid=$('#selGroupId').value.trim(); if(!gid) return;
-    const r = await post('/groups/get',{group_id:gid});
-    const m = (r.group && r.group.multisig) || r.multisig || {};
-    $('#msBox').textContent = J(m);
-  }
-  async function multisigSet(){
-    const gid=$('#selGroupId').value.trim(); if(!gid) return alert('Enter group id');
-    const signers = ($('#msSigners').value||'').split(',').map(s=>s.trim()).filter(Boolean);
-    const threshold = parseInt($('#msThresh').value||'0',10);
-    const r = await post('/groups/multisig/set',{group_id:gid, signers, threshold});
-    await multisigShow();
-  }
+          <div class="row" style="margin-top:0.35rem">
+            <input id="emNominee" placeholder="candidate_account_id" />
+            <button id="btnNominate" class="btn small">Nominate</button>
+          </div>
 
-  // ----- Polls (IRV)
-  async function pollsList(){
-    const gid=$('#selGroupId').value.trim(); if(!gid) return;
-    const r = await post('/polls/list',{group_id:gid});
-    $('#pollBox').textContent = J(r);
-  }
-  async function pollCreate(){
-    const gid=$('#selGroupId').value.trim(); if(!gid) return alert('Enter group id');
-    const title=$('#plTitle').value.trim(); if(!title) return alert('Title required');
-    const options = ($('#plOptions').value||'').split(',').map(s=>s.trim()).filter(Boolean);
-    if(options.length<2) return alert('At least two options');
-    const r = await post('/polls/create',{group_id:gid, title, options, method:'irv'});
-    await pollsList();
-  }
-  async function pollVote(){
-    const voter=$('#acct').value.trim(); if(!voter) return alert('Enter your account id');
-    const pollId=$('#plVotePoll').value.trim(); if(!pollId) return alert('Enter poll id');
-    const ranking=($('#plRanking').value||'').split(',').map(s=>s.trim()).filter(Boolean);
-    const r = await post('/polls/vote',{poll_id:pollId, voter_id:voter, ranking});
-    await pollsList();
-  }
+          <div class="row" style="margin-top:0.35rem">
+            <input id="emBallot" placeholder="ranked list: acct1,acct2,acct3…" />
+            <button id="btnBallot" class="btn small">Submit ballot</button>
+          </div>
 
-  // ----- Proposals
-  async function propsList(){
-    const gid=$('#selGroupId').value.trim(); if(!gid) return;
-    const r = await post('/proposals/list',{group_id:gid});
-    $('#propBox').textContent = J(r);
-  }
-  async function propCreate(){
-    const gid=$('#selGroupId').value.trim(); if(!gid) return alert('Enter group id');
-    const title=$('#prTitle').value.trim(); if(!title) return alert('Title required');
-    const summary=$('#prSummary').value.trim();
-    const budget=parseFloat($('#prBudget').value||'0');
-    let payload={}; try{ payload=JSON.parse($('#prPayload').value||'{}'); }catch(e){ return alert('Payload must be JSON'); }
-    const r = await post('/proposals/create',{group_id:gid, title, summary, budget, payload});
-    await propsList();
-  }
-  async function propVote(){
-    const voter=$('#acct').value.trim(); if(!voter) return alert('Enter your account id');
-    const pid=$('#prVoteId').value.trim(); if(!pid) return alert('Enter proposal id');
-    const choice=$('#prVoteChoice').value;
-    const r = await post('/proposals/vote',{proposal_id:pid, voter_id:voter, choice});
-    await propsList();
-  }
-  async function propExec(){
-    const pid=$('#prExecId').value.trim(); if(!pid) return alert('Enter proposal id');
-    const r = await post('/proposals/execute',{proposal_id:pid});
-    await propsList(); await multisigShow(); await treasuryGroup();
-  }
+          <div id="emBox" class="json-box" style="margin-top:0.45rem">
+            Emissary panel / stats will appear here.
+          </div>
+        </details>
 
-  // ----- Treasury
-  async function treasuryNode(){
-    const r = await post('/treasury/info',{});
-    $('#treBox').textContent = J(r);
-  }
-  async function treasuryGroup(){
-    const gid=$('#selGroupId').value.trim(); if(!gid) return;
-    const r = await post('/treasury/info',{group_id:gid});
-    $('#treBox').textContent = J(r);
-  }
+        <!-- Multisig -->
+        <details class="section">
+          <summary>Group multisig</summary>
+          <p style="margin-top:0.4rem;font-size:0.82rem;color:#9ca3af;">
+            Each group can specify a multisig configuration for treasury moves
+            and high-stakes actions.
+          </p>
 
-  // Bindings
-  $('#btnPoh').onclick = ()=>pohStatus();
+          <label for="msSigners">Signers (comma-separated)</label>
+          <input id="msSigners" placeholder="@acct1,@acct2,@acct3…" />
 
-  $('#btnCreate').onclick = ()=>groupCreate().catch(e=>alert(e.message));
-  $('#btnList').onclick   = ()=>groupsList().catch(e=>alert(e.message));
-  $('#btnLoad').onclick   = ()=>loadGroup().catch(e=>alert(e.message));
-  $('#btnJoin').onclick   = ()=>joinGroup().catch(e=>alert(e.message));
-  $('#btnLeave').onclick  = ()=>leaveGroup().catch(e=>alert(e.message));
+          <label for="msThresh">Threshold</label>
+          <input id="msThresh" placeholder="e.g. 3" />
 
-  $('#btnNominate').onclick = ()=>nominate().catch(e=>alert(e.message));
-  $('#btnBallot').onclick   = ()=>ballot().catch(e=>alert(e.message));
+          <div class="row" style="margin-top:0.4rem">
+            <button id="btnMultisigSet" class="btn small">Set multisig</button>
+          </div>
 
-  $('#btnMultisigSet').onclick = ()=>multisigSet().catch(e=>alert(e.message));
+          <div id="msBox" class="json-box" style="margin-top:0.4rem">
+            Multisig config will appear here.
+          </div>
+        </details>
 
-  $('#btnPollCreate').onclick = ()=>pollCreate().catch(e=>alert(e.message));
-  $('#btnPollList').onclick   = ()=>pollsList().catch(e=>alert(e.message));
-  $('#btnPollVote').onclick   = ()=>pollVote().catch(e=>alert(e.message));
+        <!-- Polls -->
+        <details class="section">
+          <summary>Polls (IRV / single winner)</summary>
+          <p style="margin-top:0.4rem;font-size:0.82rem;color:#9ca3af;">
+            Internal polls used to select roles or make one-off decisions.
+          </p>
 
-  $('#btnPropCreate').onclick = ()=>propCreate().catch(e=>alert(e.message));
-  $('#btnPropList').onclick   = ()=>propsList().catch(e=>alert(e.message));
-  $('#btnPropVote').onclick   = ()=>propVote().catch(e=>alert(e.message));
-  $('#btnPropExec').onclick   = ()=>propExec().catch(e=>alert(e.message));
+          <label for="plTitle">Title</label>
+          <input id="plTitle" placeholder="e.g., Choose facilitator" />
 
-  $('#btnTreasuryInfo').onclick = ()=>treasuryNode().catch(e=>alert(e.message));
-  $('#btnGroupTreasury').onclick = ()=>treasuryGroup().catch(e=>alert(e.message));
+          <label for="plOptions">Options (comma-separated)</label>
+          <input id="plOptions" placeholder="opt1,opt2,opt3" />
 
-  // Boot
-  (async function init(){
-    try{ await groupsList(); }catch{}
-  })();
-})();
-</script>
+          <div class="row" style="margin-top:0.35rem">
+            <button id="btnPollCreate" class="btn small">Create poll</button>
+            <button id="btnPollList" class="btn small">List polls</button>
+          </div>
 
-<footer class="weall-footer">
-  <span>© WeAll</span>
-  &nbsp;•&nbsp;<a href="/frontend/privacy.html">Privacy</a>
-  &nbsp;•&nbsp;<a href="/frontend/terms.html">Terms</a>
-</footer>
+          <div class="row" style="margin-top:0.35rem">
+            <input id="plVotePoll" placeholder="poll_id…" />
+            <input id="plRanking" placeholder="ranked: opt1,opt2,opt3…" />
+            <button id="btnPollVote" class="btn small">Vote</button>
+          </div>
 
+          <div id="pollBox" class="json-box" style="margin-top:0.4rem">
+            Poll list / results will appear here.
+          </div>
+        </details>
+
+        <!-- Proposals -->
+        <details class="section">
+          <summary>Proposals (budget &amp; execution)</summary>
+          <p style="margin-top:0.4rem;font-size:0.82rem;color:#9ca3af;">
+            Formal proposals with budgets and optional execution payloads.
+          </p>
+
+          <label for="prTitle">Title</label>
+          <input id="prTitle" placeholder="e.g., Fund community tooling" />
+
+          <label for="prSummary">Summary</label>
+          <textarea id="prSummary" placeholder="Short description"></textarea>
+
+          <label for="prBudget">Budget (number)</label>
+          <input id="prBudget" placeholder="100.0" />
+
+          <label for="prPayload">Payload (JSON)</label>
+          <textarea
+            id="prPayload"
+            placeholder='{"action":"grant","target":"acct_x"}'
+          ></textarea>
+
+          <div class="row" style="margin-top:0.4rem">
+            <button id="btnPropCreate" class="btn small">Create proposal</button>
+            <button id="btnPropList" class="btn small">List proposals</button>
+          </div>
+
+          <div class="row" style="margin-top:0.35rem">
+            <input id="prVoteId" placeholder="proposal_id" />
+            <select id="prVoteChoice">
+              <option>yes</option>
+              <option>no</option>
+              <option>abstain</option>
+            </select>
+            <button id="btnPropVote" class="btn small">Vote</button>
+          </div>
+
+          <div class="row" style="margin-top:0.35rem">
+            <input id="prExecId" placeholder="proposal_id (for multisig exec)" />
+            <button id="btnPropExec" class="btn small">Execute</button>
+          </div>
+
+          <div id="propBox" class="json-box" style="margin-top:0.4rem">
+            Proposals and tallies will appear here.
+          </div>
+        </details>
+
+        <!-- Treasury -->
+        <details class="section">
+          <summary>Treasury</summary>
+          <p style="margin-top:0.4rem;font-size:0.82rem;color:#9ca3af;">
+            Inspect the node-level treasury and group-level treasury view.
+          </p>
+
+          <div class="row" style="margin-top:0.35rem">
+            <button id="btnTreasuryInfo" class="btn small">Node treasury</button>
+            <button id="btnGroupTreasury" class="btn small">Group treasury</button>
+          </div>
+
+          <div id="treBox" class="json-box" style="margin-top:0.4rem">
+            Treasury info will appear here.
+          </div>
+        </details>
+      </section>
+    </main>
+
+    <footer class="weall-footer">
+      <span>© <span id="footer-year">2024</span> WeAll</span>
+      &nbsp;•&nbsp;<a href="/frontend/privacy.html">Privacy</a>
+      &nbsp;•&nbsp;<a href="/frontend/terms.html">Terms</a>
+    </footer>
+  </div>
+
+  <script src="/frontend/env.js"></script>
+  <script src="/frontend/auth.js"></script>
+  <script src="/frontend/session.js"></script>
+  <script src="/frontend/nav.js"></script>
+  <script src="/frontend/footer.js"></script>
+  <script>
+    (function () {
+      const $ = (id) => document.getElementById(id);
+
+      function apiBase() {
+        return (window.ENV && window.ENV.VITE_API_BASE) || "";
+      }
+
+      async function jsonFetch(path, opts) {
+        const url = apiBase() + path;
+        const options = Object.assign(
+          {
+            headers: { Accept: "application/json" },
+            credentials: "include",
+          },
+          opts || {}
+        );
+        if (options.body && typeof options.body !== "string") {
+          options.headers["Content-Type"] =
+            options.headers["Content-Type"] || "application/json";
+          options.body = JSON.stringify(options.body);
+        }
+        const res = await fetch(url, options);
+        let data = null;
+        try {
+          data = await res.json();
+        } catch {
+          data = null;
+        }
+        if (!res.ok) {
+          const msg =
+            (data && (data.detail || data.error || data.message)) ||
+            "Request failed with " + res.status;
+          throw new Error(msg);
+        }
+        return data;
+      }
+
+      function J(obj) {
+        try {
+          return JSON.stringify(obj, null, 2);
+        } catch {
+          return String(obj);
+        }
+      }
+
+      function buildRoleBanner(userId, roles, nodeMeta, poh) {
+        const parts = [];
+
+        const tier =
+          (roles && (roles.poh_tier ?? roles.pohTier)) ||
+          (poh && typeof poh.tier === "number" ? poh.tier : 0) ||
+          0;
+        const status = (poh && poh.status) || "ok";
+
+        parts.push("PoH Tier " + tier + " (" + status + ")");
+
+        const flags = (roles && roles.flags) || {};
+        const caps = (roles && roles.capabilities) || [];
+        const tags = [];
+
+        if (flags.wants_creator || caps.includes("earn_creator_rewards")) {
+          tags.push("Creator");
+        }
+        if (flags.wants_juror || caps.includes("serve_juror_panel")) {
+          tags.push("Juror");
+        }
+        if (flags.wants_validator || caps.includes("validator_duties")) {
+          tags.push("Validator");
+        }
+        if (flags.wants_operator || caps.includes("operator_duties")) {
+          tags.push("Operator");
+        }
+        if (flags.wants_emissary || caps.includes("act_as_emissary")) {
+          tags.push("Emissary");
+        }
+
+        if (tags.length) {
+          parts.push(tags.join(" · "));
+        }
+
+        const nodeKind = (nodeMeta && nodeMeta.node_kind) || "public_gateway";
+        if (nodeKind === "validator_node") {
+          parts.push("Validator node");
+        } else if (nodeKind === "private_node") {
+          parts.push("Private node");
+        } else {
+          parts.push("Gateway node");
+        }
+
+        return "Signed in as " + userId + " · " + parts.join(" · ");
+      }
+
+      async function refreshSessionAndPoh() {
+        const bannerEl = $("signedIn");
+        const tierBadge = $("tierBadge");
+        const pohBox = $("pohBox");
+        const acctInput = $("acct");
+
+        try {
+          const sess = await weallAuth.getSession();
+          if (!sess || !sess.user_id) {
+            if (bannerEl) bannerEl.textContent = "Not signed in.";
+            if (pohBox) pohBox.textContent = "Please log in to see PoH status.";
+            if (tierBadge) tierBadge.querySelector("span:nth-child(2)").textContent = "tier: ?";
+            return null;
+          }
+
+          const [poh, roles, nodeMeta] = await Promise.all([
+            weallAuth.getPohMe().catch(() => null),
+            jsonFetch("/roles/effective/me", {
+              headers: { "X-WeAll-User": sess.user_id },
+            }).catch(() => null),
+            jsonFetch("/node/meta").catch(() => null),
+          ]);
+
+          if (bannerEl) {
+            bannerEl.textContent = buildRoleBanner(
+              sess.user_id,
+              roles,
+              nodeMeta,
+              poh
+            );
+          }
+
+          if (acctInput && !acctInput.value) {
+            acctInput.value = sess.user_id;
+          }
+
+          const tier =
+            poh && typeof poh.tier === "number" ? poh.tier : (roles && roles.poh_tier) || 0;
+
+          if (tierBadge) {
+            const labelSpan = tierBadge.querySelector("span:nth-child(2)");
+            if (labelSpan) {
+              labelSpan.textContent = "tier: " + (tier || 0);
+            }
+          }
+
+          if (pohBox) {
+            pohBox.textContent = poh ? J(poh) : "No PoH record found.";
+          }
+
+          return { sess, poh, roles, nodeMeta };
+        } catch (err) {
+          console.error("refreshSessionAndPoh error:", err);
+          if (bannerEl) bannerEl.textContent = "Unable to load session.";
+          if (pohBox) {
+            pohBox.textContent = "Failed to load PoH status: " + err.message;
+          }
+          if (tierBadge) {
+            const labelSpan = tierBadge.querySelector("span:nth-child(2)");
+            if (labelSpan) labelSpan.textContent = "tier: ?";
+          }
+          return null;
+        }
+      }
+
+      // ----- Groups: list / create / load / join / leave -----
+      async function groupsList() {
+        const box = $("myGroups");
+        const acct = ($("acct") && $("acct").value.trim()) || "";
+        if (!box) return;
+
+        box.innerHTML = "Loading groups…";
+
+        try {
+          const res = await jsonFetch("/groups/list");
+          const groups = (res && res.groups) || [];
+          if (!groups.length) {
+            box.textContent = "No groups yet.";
+            return;
+          }
+
+          box.innerHTML = "";
+          for (const g of groups) {
+            const card = document.createElement("article");
+            card.className = "group-card";
+
+            const isMember = (g.members || []).includes(acct);
+
+            card.innerHTML = `
+              <div class="group-card-title">
+                <span>${g.name || "(unnamed group)"}</span>
+                <span class="group-card-id">${g.id || ""}</span>
+              </div>
+              <div class="group-card-desc">${g.description || ""}</div>
+              <div class="tag-row">
+                ${(g.tags || [])
+                  .map((t) => `<span class="tag">${t}</span>`)
+                  .join("")}
+              </div>
+              <div class="group-card-meta">
+                members: ${(g.members || []).length} · status: ${g.status || "unknown"}
+              </div>
+              <div class="row" style="margin-top:0.25rem">
+                <button class="btn small btnSel" data-gid="${g.id || ""}">
+                  Select
+                </button>
+                ${
+                  isMember
+                    ? '<span class="pill"><span class="dot"></span><span>member</span></span>'
+                    : ""
+                }
+              </div>
+            `;
+            box.appendChild(card);
+          }
+
+          box.querySelectorAll(".btnSel").forEach((btn) => {
+            btn.addEventListener("click", () => {
+              const gid = btn.getAttribute("data-gid");
+              if ($("selGroupId") && gid) {
+                $("selGroupId").value = gid;
+                loadGroup().catch((e) => alert(e.message));
+              }
+            });
+          });
+        } catch (err) {
+          console.error("groupsList error:", err);
+          box.textContent = "Failed to load groups: " + err.message;
+        }
+      }
+
+      async function groupCreate() {
+        const acct = ($("acct") && $("acct").value.trim()) || "";
+        const name = ($("gName") && $("gName").value.trim()) || "";
+        const desc = ($("gDesc") && $("gDesc").value.trim()) || "";
+        const tagsRaw = ($("gTags") && $("gTags").value) || "";
+        const vis = ($("gVis") && $("gVis").value) || "public";
+
+        if (!acct) return alert("Enter account id first.");
+        if (!name) return alert("Name required.");
+
+        const tags = tagsRaw
+          .split(",")
+          .map((s) => s.trim())
+          .filter(Boolean);
+
+        const payload = {
+          name,
+          description: desc,
+          tags,
+          visibility: vis,
+          created_by: acct,
+        };
+
+        try {
+          const res = await jsonFetch("/groups/create", {
+            method: "POST",
+            body: payload,
+          });
+          const gid = res && res.group && res.group.id;
+          if ($("selGroupId") && gid) {
+            $("selGroupId").value = gid;
+          }
+          await groupsList();
+          await loadGroup();
+        } catch (err) {
+          console.error("groupCreate error:", err);
+          alert("Failed to create group: " + err.message);
+        }
+      }
+
+      async function loadGroup() {
+        const gid = ($("selGroupId") && $("selGroupId").value.trim()) || "";
+        const box = $("groupBox");
+        if (!gid || !box) return;
+
+        box.textContent = "Loading group…";
+
+        try {
+          const res = await jsonFetch("/groups/get", {
+            method: "POST",
+            body: { group_id: gid },
+          });
+          const group = res.group || res;
+          box.textContent = J(group);
+
+          // Preload sub-surfaces
+          await emissaryStatus();
+          await multisigShow();
+          await pollsList();
+          await propsList();
+          await treasuryGroup();
+        } catch (err) {
+          console.error("loadGroup error:", err);
+          box.textContent = "Failed to load group: " + err.message;
+        }
+      }
+
+      async function joinGroup() {
+        const acct = ($("acct") && $("acct").value.trim()) || "";
+        const gid = ($("selGroupId") && $("selGroupId").value.trim()) || "";
+        if (!acct) return alert("Enter account id.");
+        if (!gid) return alert("Enter group id.");
+
+        try {
+          await jsonFetch("/groups/join", {
+            method: "POST",
+            body: { group_id: gid, account_id: acct },
+          });
+          await loadGroup();
+          await groupsList();
+        } catch (err) {
+          console.error("joinGroup error:", err);
+          alert("Failed to join group: " + err.message);
+        }
+      }
+
+      async function leaveGroup() {
+        const acct = ($("acct") && $("acct").value.trim()) || "";
+        const gid = ($("selGroupId") && $("selGroupId").value.trim()) || "";
+        if (!acct) return alert("Enter account id.");
+        if (!gid) return alert("Enter group id.");
+
+        try {
+          await jsonFetch("/groups/leave", {
+            method: "POST",
+            body: { group_id: gid, account_id: acct },
+          });
+          await loadGroup();
+          await groupsList();
+        } catch (err) {
+          console.error("leaveGroup error:", err);
+          alert("Failed to leave group: " + err.message);
+        }
+      }
+
+      // ----- Emissaries -----
+      async function emissaryStatus() {
+        const gid = ($("selGroupId") && $("selGroupId").value.trim()) || "";
+        const box = $("emBox");
+        if (!gid || !box) return;
+        box.textContent = "Loading emissary status…";
+
+        try {
+          const res = await jsonFetch("/groups/emissaries/status", {
+            method: "POST",
+            body: { group_id: gid },
+          });
+          box.textContent = J(res);
+        } catch (err) {
+          console.error("emissaryStatus error:", err);
+          box.textContent = "Failed to load emissary status: " + err.message;
+        }
+      }
+
+      async function nominate() {
+        const gid = ($("selGroupId") && $("selGroupId").value.trim()) || "";
+        const nominator = ($("acct") && $("acct").value.trim()) || "";
+        const cand = ($("emNominee") && $("emNominee").value.trim()) || "";
+        if (!gid) return alert("Enter group id.");
+        if (!nominator) return alert("Enter your account id.");
+        if (!cand) return alert("Enter candidate id.");
+
+        try {
+          await jsonFetch("/groups/emissaries/nominate", {
+            method: "POST",
+            body: { group_id: gid, nominator_id: nominator, candidate_id: cand },
+          });
+          await emissaryStatus();
+        } catch (err) {
+          console.error("nominate error:", err);
+          alert("Failed to nominate: " + err.message);
+        }
+      }
+
+      async function ballot() {
+        const gid = ($("selGroupId") && $("selGroupId").value.trim()) || "";
+        const voter = ($("acct") && $("acct").value.trim()) || "";
+        const rankingRaw =
+          ($("emBallot") && $("emBallot").value) || "";
+        if (!gid) return alert("Enter group id.");
+        if (!voter) return alert("Enter your account id.");
+
+        const ranking = rankingRaw
+          .split(",")
+          .map((s) => s.trim())
+          .filter(Boolean)
+          .slice(0, 5);
+
+        if (!ranking.length) return alert("Enter a ranked list (up to 5).");
+
+        try {
+          await jsonFetch("/groups/emissaries/ballot", {
+            method: "POST",
+            body: { group_id: gid, voter_id: voter, ranking },
+          });
+          await emissaryStatus();
+        } catch (err) {
+          console.error("ballot error:", err);
+          alert("Failed to submit ballot: " + err.message);
+        }
+      }
+
+      // ----- Multisig -----
+      async function multisigShow() {
+        const gid = ($("selGroupId") && $("selGroupId").value.trim()) || "";
+        const box = $("msBox");
+        if (!gid || !box) return;
+        box.textContent = "Loading multisig config…";
+
+        try {
+          const res = await jsonFetch("/groups/get", {
+            method: "POST",
+            body: { group_id: gid },
+          });
+          const m = (res.group && res.group.multisig) || res.multisig || {};
+          box.textContent = J(m);
+        } catch (err) {
+          console.error("multisigShow error:", err);
+          box.textContent = "Failed to load multisig: " + err.message;
+        }
+      }
+
+      async function multisigSet() {
+        const gid = ($("selGroupId") && $("selGroupId").value.trim()) || "";
+        const signersRaw =
+          ($("msSigners") && $("msSigners").value) || "";
+        const thresholdRaw =
+          ($("msThresh") && $("msThresh").value) || "0";
+
+        if (!gid) return alert("Enter group id.");
+        const signers = signersRaw
+          .split(",")
+          .map((s) => s.trim())
+          .filter(Boolean);
+        const threshold = parseInt(thresholdRaw || "0", 10);
+
+        try {
+          await jsonFetch("/groups/multisig/set", {
+            method: "POST",
+            body: { group_id: gid, signers, threshold },
+          });
+          await multisigShow();
+        } catch (err) {
+          console.error("multisigSet error:", err);
+          alert("Failed to set multisig: " + err.message);
+        }
+      }
+
+      // ----- Polls -----
+      async function pollsList() {
+        const gid = ($("selGroupId") && $("selGroupId").value.trim()) || "";
+        const box = $("pollBox");
+        if (!gid || !box) return;
+        box.textContent = "Loading polls…";
+
+        try {
+          const res = await jsonFetch("/polls/list", {
+            method: "POST",
+            body: { group_id: gid },
+          });
+          box.textContent = J(res);
+        } catch (err) {
+          console.error("pollsList error:", err);
+          box.textContent = "Failed to load polls: " + err.message;
+        }
+      }
+
+      async function pollCreate() {
+        const gid = ($("selGroupId") && $("selGroupId").value.trim()) || "";
+        const title = ($("plTitle") && $("plTitle").value.trim()) || "";
+        const optionsRaw =
+          ($("plOptions") && $("plOptions").value) || "";
+
+        if (!gid) return alert("Enter group id.");
+        if (!title) return alert("Title required.");
+
+        const options = optionsRaw
+          .split(",")
+          .map((s) => s.trim())
+          .filter(Boolean);
+
+        if (options.length < 2) {
+          return alert("At least two options are required.");
+        }
+
+        try {
+          await jsonFetch("/polls/create", {
+            method: "POST",
+            body: { group_id: gid, title, options, method: "irv" },
+          });
+          await pollsList();
+        } catch (err) {
+          console.error("pollCreate error:", err);
+          alert("Failed to create poll: " + err.message);
+        }
+      }
+
+      async function pollVote() {
+        const voter = ($("acct") && $("acct").value.trim()) || "";
+        const pollId =
+          ($("plVotePoll") && $("plVotePoll").value.trim()) || "";
+        const rankingRaw =
+          ($("plRanking") && $("plRanking").value) || "";
+
+        if (!voter) return alert("Enter your account id.");
+        if (!pollId) return alert("Enter poll id.");
+
+        const ranking = rankingRaw
+          .split(",")
+          .map((s) => s.trim())
+          .filter(Boolean);
+
+        try {
+          await jsonFetch("/polls/vote", {
+            method: "POST",
+            body: { poll_id: pollId, voter_id: voter, ranking },
+          });
+          await pollsList();
+        } catch (err) {
+          console.error("pollVote error:", err);
+          alert("Failed to vote on poll: " + err.message);
+        }
+      }
+
+      // ----- Proposals -----
+      async function propsList() {
+        const gid = ($("selGroupId") && $("selGroupId").value.trim()) || "";
+        const box = $("propBox");
+        if (!gid || !box) return;
+        box.textContent = "Loading proposals…";
+
+        try {
+          const res = await jsonFetch("/proposals/list", {
+            method: "POST",
+            body: { group_id: gid },
+          });
+          box.textContent = J(res);
+        } catch (err) {
+          console.error("propsList error:", err);
+          box.textContent = "Failed to load proposals: " + err.message;
+        }
+      }
+
+      async function propCreate() {
+        const gid = ($("selGroupId") && $("selGroupId").value.trim()) || "";
+        const title = ($("prTitle") && $("prTitle").value.trim()) || "";
+        const summary =
+          ($("prSummary") && $("prSummary").value.trim()) || "";
+        const budgetRaw =
+          ($("prBudget") && $("prBudget").value.trim()) || "";
+        const payloadRaw =
+          ($("prPayload") && $("prPayload").value.trim()) || "";
+
+        if (!gid) return alert("Enter group id.");
+        if (!title) return alert("Title required.");
+
+        let budget = null;
+        if (budgetRaw) {
+          budget = parseFloat(budgetRaw);
+        }
+
+        let payload = null;
+        if (payloadRaw) {
+          try {
+            payload = JSON.parse(payloadRaw);
+          } catch {
+            payload = payloadRaw;
+          }
+        }
+
+        try {
+          await jsonFetch("/proposals/create", {
+            method: "POST",
+            body: { group_id: gid, title, summary, budget, payload },
+          });
+          await propsList();
+        } catch (err) {
+          console.error("propCreate error:", err);
+          alert("Failed to create proposal: " + err.message);
+        }
+      }
+
+      async function propVote() {
+        const voter = ($("acct") && $("acct").value.trim()) || "";
+        const pid =
+          ($("prVoteId") && $("prVoteId").value.trim()) || "";
+        const choice =
+          ($("prVoteChoice") && $("prVoteChoice").value) || "yes";
+
+        if (!voter) return alert("Enter your account id.");
+        if (!pid) return alert("Enter proposal id.");
+
+        try {
+          await jsonFetch("/proposals/vote", {
+            method: "POST",
+            body: { proposal_id: pid, voter_id: voter, choice },
+          });
+          await propsList();
+        } catch (err) {
+          console.error("propVote error:", err);
+          alert("Failed to vote on proposal: " + err.message);
+        }
+      }
+
+      async function propExec() {
+        const pid =
+          ($("prExecId") && $("prExecId").value.trim()) || "";
+        if (!pid) return alert("Enter proposal id.");
+
+        try {
+          await jsonFetch("/proposals/execute", {
+            method: "POST",
+            body: { proposal_id: pid },
+          });
+          await propsList();
+        } catch (err) {
+          console.error("propExec error:", err);
+          alert("Failed to execute proposal: " + err.message);
+        }
+      }
+
+      // ----- Treasury -----
+      async function treasuryNode() {
+        const box = $("treBox");
+        if (!box) return;
+        box.textContent = "Loading node treasury…";
+
+        try {
+          const res = await jsonFetch("/treasury/info", {
+            method: "POST",
+            body: {},
+          });
+          box.textContent = J(res);
+        } catch (err) {
+          console.error("treasuryNode error:", err);
+          box.textContent = "Failed to load node treasury: " + err.message;
+        }
+      }
+
+      async function treasuryGroup() {
+        const box = $("treBox");
+        const gid = ($("selGroupId") && $("selGroupId").value.trim()) || "";
+        if (!box || !gid) return;
+        box.textContent = "Loading group treasury…";
+
+        try {
+          const res = await jsonFetch("/treasury/info", {
+            method: "POST",
+            body: { group_id: gid },
+          });
+          box.textContent = J(res);
+        } catch (err) {
+          console.error("treasuryGroup error:", err);
+          box.textContent = "Failed to load group treasury: " + err.message;
+        }
+      }
+
+      // ----- wiring -----
+      function wireEvents() {
+        if ($("btnPoh")) $("btnPoh").onclick = () => refreshSessionAndPoh();
+
+        if ($("btnCreate")) $("btnCreate").onclick = () =>
+          groupCreate().catch((e) => alert(e.message));
+        if ($("btnList")) $("btnList").onclick = () =>
+          groupsList().catch((e) => alert(e.message));
+
+        if ($("btnLoad")) $("btnLoad").onclick = () =>
+          loadGroup().catch((e) => alert(e.message));
+        if ($("btnJoin")) $("btnJoin").onclick = () =>
+          joinGroup().catch((e) => alert(e.message));
+        if ($("btnLeave")) $("btnLeave").onclick = () =>
+          leaveGroup().catch((e) => alert(e.message));
+
+        if ($("btnNominate")) $("btnNominate").onclick = () =>
+          nominate().catch((e) => alert(e.message));
+        if ($("btnBallot")) $("btnBallot").onclick = () =>
+          ballot().catch((e) => alert(e.message));
+
+        if ($("btnMultisigSet")) $("btnMultisigSet").onclick = () =>
+          multisigSet().catch((e) => alert(e.message));
+
+        if ($("btnPollCreate")) $("btnPollCreate").onclick = () =>
+          pollCreate().catch((e) => alert(e.message));
+        if ($("btnPollList")) $("btnPollList").onclick = () =>
+          pollsList().catch((e) => alert(e.message));
+        if ($("btnPollVote")) $("btnPollVote").onclick = () =>
+          pollVote().catch((e) => alert(e.message));
+
+        if ($("btnPropCreate")) $("btnPropCreate").onclick = () =>
+          propCreate().catch((e) => alert(e.message));
+        if ($("btnPropList")) $("btnPropList").onclick = () =>
+          propsList().catch((e) => alert(e.message));
+        if ($("btnPropVote")) $("btnPropVote").onclick = () =>
+          propVote().catch((e) => alert(e.message));
+        if ($("btnPropExec")) $("btnPropExec").onclick = () =>
+          propExec().catch((e) => alert(e.message));
+
+        if ($("btnTreasuryInfo")) $("btnTreasuryInfo").onclick = () =>
+          treasuryNode().catch((e) => alert(e.message));
+        if ($("btnGroupTreasury")) $("btnGroupTreasury").onclick = () =>
+          treasuryGroup().catch((e) => alert(e.message));
+      }
+
+      async function init() {
+        // Require at least Tier 1 (basic account) to use groups console
+        const ok = await weallAuth.require({
+          minTier: 1,
+          redirectToLogin: "/frontend/login.html",
+        });
+        if (!ok) return;
+
+        wireEvents();
+        await refreshSessionAndPoh();
+        await groupsList();
+      }
+
+      if (document.readyState === "loading") {
+        document.addEventListener("DOMContentLoaded", init);
+      } else {
+        init();
+      }
+    })();
+  </script>
 </body>
 </html>

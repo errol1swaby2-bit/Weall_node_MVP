@@ -1,764 +1,769 @@
 <!doctype html>
 <html lang="en">
 <head>
-  <meta charset="utf-8">
-  <title>WeAll – Home Feed</title>
-  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta charset="utf-8" />
+  <title>WeAll — Home Feed</title>
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <link rel="icon" href="/frontend/favicon.svg" />
+  <link rel="stylesheet" href="/frontend/style.css" />
   <style>
-    :root {
-      --bg: #05060a;
-      --card-bg: #101218;
-      --accent: #00ff7f;
-      --accent-soft: rgba(0,255,127,0.18);
-      --text-main: #ffffff;
-      --text-muted: #a0a4b8;
-      --danger-soft: rgba(255, 77, 77, 0.16);
-    }
-    * { box-sizing: border-box; margin: 0; padding: 0; }
     body {
-      font-family: system-ui, -apple-system, BlinkMacSystemFont, "SF Pro Text", sans-serif;
-      background: radial-gradient(circle at top, #16192b 0, #05060a 45%);
-      color: var(--text-main);
-      min-height: 100vh;
-      display: flex;
-      flex-direction: column;
-      align-items: stretch;
-      justify-content: center;
-      -webkit-font-smoothing: antialiased;
-      overscroll-behavior-y: none;
-      touch-action: pan-y;
+      margin: 0;
+      padding: 1.2rem 1.1rem 1.6rem;
+      font-family: system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+      background:
+        radial-gradient(circle at top, #22c55e22 0, #020617 55%, #020617 100%);
+      color: #e5e7eb;
     }
-    #waRoot {
-      width: 100%;
-      max-width: 520px;
+
+    .wrap {
+      max-width: 1040px;
       margin: 0 auto;
-      padding: 8px 10px 16px;
-      display: flex;
-      flex-direction: column;
-      gap: 10px;
-    }
-    @media (min-width: 768px) {
-      #waRoot {
-        padding-top: 20px;
-      }
     }
 
-    /* Top bar */
-    .wa-topbar {
+    .page-header {
       display: flex;
-      align-items: center;
+      flex-wrap: wrap;
+      align-items: flex-start;
       justify-content: space-between;
-      gap: 10px;
+      gap: 0.9rem;
+      margin-bottom: 1.1rem;
     }
-    .wa-brand {
-      display: flex;
-      align-items: center;
-      gap: 8px;
-    }
-    .wa-pill {
-      border-radius: 999px;
-      border: 1px solid var(--accent-soft);
-      padding: 2px 9px;
-      font-size: 11px;
-      color: var(--accent);
-      background: rgba(0, 0, 0, 0.4);
-      letter-spacing: 0.04em;
-      text-transform: uppercase;
-    }
-    .wa-logo {
-      width: 26px;
-      height: 26px;
-      border-radius: 50%;
-      background: conic-gradient(from 140deg, #00ff7f, #00bfff, #ff00ff, #ff8800, #00ff7f);
-      border: 2px solid #05060a;
-      box-shadow: 0 0 0 2px rgba(0,255,127,0.45);
-    }
-    .wa-title-block {
+
+    .page-header-main {
       display: flex;
       flex-direction: column;
-    }
-    .wa-title-main {
-      font-size: 18px;
-      letter-spacing: 0.04em;
-      text-transform: uppercase;
-      font-weight: 600;
-      color: #f9fafb;
-    }
-    .wa-title-sub {
-      font-size: 11px;
-      color: var(--text-muted);
-    }
-    .wa-top-actions {
-      display: flex;
-      align-items: center;
-      gap: 8px;
-    }
-    .wa-icon-button {
-      width: 32px;
-      height: 32px;
-      border-radius: 999px;
-      border: 1px solid rgba(255,255,255,0.08);
-      display: inline-flex;
-      align-items: center;
-      justify-content: center;
-      font-size: 16px;
-      background: rgba(8, 9, 15, 0.85);
-      cursor: pointer;
-    }
-    .wa-icon-button span {
-      opacity: 0.75;
+      gap: 0.25rem;
     }
 
-    /* Card shell */
-    .wa-card-shell {
-      background: radial-gradient(circle at top, rgba(80,90,255,0.25) 0, rgba(14,18,38,0.98) 40%, #05060a 100%);
-      border-radius: 18px;
-      overflow: hidden;
-      border: 1px solid rgba(255,255,255,0.05);
-      box-shadow:
-        0 18px 40px rgba(0,0,0,0.75),
-        0 0 0 1px rgba(255,255,255,0.02);
-      min-height: min(720px, 100vh - 130px);
-      max-height: calc(100vh - 110px);
-      display: flex;
-      flex-direction: column;
-      position: relative;
-      isolation: isolate;
-    }
-
-    /* Glow blobs behind card */
-    .wa-blob {
-      position: absolute;
-      pointer-events: none;
-      filter: blur(30px);
-      opacity: 0.65;
-      mix-blend-mode: screen;
-    }
-    .wa-blob.a {
-      top: -30px;
-      left: -20px;
-      width: 160px;
-      height: 160px;
-      background: radial-gradient(circle, rgba(0,255,127,0.4), transparent 70%);
-    }
-    .wa-blob.b {
-      top: -50px;
-      right: -40px;
-      width: 240px;
-      height: 240px;
-      background: radial-gradient(circle, rgba(0,191,255,0.45), transparent 70%);
-    }
-    .wa-blob.c {
-      bottom: -60px;
-      right: 20%;
-      width: 220px;
-      height: 220px;
-      background: radial-gradient(circle, rgba(255,0,255,0.35), transparent 70%);
-    }
-
-    /* Video/feed zone */
-    .wa-main {
-      flex: 1;
-      position: relative;
-      overflow: hidden;
-      display: flex;
-      flex-direction: row;
-    }
-    .wa-feed {
-      flex: 1;
-      position: relative;
-      overflow-y: scroll;
-      scroll-snap-type: y mandatory;
-      -webkit-overflow-scrolling: touch;
-      padding: 10px 8px 14px 10px;
-      z-index: 2;
-    }
-    .wa-slide {
-      scroll-snap-align: start;
-      margin-bottom: 15px;
-      border-radius: 16px;
-      background: linear-gradient(145deg, rgba(7,10,27,0.98), rgba(10,12,30,0.98));
-      border: 1px solid rgba(255,255,255,0.04);
-      padding: 10px 10px 9px;
-      display: flex;
-      flex-direction: column;
-      gap: 8px;
-      position: relative;
-    }
-
-    .wa-slide-header {
+    .brand-row {
       display: flex;
       align-items: center;
-      justify-content: space-between;
-      gap: 8px;
+      gap: 0.6rem;
     }
-    .wa-slide-author {
-      display: flex;
-      align-items: center;
-      gap: 8px;
-      min-width: 0;
-    }
-    .wa-avatar {
+
+    .brand-mark {
       width: 30px;
       height: 30px;
-      border-radius: 999px;
-      background: radial-gradient(circle at 30% 20%, #ffffff 0, #999 16%, #3a3a3a 45%, #101010 70%);
-      border: 1px solid rgba(255,255,255,0.15);
-      flex-shrink: 0;
+      border-radius: 0.9rem;
+      background:
+        radial-gradient(circle at 30% 20%, #22c55e 0, #0ea5e9 45%, #6366f1 85%);
+      border: 1px solid rgba(15,23,42,0.9);
+      box-shadow:
+        0 10px 25px rgba(15,23,42,0.85),
+        0 0 0 1px rgba(15,23,42,0.95);
     }
-    .wa-author-text {
+
+    .brand-title {
       display: flex;
       flex-direction: column;
-      min-width: 0;
-    }
-    .wa-author-name {
-      font-size: 14px;
-      font-weight: 500;
-      white-space: nowrap;
-      overflow: hidden;
-      text-overflow: ellipsis;
-    }
-    .wa-author-meta {
-      font-size: 11px;
-      color: var(--text-muted);
-      display: flex;
-      align-items: center;
-      gap: 6px;
-    }
-    .wa-poh {
-      font-size: 10px;
-      border-radius: 999px;
-      padding: 1px 7px 2px;
-      border: 1px solid rgba(0,255,127,0.6);
-      color: #bfffe0;
-      background: rgba(0,255,127,0.07);
-      letter-spacing: 0.04em;
-      text-transform: uppercase;
-    }
-    .wa-poh.tier1 {
-      border-color: rgba(0,255,127,0.45);
-      background: rgba(0,255,127,0.06);
-    }
-    .wa-poh.tier2 {
-      border-color: rgba(0,191,255,0.6);
-      background: rgba(0,191,255,0.07);
-      color: #c7ecff;
-    }
-    .wa-poh.tier3 {
-      border-color: rgba(255,215,0,0.7);
-      background: rgba(255,215,0,0.09);
-      color: #fff9c2;
+      gap: 0.1rem;
     }
 
-    .wa-slide-menu {
-      display: flex;
-      align-items: center;
-      gap: 4px;
-    }
-    .wa-badge-small {
-      font-size: 9px;
-      padding: 1px 6px 2px;
-      border-radius: 999px;
-      border: 1px solid rgba(255,255,255,0.10);
-      color: var(--text-muted);
+    .brand-title span:first-child {
+      font-size: 1.25rem;
+      font-weight: 600;
+      letter-spacing: 0.06em;
       text-transform: uppercase;
+    }
+
+    .brand-title span:last-child {
+      font-size: 0.8rem;
+      color: #9ca3af;
+    }
+
+    .page-kicker {
+      font-size: 0.76rem;
+      text-transform: uppercase;
+      letter-spacing: 0.14em;
+      color: #9ca3af;
+    }
+
+    .page-blurb {
+      margin: 0;
+      font-size: 0.86rem;
+      color: #cbd5f5;
+      max-width: 440px;
+    }
+
+    .signed-in-banner {
+      font-size: 0.78rem;
+      letter-spacing: 0.03em;
+      text-transform: uppercase;
+      color: #9ca3af;
+      text-align: right;
+      min-width: 220px;
+    }
+
+    main {
+      display: grid;
+      grid-template-columns: minmax(0, 1.1fr) minmax(0, 1.4fr);
+      gap: 1.1rem;
+    }
+
+    @media (max-width: 880px) {
+      main {
+        grid-template-columns: minmax(0, 1fr);
+      }
+    }
+
+    .card {
+      background:
+        radial-gradient(circle at top left, rgba(56,189,248,0.16), transparent 55%),
+        radial-gradient(circle at bottom right, rgba(34,197,94,0.18), transparent 50%),
+        rgba(15,23,42,0.96);
+      border-radius: 0.9rem;
+      border: 1px solid rgba(148,163,184,0.35);
+      padding: 0.95rem 1.0rem 1.15rem;
+      box-shadow:
+        0 18px 40px rgba(15,23,42,0.9),
+        0 0 0 1px rgba(15,23,42,0.92);
+    }
+
+    .card h2 {
+      margin: 0 0 0.25rem;
+      font-size: 0.96rem;
       letter-spacing: 0.08em;
-    }
-    .wa-dot {
-      width: 3px;
-      height: 3px;
-      border-radius: 999px;
-      background: rgba(255,255,255,0.45);
-    }
-    .wa-dots {
-      width: 20px;
-      height: 20px;
-      border-radius: 999px;
-      border: 1px solid rgba(255,255,255,0.08);
-      display: inline-flex;
-      align-items: center;
-      justify-content: center;
-      font-size: 15px;
-      cursor: pointer;
-      background: rgba(7, 9, 20, 0.9);
-    }
-
-    .wa-slide-body {
-      display: flex;
-      flex-direction: column;
-      gap: 7px;
-    }
-    .wa-video-shell {
-      border-radius: 12px;
-      overflow: hidden;
-      background: #05060a;
-      border: 1px solid rgba(255,255,255,0.15);
-      position: relative;
-      max-height: min(420px, 60vh);
-    }
-    .wa-video-shell video {
-      width: 100%;
-      height: auto;
-      display: block;
-      background: #000;
-    }
-    .wa-video-label {
-      position: absolute;
-      bottom: 8px;
-      left: 8px;
-      padding: 2px 7px;
-      border-radius: 999px;
-      background: rgba(0,0,0,0.65);
-      font-size: 10px;
       text-transform: uppercase;
-      letter-spacing: 0.08em;
-      color: #f1f5f9;
-    }
-
-    .wa-text {
-      font-size: 14px;
-      line-height: 1.4;
       color: #e5e7eb;
-      max-height: 4.8em;
-      overflow: hidden;
-      position: relative;
-    }
-    .wa-text.more::after {
-      content: "… more";
-      position: absolute;
-      bottom: 0;
-      right: 0;
-      font-size: 11px;
-      padding-left: 6px;
-      background: linear-gradient(to right, transparent, #101218);
-      color: var(--accent);
     }
 
-    .wa-slide-footer {
-      display: flex;
-      align-items: center;
-      justify-content: space-between;
-      gap: 10px;
-      margin-top: 3px;
+    .card p {
+      margin: 0.15rem 0;
+      font-size: 0.86rem;
+      color: #cbd5f5;
     }
-    .wa-footer-left {
-      display: flex;
-      align-items: center;
-      gap: 8px;
+
+    .hint {
+      font-size: 0.78rem;
+      color: #9ca3af;
+      margin-top: 0.4rem;
     }
-    .wa-footer-stat {
-      display: flex;
-      align-items: center;
-      gap: 4px;
-      font-size: 11px;
-      color: var(--text-muted);
-    }
-    .wa-footer-stat span {
-      font-size: 13px;
-    }
-    .wa-footer-right {
-      display: flex;
-      align-items: center;
-      gap: 8px;
-    }
-    .wa-footer-button {
-      border-radius: 999px;
-      border: 1px solid rgba(255,255,255,0.12);
-      padding: 3px 9px 4px;
-      font-size: 11px;
+
+    label {
+      display: block;
+      margin: 0.6rem 0 0.15rem;
+      font-size: 0.78rem;
       text-transform: uppercase;
       letter-spacing: 0.08em;
-      background: rgba(10, 13, 30, 0.95);
-      display: inline-flex;
-      align-items: center;
-      gap: 5px;
-      cursor: pointer;
+      color: #9ca3af;
     }
 
-    /* Right rail: like/comment/share */
-    .wa-rail {
-      width: 58px;
-      border-left: 1px solid rgba(255,255,255,0.08);
-      display: flex;
-      flex-direction: column;
-      align-items: center;
-      justify-content: center;
-      gap: 14px;
-      padding: 12px 0;
-      background: linear-gradient(to bottom, rgba(8,11,26,0.9), rgba(3,4,10,0.98));
-      z-index: 2;
-    }
-    .wa-rail-btn {
-      width: 44px;
-      height: 44px;
-      border-radius: 999px;
-      border: 1px solid rgba(255,255,255,0.10);
-      background: rgba(6,9,20,0.98);
-      display: flex;
-      flex-direction: column;
-      align-items: center;
-      justify-content: center;
-      cursor: pointer;
-      gap: 2px;
-    }
-    .wa-rail-btn span:first-child {
-      font-size: 16px;
-    }
-    .wa-rail-btn-label {
-      font-size: 11px;
-      color: var(--text-muted);
-      line-height: 1.1;
-    }
-    .wa-rail-btn.primary {
-      border-color: rgba(0,255,127,0.65);
-      box-shadow: 0 0 0 1px rgba(0,255,127,0.25);
-    }
-    .wa-rail-btn.danger {
-      border-color: rgba(255,77,77,0.6);
-      box-shadow: 0 0 0 1px rgba(255,77,77,0.15);
+    textarea {
+      width: 100%;
+      border-radius: 0.7rem;
+      border: 1px solid rgba(30,41,59,0.9);
+      padding: 0.5rem 0.65rem;
+      background: rgba(15,23,42,0.98);
+      color: #e5e7eb;
+      font-size: 0.9rem;
+      resize: vertical;
+      min-height: 80px;
+      outline: none;
     }
 
-    /* Bottom nav */
-    .wa-bottom-nav {
+    textarea:focus {
+      border-color: #38bdf8;
+      box-shadow: 0 0 0 1px rgba(56,189,248,0.6);
+    }
+
+    .composer-footer {
+      margin-top: 0.55rem;
       display: flex;
       align-items: center;
       justify-content: space-between;
-      border-top: 1px solid rgba(255,255,255,0.12);
-      background: linear-gradient(to top, rgba(0,0,0,0.9), rgba(6,9,18,0.85));
-      padding: 7px 10px 4px;
-      z-index: 5;
-      position: relative;
+      gap: 0.7rem;
+      flex-wrap: wrap;
     }
-    .wa-nav-section {
-      display: flex;
-      align-items: center;
-      gap: 14px;
+
+    .composer-note {
+      font-size: 0.76rem;
+      color: #9ca3af;
     }
-    .wa-tab {
-      display: flex;
-      flex-direction: column;
-      align-items: center;
-      gap: 1px;
-      font-size: 11px;
-      color: var(--text-muted);
-      cursor: pointer;
-    }
-    .wa-tab span:first-child {
-      font-size: 17px;
-    }
-    .wa-tab-label {
-      font-size: 10px;
+
+    .btn {
+      border-radius: 999px;
+      border: 1px solid rgba(148,163,184,0.85);
+      padding: 0.42rem 0.95rem;
+      font-size: 0.8rem;
+      font-weight: 500;
       text-transform: uppercase;
       letter-spacing: 0.12em;
-    }
-    .wa-tab.active .wa-tab-label {
-      color: var(--accent);
-    }
-    .wa-avatar-mini {
-      width: 22px;
-      height: 22px;
-      border-radius: 999px;
-      background: radial-gradient(circle at 30% 20%, #ffffff 0, #999 16%, #3a3a3a 45%, #101010 70%);
-      border: 1px solid rgba(255,255,255,0.26);
-    }
-
-    .wa-fab-shell {
-      position: absolute;
-      left: 50%;
-      transform: translateX(-50%);
-      top: -26px;
-    }
-    .wa-fab {
-      width: 56px;
-      height: 56px;
-      border-radius: 999px;
-      background: radial-gradient(circle at 30% 20%, #1fff9c 0, #00a86b 45%, #0f766e 85%);
-      display: flex;
-      align-items: center;
-      justify-content: center;
-      border: 1px solid rgba(0,0,0,0.9);
-      box-shadow:
-        0 12px 25px rgba(0,0,0,0.6),
-        0 0 0 2px rgba(255,255,255,0.22);
-      cursor: pointer;
-      transform-origin: center;
-      transition: transform 0.12s ease-out;
-    }
-    .wa-fab span {
-      font-size: 24px;
-    }
-    .wa-fab:active {
-      transform: translateX(-50%) scale(0.94);
-    }
-
-    /* Sheet */
-    .wa-sheet-backdrop {
-      position: fixed;
-      inset: 0;
-      background: radial-gradient(circle at top, rgba(0,0,0,0.2), rgba(0,0,0,0.85));
-      display: none;
-      align-items: flex-end;
-      justify-content: center;
-      z-index: 999;
-    }
-    .wa-sheet-backdrop.open {
-      display: flex;
-    }
-    .wa-sheet {
-      width: 100%;
-      max-width: 520px;
-      background: linear-gradient(to top, #05060a, #090c19);
-      border-radius: 18px 18px 0 0;
-      border: 1px solid rgba(255,255,255,0.08);
-      box-shadow: 0 -20px 40px rgba(0,0,0,0.85);
-      padding: 10px 14px 16px;
-      display: flex;
-      flex-direction: column;
-      gap: 10px;
-    }
-    .wa-sheet-handle {
-      width: 42px;
-      height: 4px;
-      border-radius: 999px;
-      background: rgba(148, 163, 184, 0.55);
-      margin: 0 auto 6px;
-    }
-    .wa-sheet-header {
-      display: flex;
-      align-items: center;
-      justify-content: space-between;
-      margin-bottom: 4px;
-    }
-    .wa-sheet-title {
-      font-size: 14px;
-      font-weight: 500;
-    }
-    .wa-sheet-sub {
-      font-size: 11px;
-      color: var(--text-muted);
-      margin-top: 2px;
-    }
-    .wa-sheet-close {
-      width: 26px;
-      height: 26px;
-      border-radius: 999px;
-      border: 1px solid rgba(255,255,255,0.15);
-      background: rgba(15,23,42,0.95);
-      display: inline-flex;
-      align-items: center;
-      justify-content: center;
-      cursor: pointer;
-      font-size: 16px;
-    }
-
-    .wa-sheet-options {
-      display: flex;
-      flex-direction: column;
-      gap: 8px;
-      margin-top: 4px;
-    }
-    .wa-sheet-option {
-      width: 100%;
-      border-radius: 12px;
-      border: 1px solid rgba(148, 163, 184, 0.3);
       background: rgba(15,23,42,0.96);
-      padding: 10px 11px 11px;
-      display: flex;
-      align-items: center;
-      justify-content: space-between;
-      gap: 10px;
-      cursor: pointer;
-    }
-    .wa-sheet-option-main {
-      display: flex;
-      flex-direction: column;
-      gap: 1px;
-      font-size: 13px;
-    }
-    .wa-sheet-option-main span {
-      font-size: 11px;
-      color: var(--text-muted);
-    }
-    .wa-sheet-option .wa-pill {
-      font-size: 10px;
-      padding-inline: 8px;
-    }
-
-    .wa-error {
-      margin-top: 6px;
-      font-size: 11px;
-      color: #fecaca;
-      background: var(--danger-soft);
-      border-radius: 8px;
-      padding: 5px 8px;
-      display: none;
-    }
-
-    /* Toast */
-    #toast {
-      position: fixed;
-      left: 50%;
-      transform: translateX(-50%);
-      bottom: 80px;
-      z-index: 2000;
-      background: rgba(15,23,42,0.96);
-      border-radius: 999px;
-      padding: 7px 13px;
-      font-size: 12px;
       color: #e5e7eb;
-      border: 1px solid rgba(148, 163, 184, 0.55);
-      opacity: 0;
-      transition: opacity 0.18s ease-out, transform 0.18s ease-out;
-      pointer-events: none;
-    }
-    #toast.show {
-      opacity: 1;
-      transform: translateX(-50%) translateY(-4px);
-    }
-    #toast.ok {
-      border-color: rgba(34,197,94,0.75);
-      color: #bbf7d0;
-    }
-    #toast.warn {
-      border-color: rgba(234,179,8,0.75);
-      color: #facc15;
-    }
-    #toast.err {
-      border-color: rgba(248,113,113,0.85);
-      color: #fecaca;
+      cursor: pointer;
     }
 
-    /* Scrollbar */
-    .wa-feed::-webkit-scrollbar {
-      width: 4px;
+    .btn.primary {
+      border-color: rgba(34,197,94,0.9);
+      background: radial-gradient(circle at 30% 0%,
+                  rgba(34,197,94,0.65), rgba(15,23,42,0.98));
+      color: #ecfeff;
     }
-    .wa-feed::-webkit-scrollbar-track {
-      background: transparent;
+
+    .btn:disabled {
+      opacity: 0.55;
+      cursor: default;
     }
-    .wa-feed::-webkit-scrollbar-thumb {
-      background: rgba(148,163,184,0.55);
+
+    .feed-header-row {
+      display: flex;
+      align-items: baseline;
+      justify-content: space-between;
+      gap: 0.6rem;
+      margin-bottom: 0.25rem;
+    }
+
+    .feed-header-row span {
+      font-size: 0.78rem;
+      color: #9ca3af;
+    }
+
+    .feed-list {
+      margin-top: 0.3rem;
+      display: flex;
+      flex-direction: column;
+      gap: 0.65rem;
+      max-height: calc(100vh - 220px);
+      overflow-y: auto;
+      padding-right: 0.2rem;
+    }
+
+    .post-card {
+      border-radius: 0.75rem;
+      border: 1px solid rgba(31,41,55,0.95);
+      background: rgba(15,23,42,0.98);
+      padding: 0.6rem 0.7rem 0.6rem;
+      font-size: 0.86rem;
+    }
+
+    .post-header {
+      display: flex;
+      justify-content: space-between;
+      align-items: baseline;
+      gap: 0.4rem;
+      margin-bottom: 0.2rem;
+    }
+
+    .post-author {
+      font-weight: 500;
+      color: #e5e7eb;
+    }
+
+    .post-meta {
+      font-size: 0.76rem;
+      color: #9ca3af;
+    }
+
+    .post-body {
+      font-size: 0.87rem;
+      color: #e5e7eb;
+      white-space: pre-wrap;
+      word-wrap: break-word;
+      margin-bottom: 0.25rem;
+    }
+
+    .post-footer {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 0.4rem;
+      margin-top: 0.1rem;
+      font-size: 0.78rem;
+      color: #9ca3af;
+    }
+
+    .post-tags {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 0.25rem;
+    }
+
+    .tag-pill {
       border-radius: 999px;
+      border: 1px solid rgba(51,65,85,0.9);
+      padding: 0.04rem 0.45rem;
+      font-size: 0.72rem;
+      color: #9ca3af;
     }
 
-    @media (max-height: 650px) {
-      .wa-card-shell {
-        max-height: calc(100vh - 80px);
-      }
-      .wa-feed {
-        padding-bottom: 10px;
-      }
+    .empty {
+      font-size: 0.84rem;
+      color: #9ca3af;
+      padding: 0.4rem 0.1rem;
+    }
+
+    .status {
+      margin-top: 0.35rem;
+      font-size: 0.78rem;
+      color: #9ca3af;
+    }
+
+    .status.ok { color: #4ade80; }
+    .status.err { color: #fb7185; }
+
+    footer.weall-footer {
+      border-top: 1px solid rgba(31,41,55,0.9);
+      padding: 0.75rem 0.1rem 1.1rem;
+      margin-top: 1.5rem;
+      font-size: 0.78rem;
+      color: #6b7280;
+      text-align: center;
+    }
+
+    footer.weall-footer a {
+      color: #9ca3af;
+      text-decoration: none;
+    }
+
+    footer.weall-footer a:hover {
+      text-decoration: underline;
     }
   </style>
 </head>
 <body>
-<div id="waRoot">
-  <header class="wa-topbar">
-    <div class="wa-brand">
-      <div class="wa-logo"></div>
-      <div class="wa-title-block">
-        <div class="wa-title-main">WeAll</div>
-        <div class="wa-title-sub">Shared governance, human-first</div>
+  <div class="wrap">
+    <header class="page-header">
+      <div class="page-header-main">
+        <div class="brand-row">
+          <div class="brand-mark"></div>
+          <div class="brand-title">
+            <span>WeAll</span>
+            <span>Shared governance, human-first network</span>
+          </div>
+        </div>
+        <div class="page-kicker">Home feed · genesis mode</div>
+        <p class="page-blurb">
+          A simple global feed wired to your local node. Posts here are stored
+          in your node’s ledger and rolled into the shared WeAll state as the
+          network grows.
+        </p>
       </div>
-    </div>
-    <div class="wa-top-actions">
-      <button class="wa-icon-button" id="waBtnGov" title="Governance">
-        <span>⚖</span>
-      </button>
-      <button class="wa-icon-button" id="waBtnInbox" title="Messages">
-        <span>✉</span>
-      </button>
-    </div>
-  </header>
+      <p id="signedIn" class="signed-in-banner">
+        Checking session…
+      </p>
+    </header>
 
-  <section class="wa-card-shell">
-    <div class="wa-blob a"></div>
-    <div class="wa-blob b"></div>
-    <div class="wa-blob c"></div>
+    <main>
+      <!-- Composer -->
+      <section class="card">
+        <h2>Share something</h2>
+        <p>
+          Short text notes are enough for Genesis. Files and rich media can be
+          layered in on top once IPFS flows are fully wired.
+        </p>
 
-    <div class="wa-main">
-      <div id="waFeed" class="wa-feed"></div>
-      <aside class="wa-rail">
-        <button class="wa-rail-btn primary" id="waLike">
-          <span>♡</span>
-          <div class="wa-rail-btn-label">Like</div>
-        </button>
-        <button class="wa-rail-btn" id="waComment">
-          <span>💬</span>
-          <div class="wa-rail-btn-label">Comment</div>
-        </button>
-        <button class="wa-rail-btn" id="waShare">
-          <span>⤴</span>
-          <div class="wa-rail-btn-label">Share</div>
-        </button>
-      </aside>
-    </div>
+        <label for="postText">Your message</label>
+        <textarea id="postText" placeholder="What are you working on for the commons?"></textarea>
 
-    <footer class="wa-bottom-nav">
-      <div class="wa-nav-section">
-        <div class="wa-tab active" id="waTabHome">
-          <span>◎</span>
-          <div class="wa-tab-label">Home</div>
+        <div class="composer-footer">
+          <div class="composer-note" id="composerNote">
+            You’ll need to sign in (Tier 1+) to post.
+          </div>
+          <button class="btn primary" id="btnPost">
+            Post to global feed
+          </button>
         </div>
-        <div class="wa-tab" id="waTabGov">
-          <span>⚖</span>
-          <div class="wa-tab-label">Govern</div>
+
+        <div class="status" id="postStatus"></div>
+      </section>
+
+      <!-- Feed -->
+      <section class="card">
+        <div class="feed-header-row">
+          <h2>Global feed</h2>
+          <span id="feedMeta">Loading…</span>
         </div>
-      </div>
-      <div class="wa-fab-shell">
-        <button class="wa-fab" id="waFab">
-          <span>＋</span>
-        </button>
-      </div>
-      <div class="wa-nav-section">
-        <div class="wa-tab" id="waTabInbox">
-          <span>✉</span>
-          <div class="wa-tab-label">Inbox</div>
-        </div>
-        <div class="wa-tab" id="waTabProfile">
-          <div class="wa-avatar-mini" id="waMiniAvatar"></div>
-          <div class="wa-tab-label">Profile</div>
-        </div>
-      </div>
+        <div id="feedList" class="feed-list"></div>
+        <div class="status" id="feedStatus"></div>
+      </section>
+    </main>
+
+    <footer class="weall-footer">
+      <span>© <span id="footer-year">2024</span> WeAll</span>
+      &nbsp;•&nbsp;<a href="/frontend/privacy.html">Privacy</a>
+      &nbsp;•&nbsp;<a href="/frontend/terms.html">Terms</a>
     </footer>
-  </section>
-</div>
-
-<div id="waSheetBackdrop" class="wa-sheet-backdrop">
-  <div class="wa-sheet">
-    <div class="wa-sheet-handle"></div>
-    <div class="wa-sheet-header">
-      <div>
-        <div class="wa-sheet-title">Create new post</div>
-        <div class="wa-sheet-sub">Share something with the network.</div>
-      </div>
-      <button class="wa-sheet-close" id="waSheetClose">✕</button>
-    </div>
-    <div class="wa-sheet-options">
-      <button class="wa-sheet-option" id="waOptText">
-        <div class="wa-sheet-option-main">
-          <strong>Text post</strong>
-          <span>Share a short thought with the network.</span>
-        </div>
-        <span class="wa-pill">Quick</span>
-      </button>
-      <button class="wa-sheet-option" id="waOptVideo">
-        <div class="wa-sheet-option-main">
-          <strong>Record / upload video</strong>
-          <span>Use your camera to record a short clip.</span>
-        </div>
-        <span class="wa-pill">Beta</span>
-      </button>
-    </div>
-    <div id="waSheetError" class="wa-error" style="display:none;"></div>
   </div>
-</div>
 
-<!-- Hidden video input -->
-<input type="file" id="waVideoInput" accept="video/*" capture="user" style="display:none;" />
+  <!-- Shared helpers -->
+  <script src="/frontend/env.js"></script>
+  <script src="/frontend/auth.js"></script>
+  <script src="/frontend/session.js"></script>
+  <script src="/frontend/nav.js"></script>
+  <script src="/frontend/footer.js"></script>
 
-<div id="toast"></div>
+  <script>
+    (function () {
+      const $ = (id) => document.getElementById(id);
 
-<script src="/frontend/session.js"></script>
-<script src="/frontend/tiktok.js"></script>
+      function apiBase() {
+        return (window.ENV && window.ENV.VITE_API_BASE) || "";
+      }
+
+      async function jsonFetch(path, opts) {
+        const url = apiBase() + path;
+        const options = Object.assign(
+          {
+            method: "GET",
+            headers: { Accept: "application/json" },
+            credentials: "include",
+          },
+          opts || {}
+        );
+        if (options.body && typeof options.body !== "string") {
+          options.headers["Content-Type"] =
+            options.headers["Content-Type"] || "application/json";
+          options.body = JSON.stringify(options.body);
+        }
+        const res = await fetch(url, options);
+        let data = null;
+        try {
+          data = await res.json();
+        } catch {
+          data = null;
+        }
+        if (!res.ok) {
+          const msg =
+            (data && (data.detail || data.error || data.message)) ||
+            "Request failed with " + res.status;
+          throw new Error(msg);
+        }
+        return data;
+      }
+
+      function timeAgo(ts) {
+        if (!ts) return "";
+        // backend uses seconds; tolerate ms
+        if (ts > 1e12) ts = Math.floor(ts / 1000);
+        const now = Math.floor(Date.now() / 1000);
+        const diff = now - ts;
+        if (diff < 5) return "now";
+        if (diff < 60) return diff + "s";
+        const m = Math.floor(diff / 60);
+        if (m < 60) return m + "m";
+        const h = Math.floor(m / 60);
+        if (h < 48) return h + "h";
+        const d = Math.floor(h / 24);
+        if (d < 365) return d + "d";
+        const y = Math.floor(d / 365);
+        return y + "y";
+      }
+
+      function J(obj) {
+        try {
+          return JSON.stringify(obj, null, 2);
+        } catch {
+          return String(obj);
+        }
+      }
+
+      function buildRoleBanner(userId, roles, nodeMeta, poh) {
+        const parts = [];
+
+        const tier =
+          (roles && (roles.poh_tier ?? roles.pohTier)) ||
+          (poh && typeof poh.tier === "number" ? poh.tier : 0) ||
+          0;
+        const status = (poh && poh.status) || "ok";
+
+        parts.push("PoH Tier " + tier + " (" + status + ")");
+
+        const flags = (roles && roles.flags) || {};
+        const caps = (roles && roles.capabilities) || [];
+        const tags = [];
+
+        if (flags.wants_creator || caps.includes("earn_creator_rewards")) {
+          tags.push("Creator");
+        }
+        if (flags.wants_juror || caps.includes("serve_juror_panel")) {
+          tags.push("Juror");
+        }
+        if (flags.wants_validator || caps.includes("validator_duties")) {
+          tags.push("Validator");
+        }
+        if (flags.wants_operator || caps.includes("operator_duties")) {
+          tags.push("Operator");
+        }
+        if (flags.wants_emissary || caps.includes("act_as_emissary")) {
+          tags.push("Emissary");
+        }
+
+        if (tags.length) {
+          parts.push(tags.join(" · "));
+        }
+
+        const nodeKind = (nodeMeta && nodeMeta.node_kind) || "public_gateway";
+        if (nodeKind === "validator_node") {
+          parts.push("Validator node");
+        } else if (nodeKind === "private_node") {
+          parts.push("Private node");
+        } else {
+          parts.push("Gateway node");
+        }
+
+        return "Signed in as " + userId + " · " + parts.join(" · ");
+      }
+
+      async function hydrateHeader() {
+        const bannerEl = $("signedIn");
+        const composerNote = $("composerNote");
+
+        try {
+          const sess = await weallAuth.getSession().catch(() => null);
+
+          if (!sess || !sess.user_id) {
+            if (bannerEl) bannerEl.textContent = "Not signed in.";
+            if (composerNote) {
+              composerNote.textContent =
+                "You’ll need to sign in (Tier 1+) before posting.";
+            }
+            return null;
+          }
+
+          const [poh, roles, nodeMeta] = await Promise.all([
+            weallAuth.getPohMe().catch(() => null),
+            jsonFetch("/roles/effective/me", {
+              headers: { "X-WeAll-User": sess.user_id },
+            }).catch(() => null),
+            jsonFetch("/node/meta").catch(() => null),
+          ]);
+
+          if (bannerEl) {
+            bannerEl.textContent = buildRoleBanner(
+              sess.user_id,
+              roles,
+              nodeMeta,
+              poh
+            );
+          }
+
+          if (composerNote) {
+            const tier = (poh && typeof poh.tier === "number" ? poh.tier : 0) || 0;
+            if (tier >= 1 && (!poh || (poh.status || "ok") === "ok")) {
+              composerNote.textContent = "Posting as " + sess.user_id + ".";
+            } else {
+              composerNote.textContent =
+                "Posting will unlock once your PoH Tier is valid.";
+            }
+          }
+
+          return { sess, poh, roles, nodeMeta };
+        } catch (err) {
+          console.error("hydrateHeader error:", err);
+          if (bannerEl) bannerEl.textContent = "Unable to load session.";
+          if (composerNote) {
+            composerNote.textContent = "Posting may be limited until auth is stable.";
+          }
+          return null;
+        }
+      }
+
+      function renderPost(post) {
+        const el = document.createElement("article");
+        el.className = "post-card";
+
+        const header = document.createElement("div");
+        header.className = "post-header";
+
+        const author = document.createElement("div");
+        author.className = "post-author";
+        author.textContent = post.author || "@unknown";
+
+        const meta = document.createElement("div");
+        meta.className = "post-meta";
+        const created = post.created_at || post.timestamp || null;
+        const scope = post.scope || "global";
+        const bits = [];
+        if (created) bits.push(timeAgo(created));
+        if (scope === "group" && post.group_id) {
+          bits.push("group:" + post.group_id.slice(0, 8));
+        } else {
+          bits.push("global");
+        }
+        meta.textContent = bits.join(" · ");
+
+        header.appendChild(author);
+        header.appendChild(meta);
+
+        const body = document.createElement("div");
+        body.className = "post-body";
+        body.textContent = post.text || "";
+
+        const footer = document.createElement("div");
+        footer.className = "post-footer";
+
+        const tagsRoot = document.createElement("div");
+        tagsRoot.className = "post-tags";
+        const tags = post.tags || [];
+        tags.forEach((t) => {
+          const pill = document.createElement("span");
+          pill.className = "tag-pill";
+          pill.textContent = "#" + t;
+          tagsRoot.appendChild(pill);
+        });
+
+        const idMeta = document.createElement("div");
+        idMeta.textContent = post.id ? "id:" + String(post.id).slice(0, 8) : "";
+
+        footer.appendChild(tagsRoot);
+        footer.appendChild(idMeta);
+
+        el.appendChild(header);
+        el.appendChild(body);
+        el.appendChild(footer);
+
+        return el;
+      }
+
+      function renderFeed(posts) {
+        const listEl = $("feedList");
+        const metaEl = $("feedMeta");
+        const statusEl = $("feedStatus");
+        if (!listEl) return;
+
+        listEl.innerHTML = "";
+        if (!posts || !posts.length) {
+          const empty = document.createElement("div");
+          empty.className = "empty";
+          empty.textContent =
+            "No posts yet. Be the first to share something on this node.";
+          listEl.appendChild(empty);
+          if (metaEl) metaEl.textContent = "0 posts";
+          if (statusEl) {
+            statusEl.textContent =
+              "Genesis mode: posts are stored locally in your node’s ledger.";
+            statusEl.className = "status ok";
+          }
+          return;
+        }
+
+        posts.forEach((p) => {
+          listEl.appendChild(renderPost(p));
+        });
+
+        if (metaEl) metaEl.textContent = posts.length + " posts";
+        if (statusEl) {
+          statusEl.textContent =
+            "Posts are fetched from /content/feed (scope=global).";
+          statusEl.className = "status ok";
+        }
+      }
+
+      async function loadFeed() {
+        const listEl = $("feedList");
+        const metaEl = $("feedMeta");
+        const statusEl = $("feedStatus");
+
+        if (metaEl) metaEl.textContent = "Loading…";
+        if (statusEl) {
+          statusEl.textContent = "";
+          statusEl.className = "status";
+        }
+        if (listEl) listEl.innerHTML = "";
+
+        try {
+          const data = await jsonFetch("/content/feed?scope=global&limit=50");
+          const posts = data.posts || data.items || data.feed || [];
+          renderFeed(posts);
+        } catch (err) {
+          console.error("loadFeed error:", err);
+          if (statusEl) {
+            statusEl.textContent = "Failed to load feed: " + err.message;
+            statusEl.className = "status err";
+          }
+        }
+      }
+
+      async function handlePost() {
+        const textEl = $("postText");
+        const statusEl = $("postStatus");
+        const btn = $("btnPost");
+
+        if (!textEl) return;
+
+        const text = (textEl.value || "").trim();
+        if (!text) {
+          alert("Please enter something to share.");
+          return;
+        }
+
+        try {
+          if (btn) btn.disabled = true;
+          if (statusEl) {
+            statusEl.textContent = "Posting…";
+            statusEl.className = "status";
+          }
+
+          // Require at least Tier 1 before posting
+          const ok = await weallAuth.require({
+            minTier: 1,
+            redirectToLogin: "/frontend/login.html",
+          });
+          if (!ok) {
+            if (btn) btn.disabled = false;
+            if (statusEl) {
+              statusEl.textContent = "Please sign in to post.";
+              statusEl.className = "status err";
+            }
+            return;
+          }
+
+          const sess = await weallAuth.getSession();
+          const author = sess && sess.user_id;
+          if (!author) {
+            throw new Error("No session user_id found.");
+          }
+
+          await jsonFetch("/content/posts", {
+            method: "POST",
+            body: {
+              author,
+              text,
+              scope: "global",
+              group_id: null,
+            },
+          });
+
+          textEl.value = "";
+          if (statusEl) {
+            statusEl.textContent = "Posted. Refreshing feed…";
+            statusEl.className = "status ok";
+          }
+          await loadFeed();
+        } catch (err) {
+          console.error("handlePost error:", err);
+          if (statusEl) {
+            statusEl.textContent = "Failed to post: " + err.message;
+            statusEl.className = "status err";
+          }
+        } finally {
+          if (btn) btn.disabled = false;
+        }
+      }
+
+      function wireEvents() {
+        const btn = $("btnPost");
+        if (btn) {
+          btn.addEventListener("click", function (ev) {
+            ev.preventDefault();
+            handlePost();
+          });
+        }
+      }
+
+      async function init() {
+        wireEvents();
+        await hydrateHeader();
+        await loadFeed();
+      }
+
+      if (document.readyState === "loading") {
+        document.addEventListener("DOMContentLoaded", init);
+      } else {
+        init();
+      }
+    })();
+  </script>
 </body>
 </html>

@@ -1,99 +1,306 @@
-<!doctype html>
+<!DOCTYPE html>
 <html lang="en">
 <head>
-  <meta charset="utf-8">
-  <title>WeAll - Create your account</title>
-  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta charset="UTF-8" />
+  <title>WeAll Node · Create account</title>
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <link rel="stylesheet" href="/frontend/style.css" />
+
+  <!-- Shared frontend helpers -->
+  <script src="/frontend/env.js" defer></script>
+  <script src="/frontend/session.js" defer></script>
+  <script src="/frontend/nav.js" defer></script>
+  <script src="/frontend/footer.js" defer></script>
+
   <style>
-    body { font-family: system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; margin: 1.5rem; }
-    h1 { font-size: 1.8rem; margin-bottom: 1rem; }
-    label { display: block; margin-top: 0.75rem; font-weight: 600; }
-    input { width: 100%; padding: 0.5rem; margin-top: 0.25rem; box-sizing: border-box; }
-    button { margin-top: 1rem; padding: 0.5rem 1rem; }
-    .error { color: #b00020; margin-top: 0.5rem; }
-    .success { color: #006400; margin-top: 0.5rem; }
+    /* Keep this minimal – main styling comes from style.css */
+    .auth-layout {
+      max-width: 420px;
+      margin: 0 auto;
+      padding: 4rem 1.5rem 3rem;
+    }
+    .auth-card {
+      border-radius: 24px;
+      padding: 2rem 1.75rem 1.75rem;
+      background: radial-gradient(circle at 0 0, rgba(0,255,209,0.12), transparent 55%),
+                  rgba(4,14,32,0.96);
+      box-shadow: 0 24px 60px rgba(0,0,0,0.8);
+      border: 1px solid rgba(255,255,255,0.06);
+      backdrop-filter: blur(16px);
+    }
+    .auth-title {
+      font-size: 1.4rem;
+      letter-spacing: 0.12em;
+      text-transform: uppercase;
+      color: #9fb4ff;
+      margin-bottom: 0.25rem;
+    }
+    .auth-heading {
+      font-size: 1.7rem;
+      font-weight: 700;
+      letter-spacing: 0.04em;
+      margin-bottom: 1.25rem;
+    }
+    .auth-sub {
+      font-size: 0.9rem;
+      color: #9caec9;
+      margin-bottom: 1.75rem;
+    }
+    .auth-label {
+      font-size: 0.8rem;
+      letter-spacing: 0.12em;
+      text-transform: uppercase;
+      color: #9caec9;
+      margin-bottom: 0.35rem;
+    }
+    .auth-input {
+      width: 100%;
+      background: rgba(4,10,24,0.9);
+      border-radius: 999px;
+      border: 1px solid rgba(255,255,255,0.12);
+      padding: 0.75rem 1rem;
+      color: #fff;
+      font-size: 0.95rem;
+      outline: none;
+    }
+    .auth-input:focus {
+      border-color: #39ffa8;
+      box-shadow: 0 0 0 1px rgba(57,255,168,0.4);
+    }
+    .auth-row {
+      margin-bottom: 1rem;
+    }
+    .auth-actions {
+      margin-top: 1.25rem;
+      margin-bottom: 1.25rem;
+    }
+    .auth-button {
+      width: 100%;
+      border-radius: 999px;
+      border: none;
+      padding: 0.85rem 1rem;
+      font-size: 0.98rem;
+      font-weight: 600;
+      letter-spacing: 0.08em;
+      text-transform: uppercase;
+      cursor: pointer;
+      background: linear-gradient(90deg, #39ffa8, #00e0ff);
+      color: #02111f;
+    }
+    .auth-button:disabled {
+      opacity: 0.6;
+      cursor: default;
+    }
+    .auth-meta {
+      font-size: 0.8rem;
+      color: #7f8dab;
+      margin-top: 0.25rem;
+    }
+    .auth-meta a {
+      color: #39ffa8;
+      text-decoration: none;
+    }
+    .auth-meta a:hover {
+      text-decoration: underline;
+    }
+    .auth-status {
+      font-size: 0.85rem;
+      margin-top: 0.75rem;
+    }
+    .auth-status.ok {
+      color: #39ffa8;
+    }
+    .auth-status.err {
+      color: #ff6b8b;
+    }
   </style>
+
 </head>
-<body>
-  <h1>WeAll - Create your account</h1>
+<body class="weall-body">
 
-  <form id="signupForm">
-    <label>
-      Email
-      <input type="email" id="email" required autocomplete="email">
-    </label>
+  <!-- Top nav injected by nav.js -->
+  <header id="appHeader"></header>
 
-    <label>
-      Password
-      <input type="password" id="password" required minlength="8" autocomplete="new-password">
-    </label>
+  <main class="auth-layout">
+    <section class="auth-card">
+      <div style="display:flex;align-items:center;gap:0.75rem;margin-bottom:1rem;">
+        <div style="
+          width:36px;height:36px;border-radius:999px;
+          background:conic-gradient(from 210deg, #39ffa8, #00e0ff, #7a5cff, #39ffa8);
+          padding:2px;
+        ">
+          <div style="
+            width:100%;height:100%;border-radius:999px;
+            background:radial-gradient(circle at 30% 0,#162b4f,#020814);
+          "></div>
+        </div>
+        <div>
+          <div class="auth-title">Welcome</div>
+          <div class="auth-heading">Create your WeAll account</div>
+        </div>
+      </div>
 
-    <label>
-      Confirm Password
-      <input type="password" id="confirm" required minlength="8">
-    </label>
+      <p class="auth-sub">
+        Start at Tier&nbsp;1 with an email-anchored identity. You can
+        upgrade to higher PoH tiers later via async and live juror
+        verification.
+      </p>
 
-    <button type="submit">Create Account</button>
-  </form>
+      <form id="signupForm" novalidate>
+        <div class="auth-row">
+          <label class="auth-label" for="handle">Handle</label>
+          <input
+            id="handle"
+            name="handle"
+            class="auth-input"
+            autocomplete="username"
+            placeholder="@yourhandle"
+            required
+          />
+          <div class="auth-meta">
+            This becomes your global pseudonym. Stick to one human, one handle.
+          </div>
+        </div>
 
-  <p class="error" id="error"></p>
-  <p class="success" id="success"></p>
+        <div class="auth-row">
+          <label class="auth-label" for="email">Email</label>
+          <input
+            id="email"
+            name="email"
+            type="email"
+            class="auth-input"
+            autocomplete="email"
+            placeholder="you@example.org"
+            required
+          />
+        </div>
 
-  <p style="margin-top:1.5rem;">
-    Already have an account?
-    <a href="/frontend/login.html">Log in.</a>
-  </p>
+        <div class="auth-row">
+          <label class="auth-label" for="password">Password</label>
+          <input
+            id="password"
+            name="password"
+            type="password"
+            class="auth-input"
+            autocomplete="new-password"
+            placeholder="Choose a strong passphrase"
+            required
+          />
+        </div>
+
+        <div class="auth-row">
+          <label class="auth-label" for="password2">Confirm password</label>
+          <input
+            id="password2"
+            name="password2"
+            type="password"
+            class="auth-input"
+            autocomplete="new-password"
+            placeholder="Repeat your passphrase"
+            required
+          />
+        </div>
+
+        <div class="auth-row">
+          <div class="auth-meta">
+            By continuing you agree that this is a <strong>real human</strong>
+            account and you won’t operate multiple identities on this network.
+          </div>
+        </div>
+
+        <div class="auth-actions">
+          <button id="signupSubmit" class="auth-button" type="submit">
+            Create account
+          </button>
+        </div>
+
+        <div class="auth-meta">
+          Already have an account?
+          <a href="/frontend/login.html">Sign in instead</a>
+        </div>
+
+        <div id="signupStatus" class="auth-status" aria-live="polite"></div>
+      </form>
+    </section>
+  </main>
+
+  <!-- Footer injected by footer.js -->
+  <footer id="appFooter"></footer>
 
   <script>
-    const form = document.getElementById('signupForm');
-    const errorEl = document.getElementById('error');
-    const successEl = document.getElementById('success');
+    (function () {
+      const form = document.getElementById("signupForm");
+      const statusEl = document.getElementById("signupStatus");
+      const submitBtn = document.getElementById("signupSubmit");
 
-    form.addEventListener('submit', async (e) => {
-      e.preventDefault();
-      errorEl.textContent = '';
-      successEl.textContent = '';
-
-      const email = document.getElementById('email').value.trim();
-      const password = document.getElementById('password').value;
-      const confirm = document.getElementById('confirm').value;
-
-      if (!email || !password) {
-        errorEl.textContent = 'Email and password are required.';
-        return;
-      }
-      if (password !== confirm) {
-        errorEl.textContent = 'Passwords do not match.';
-        return;
-      }
-      if (password.length < 8) {
-        errorEl.textContent = 'Password must be at least 8 characters.';
-        return;
+      function setStatus(text, ok) {
+        statusEl.textContent = text || "";
+        statusEl.className = "auth-status " + (ok ? "ok" : "err");
       }
 
-      try {
-        const res = await fetch('/api/signup', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ email, password }),
-        });
-        const data = await res.json();
+      async function handleSignup(evt) {
+        evt.preventDefault();
+        setStatus("", false);
 
-        if (!res.ok || !data.ok) {
-          errorEl.textContent = data.detail || data.error || 'Signup failed.';
+        const handle = document.getElementById("handle").value.trim();
+        const email = document.getElementById("email").value.trim();
+        const pw1 = document.getElementById("password").value;
+        const pw2 = document.getElementById("password2").value;
+
+        if (!handle || !email || !pw1 || !pw2) {
+          setStatus("Please fill out all fields.", false);
+          return;
+        }
+        if (pw1 !== pw2) {
+          setStatus("Passwords do not match.", false);
           return;
         }
 
-        successEl.textContent = 'Account created for ' + (data.account_id || email) +
-          '. Redirecting to login…';
+        submitBtn.disabled = true;
+        setStatus("Creating account…", true);
 
-        setTimeout(() => {
-          window.location.href = '/frontend/login.html';
-        }, 1200);
-      } catch (err) {
-        errorEl.textContent = 'Network error during signup.';
+        try {
+          const resp = await fetch("/auth/apply", {
+            method: "POST",
+            headers: {
+              "Content-Type": "application/json",
+            },
+            body: JSON.stringify({
+              handle: handle,
+              email: email,
+              password: pw1,
+            }),
+          });
+
+          const data = await resp.json().catch(() => ({}));
+
+          if (!resp.ok || data.ok === false) {
+            const msg =
+              (data && (data.error || data.message)) ||
+              "Signup failed. Please try again.";
+            setStatus(msg, false);
+          } else {
+            setStatus(
+              "Account request submitted. Check your email for verification or next steps.",
+              true
+            );
+            // Soft redirect after a short delay so the user can read the message.
+            setTimeout(() => {
+              window.location.href = "/frontend/login.html";
+            }, 1800);
+          }
+        } catch (err) {
+          console.error(err);
+          setStatus("Network error. Is your node online?", false);
+        } finally {
+          submitBtn.disabled = false;
+        }
       }
-    });
+
+      if (form) {
+        form.addEventListener("submit", handleSignup);
+      }
+    })();
   </script>
 </body>
 </html>

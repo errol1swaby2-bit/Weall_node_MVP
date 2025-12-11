@@ -1,423 +1,506 @@
 """
 weall_node/api/poh.py
---------------------------------------------------
-Proof-of-Humanity (PoH) tiers and upgrade flow.
+---------------------
 
-Tiers:
-    0 - Crawler / exchange (read-only, no account)
-    1 - Email verified (like, comment, message)
-    2 - Async verified human (create posts, join groups)
-    3 - Live jury verified human (full protocol access)
+HTTP API surface for Proof-of-Humanity (PoH) flows.
 
-Data layout in executor.ledger["poh"]:
-    {
-        "records": {
-            "<poh_id>": {
-                "poh_id": str,
-                "tier": int,
-                "tier_label": str,
-                "status": "active" | "revoked",
-                "created_at": int,
-                "updated_at": int,
-            },
-            ...
-        },
-        "requests": {
-            "<request_id>": {
-                "id": str,
-                "poh_id": str,
-                "current_tier": int,
-                "target_tier": int,
-                "status": "pending" | "approved" | "rejected",
-                "evidence_cid": str | None,
-                "note": str | None,
-                "created_at": int,
-                "decided_at": int | None,
-                "decided_by": str | None,
-                "decision_note": str | None,
-            },
-            ...
-        },
-    }
+This module is a thin wrapper over:
+
+    weall_node.weall_runtime.poh_flow
+
+It exposes:
+
+- /poh/meta
+- /poh/me
+- /poh/requests/mine
+- /poh/requests/juror
+
+- /poh/upgrade/tier2          (async video → Tier 2)
+- /poh/upgrade/tier3          (request Tier 3 live-call flow)
+- /poh/requests/{id}/tier3/schedule_call
+- /poh/requests/{id}/tier3/mark_started
+- /poh/requests/{id}/tier3/mark_ended
+- /poh/requests/{id}/vote     (juror votes for Tier 2 / Tier 3)
+
+Auth model (MVP):
+-----------------
+For now, the current user is taken from the "X-WeAll-User" header.
+In a production environment this should be wired to the auth session /
+token logic in routers/auth_session.py.
+
+Role gating:
+------------
+Juror voting is gated by the same capabilities as the runtime layer:
+only Tier-3 humans with "wants_juror" flag (or equivalent) should be
+allowed to vote. In this MVP, we treat flags as default and only gate
+by Tier and Capability.SERVE_AS_JUROR.
 """
 
-import time
-import secrets
-from typing import Dict, Any, List, Optional
+from __future__ import annotations
 
-from fastapi import APIRouter, HTTPException, Header, Query
+from typing import Any, Dict, List, Optional
+
+from fastapi import APIRouter, HTTPException, Request
 from pydantic import BaseModel, Field
 
 from ..weall_executor import executor
+from ..weall_runtime import poh_flow
+from ..weall_runtime import roles as roles_runtime
+
 
 router = APIRouter()
 
-# ---------------------------------------------------------------------
-# Tier metadata
-# ---------------------------------------------------------------------
 
-POH_TIERS: Dict[int, Dict[str, Any]] = {
-    0: {
-        "label": "Tier 0 – None",
-        "description": "Crawler / exchange read-only access to the chain.",
-        "capabilities": [
-            "Read public chain data",
-        ],
-    },
-    1: {
-        "label": "Tier 1 – Email verified",
-        "description": "Email verified account.",
-        "capabilities": [
-            "Like posts",
-            "Comment on posts",
-            "Send and receive messages",
-        ],
-    },
-    2: {
-        "label": "Tier 2 – Async verified human",
-        "description": "Async verification (upload evidence, reviewed by jurors).",
-        "capabilities": [
-            "Everything from Tier 1",
-            "Create public and group posts",
-            "Join existing groups",
-        ],
-    },
-    3: {
-        "label": "Tier 3 – Live jury verified human",
-        "description": "Video / live jury verification.",
-        "capabilities": [
-            "Everything from Tier 2",
-            "Create new groups (governance units)",
-            "Opt into juror, node operator, and validator roles",
-            "Participate in protocol-level governance",
-        ],
-    },
-}
-
-MAX_TIER = max(POH_TIERS.keys())
+# ---------------------------------------------------------------------------
+# Helpers
+# ---------------------------------------------------------------------------
 
 
-# ---------------------------------------------------------------------
-# Pydantic models
-# ---------------------------------------------------------------------
-
-class PohStatusResponse(BaseModel):
-    ok: bool = True
-    poh_id: str
-    tier: int
-    tier_label: str
-    status: str
-    created_at: int
-    updated_at: int
-
-
-class PohRequestCreate(BaseModel):
-    target_tier: int = Field(..., ge=1, le=MAX_TIER)
-    evidence_cid: Optional[str] = None
-    note: Optional[str] = Field(
-        None,
-        max_length=4000,
-        description="Optional human-readable note for this request.",
-    )
-
-
-class PohRequest(BaseModel):
-    id: str
-    poh_id: str
-    current_tier: int
-    target_tier: int
-    status: str
-    evidence_cid: Optional[str] = None
-    note: Optional[str] = None
-    created_at: int
-    decided_at: Optional[int] = None
-    decided_by: Optional[str] = None
-    decision_note: Optional[str] = None
-
-
-class RequestDecision(BaseModel):
-    decision: str = Field(..., pattern="^(approve|reject)$")
-    note: Optional[str] = Field(
-        None,
-        max_length=4000,
-        description="Optional note explaining the decision.",
-    )
-
-
-class PohMetaResponse(BaseModel):
-    ok: bool = True
-    tiers: Dict[int, Dict[str, Any]]
-
-
-class PohRequestsResponse(BaseModel):
-    ok: bool = True
-    requests: List[PohRequest]
-
-
-# ---------------------------------------------------------------------
-# Ledger helpers
-# ---------------------------------------------------------------------
-
-def _now() -> int:
-    return int(time.time())
-
-
-def _get_poh_state() -> Dict[str, Any]:
+def _get_ledger() -> Dict[str, Any]:
     """
-    Ensure executor.ledger has a stable "poh" root with
-    'records' and 'requests' subdicts.
+    Access the in-memory ledger from the shared executor.
+
+    This assumes executor.ledger is the canonical state dict used by
+    weall_node.weall_runtime.* modules. If that ever changes, this helper
+    is the only place that needs updating.
     """
-    state = executor.ledger.setdefault("poh", {})
-    state.setdefault("records", {})
-    state.setdefault("requests", {})
-    return state
+    try:
+        return executor.ledger  # type: ignore[attr-defined]
+    except AttributeError as exc:
+        raise RuntimeError("executor.ledger is not available") from exc
 
 
-def _ensure_record(poh_id: str) -> Dict[str, Any]:
+def _get_current_user_id(request: Request) -> str:
     """
-    Ensure a PoH record exists for the given poh_id.
+    MVP: derive the current user ID from the X-WeAll-User header.
 
-    Default tier is 1 (email verified) for real user accounts.
-    Tier 0 is reserved for system / crawler contexts.
+    Example: "@alice", "@errol1swaby2", etc.
+
+    In a production deployment, this should be wired into the
+    auth_session router (e.g. session cookies / tokens).
     """
-    state = _get_poh_state()
-    records = state["records"]
-
-    rec = records.get(poh_id)
-    if rec is None:
-        now = _now()
-        tier = 1 if poh_id != "anonymous" else 0
-        meta = POH_TIERS.get(tier, POH_TIERS[0])
-
-        rec = {
-            "poh_id": poh_id,
-            "tier": tier,
-            "tier_label": meta["label"],
-            "status": "active",
-            "created_at": now,
-            "updated_at": now,
-        }
-        records[poh_id] = rec
-
-    return rec
+    user_id = request.headers.get("X-WeAll-User")
+    if not user_id:
+        raise HTTPException(status_code=401, detail="Missing X-WeAll-User header")
+    return user_id
 
 
-def _recompute_and_persist_tier(poh_id: str) -> Dict[str, Any]:
-    """
-    Look at the base record tier AND any approved requests for this poh_id.
-    Set the record's tier to the maximum approved level.
-    """
-    state = _get_poh_state()
-    records = state["records"]
-    requests = state["requests"]
-
-    rec = _ensure_record(poh_id)
-
-    base_tier = int(rec.get("tier", 0))
-    max_tier = base_tier
-
-    for req in requests.values():
-        if req.get("poh_id") == poh_id and req.get("status") == "approved":
-            t = int(req.get("target_tier") or 0)
-            if t > max_tier:
-                max_tier = t
-
-    if max_tier < 0 or max_tier > MAX_TIER:
-        max_tier = min(max(max_tier, 0), MAX_TIER)
-
-    if max_tier != rec.get("tier"):
-        meta = POH_TIERS.get(max_tier, POH_TIERS[0])
-        rec["tier"] = max_tier
-        rec["tier_label"] = meta["label"]
-        rec["updated_at"] = _now()
-
-    return rec
+def _tier_label(tier: int) -> str:
+    if tier <= poh_flow.TIER_0:
+        return "observer"
+    if tier == poh_flow.TIER_1:
+        return "tier1"
+    if tier == poh_flow.TIER_2:
+        return "tier2"
+    if tier >= poh_flow.TIER_3:
+        return "tier3"
+    return "unknown"
 
 
-def _require_user_header(x_weall_user: Optional[str]) -> str:
-    if not x_weall_user:
-        raise HTTPException(
-            status_code=400,
-            detail="Missing X-WeAll-User header for PoH operations.",
-        )
-    return x_weall_user
-
-
-# ---------------------------------------------------------------------
-# API endpoints
-# ---------------------------------------------------------------------
-
-@router.get("/poh/meta", response_model=PohMetaResponse)
-def poh_meta() -> PohMetaResponse:
-    """
-    Expose tier metadata for the frontend.
-    """
-    return PohMetaResponse(ok=True, tiers=POH_TIERS)
-
-
-@router.get("/poh/me", response_model=PohStatusResponse)
-def poh_me(
-    x_weall_user: Optional[str] = Header(default=None, alias="X-WeAll-User"),
-) -> PohStatusResponse:
-    """
-    Return PoH status for the current user.
-
-    - If no record exists, create one (Tier 1 for normal accounts).
-    - Always recompute tier from any approved upgrade requests.
-    """
-    poh_id = _require_user_header(x_weall_user)
-    rec = _recompute_and_persist_tier(poh_id)
-
-    return PohStatusResponse(
-        ok=True,
-        poh_id=rec["poh_id"],
-        tier=int(rec["tier"]),
-        tier_label=str(rec.get("tier_label", POH_TIERS[int(rec["tier"])]["label"])),
-        status=str(rec.get("status", "active")),
-        created_at=int(rec.get("created_at", _now())),
-        updated_at=int(rec.get("updated_at", _now())),
-    )
-
-
-@router.post("/poh/requests", response_model=dict)
-def create_poh_request(
-    payload: PohRequestCreate,
-    x_weall_user: Optional[str] = Header(default=None, alias="X-WeAll-User"),
-):
-    """
-    User-initiated upgrade request to a higher tier (e.g. Tier 2 or 3).
-    """
-    poh_id = _require_user_header(x_weall_user)
-    state = _get_poh_state()
-    records = state["records"]
-    requests = state["requests"]
-
-    rec = _ensure_record(poh_id)
-    current_tier = int(rec.get("tier", 0))
-
-    if payload.target_tier <= current_tier:
-        raise HTTPException(
-            status_code=400,
-            detail="Target tier must be higher than current tier.",
-        )
-    if payload.target_tier > MAX_TIER:
-        raise HTTPException(
-            status_code=400,
-            detail=f"Target tier {payload.target_tier} is not supported.",
-        )
-
-    req_id = secrets.token_hex(8)
-    now = _now()
-
-    req = {
-        "id": req_id,
-        "poh_id": poh_id,
-        "current_tier": current_tier,
-        "target_tier": int(payload.target_tier),
-        "status": "pending",
-        "evidence_cid": payload.evidence_cid,
-        "note": payload.note,
-        "created_at": now,
-        "decided_at": None,
-        "decided_by": None,
-        "decision_note": None,
+def _serialize_poh_record(user_id: str, rec: Dict[str, Any]) -> Dict[str, Any]:
+    tier = int(rec.get("tier", 0))
+    history = rec.get("history") or []
+    evidence_hashes = rec.get("evidence_hashes") or []
+    return {
+        "user_id": user_id,
+        "tier": tier,
+        "tier_label": _tier_label(tier),
+        "history": history,
+        "evidence_hashes": evidence_hashes,
     }
 
-    requests[req_id] = req
 
-    return {"ok": True, "request": req}
-
-
-@router.get("/poh/requests/mine", response_model=PohRequestsResponse)
-def my_poh_requests(
-    x_weall_user: Optional[str] = Header(default=None, alias="X-WeAll-User"),
-) -> PohRequestsResponse:
+def _serialize_request(req: Dict[str, Any]) -> Dict[str, Any]:
     """
-    List all requests created by the current user.
+    Convert the raw upgrade_request dict into a stable JSON shape.
     """
-    poh_id = _require_user_header(x_weall_user)
-    state = _get_poh_state()
-    requests = state["requests"]
+    return {
+        "id": req.get("id"),
+        "user_id": req.get("user_id"),
+        "current_tier": req.get("current_tier"),
+        "target_tier": req.get("target_tier"),
+        "status": req.get("status"),
+        "created_at": req.get("created_at"),
+        "updated_at": req.get("updated_at"),
+        "expires_at": req.get("expires_at"),
+        "aggregates": req.get("aggregates") or {},
+        "required_jurors": req.get("required_jurors"),
+        "min_approvals": req.get("min_approvals"),
+        "jurors": req.get("jurors") or {},
+        "call": req.get("call") or None,
+    }
 
-    out: List[PohRequest] = []
-    for req in requests.values():
-        if req.get("poh_id") == poh_id:
-            out.append(PohRequest(**req))
 
-    # Sort newest first for convenience
-    out.sort(key=lambda r: r.created_at, reverse=True)
+def _get_effective_juror_capability(
+    ledger: Dict[str, Any],
+    user_id: str,
+) -> bool:
+    """
+    Determine whether a given user currently has juror capability.
 
-    return PohRequestsResponse(ok=True, requests=out)
+    MVP behavior:
+    - Map PoH record tier -> PoHTier enum.
+    - Assume default HumanRoleFlags() (wants_juror=True would be
+      more precise, but flags storage is not yet wired into ledger).
+    - Check for Capability.SERVE_AS_JUROR.
+    """
+    rec = poh_flow.ensure_poh_record(ledger, user_id)
+    tier_int = int(rec.get("tier", 0))
+    try:
+        poh_tier_enum = roles_runtime.PoHTier(tier_int)
+    except ValueError:
+        poh_tier_enum = roles_runtime.PoHTier.OBSERVER
+
+    flags = roles_runtime.HumanRoleFlags()  # default all wants_* = False
+    profile = roles_runtime.compute_effective_role_profile(poh_tier_enum, flags)
+    return roles_runtime.Capability.SERVE_AS_JUROR in profile.capabilities
 
 
-@router.get("/poh/requests/pending", response_model=PohRequestsResponse)
-def pending_poh_requests(
-    target_tier: Optional[int] = Query(
+# ---------------------------------------------------------------------------
+# Request/response models
+# ---------------------------------------------------------------------------
+
+
+class PohMeResponse(BaseModel):
+    user_id: str
+    tier: int
+    tier_label: str
+    history: List[Dict[str, Any]]
+    evidence_hashes: List[str]
+
+
+class Tier2UpgradeBody(BaseModel):
+    video_cids: List[str] = Field(
+        default_factory=list,
+        description="IPFS CIDs for the async verification video(s).",
+    )
+    random_phrase: Optional[str] = Field(
         default=None,
-        description="If provided, only show requests for this target tier.",
-    ),
-):
+        description="Random phrase that the user was asked to read.",
+    )
+    device_fingerprint: Optional[str] = Field(
+        default=None,
+        description="Opaque device fingerprint or identifier.",
+    )
+    extra_metadata: Optional[Dict[str, Any]] = Field(
+        default=None,
+        description="Any extra structured metadata.",
+    )
+
+
+class Tier3ScheduleBody(BaseModel):
+    scheduled_for: int = Field(
+        ...,
+        description="Unix timestamp when the live call is scheduled to occur.",
+    )
+    session_id: str = Field(
+        ...,
+        description="Backend / WebRTC session identifier for the live call.",
+    )
+    scheduled_by: Optional[str] = Field(
+        default=None,
+        description="User id or 'system' that scheduled the call.",
+    )
+
+
+class Tier3MarkEndedBody(BaseModel):
+    recording_cids: Optional[List[str]] = Field(
+        default=None,
+        description="Optional IPFS CIDs pointing to live-call recording segments.",
+    )
+
+
+class JurorVoteBody(BaseModel):
+    vote: str = Field(..., regex="^(approve|reject)$")
+    reason: Optional[str] = Field(
+        default="",
+        description="Optional free-text explanation from the juror.",
+    )
+
+
+# ---------------------------------------------------------------------------
+# Meta + current user endpoints
+# ---------------------------------------------------------------------------
+
+
+@router.get("/poh/meta")
+def get_poh_meta() -> Dict[str, Any]:
     """
-    Juror / operator view of pending requests.
-
-    (For now, access control is manual: use 'jury:local' or similar in X-WeAll-User
-    at the client level; later we can gate it on Tier 3 + juror flag.)
+    Return human-readable metadata about PoH tiers and roles.
     """
-    state = _get_poh_state()
-    requests = state["requests"]
+    # These descriptions should mirror the Full Scope spec.
+    return {
+        "tiers": [
+            {
+                "id": 0,
+                "label": "observer",
+                "name": "Observer",
+                "description": (
+                    "Unverified. Can browse public content where allowed, "
+                    "but cannot participate or earn rewards."
+                ),
+            },
+            {
+                "id": 1,
+                "label": "tier1",
+                "name": "Tier 1 – Email Verified",
+                "description": (
+                    "Email + auth verified account. View-only, can prepare "
+                    "their profile and begin the Tier 2 flow."
+                ),
+            },
+            {
+                "id": 2,
+                "label": "tier2",
+                "name": "Tier 2 – Async Video Verified",
+                "description": (
+                    "Async video verified by human jurors. Can post, comment, "
+                    "like, join groups, participate in polls, open disputes, "
+                    "and (by default) earn creator rewards."
+                ),
+            },
+            {
+                "id": 3,
+                "label": "tier3",
+                "name": "Tier 3 – Live Juror Verified",
+                "description": (
+                    "Live call with jurors, followed by verification votes. "
+                    "Unlocks juror, validator, operator, and emissary "
+                    "functions, and the ability to create groups and "
+                    "governance proposals."
+                ),
+            },
+        ]
+    }
 
-    out: List[PohRequest] = []
-    for req in requests.values():
-        if req.get("status") != "pending":
+
+@router.get("/poh/me", response_model=PohMeResponse)
+def get_poh_me(request: Request) -> PohMeResponse:
+    """
+    Fetch the current user's PoH record and derived tier info.
+    """
+    user_id = _get_current_user_id(request)
+    ledger = _get_ledger()
+    rec = poh_flow.ensure_poh_record(ledger, user_id)
+    data = _serialize_poh_record(user_id, rec)
+    return PohMeResponse(**data)
+
+
+# ---------------------------------------------------------------------------
+# Listing upgrade requests
+# ---------------------------------------------------------------------------
+
+
+@router.get("/poh/requests/mine")
+def list_my_poh_requests(request: Request) -> Dict[str, Any]:
+    """
+    List all PoH upgrade requests belonging to the current user.
+    """
+    user_id = _get_current_user_id(request)
+    ledger = _get_ledger()
+    poh_root = poh_flow._ensure_poh_root(ledger)  # type: ignore[attr-defined]
+    reqs = [
+        _serialize_request(req)
+        for req in poh_root["upgrade_requests"].values()
+        if req.get("user_id") == user_id
+    ]
+    return {"ok": True, "requests": reqs}
+
+
+@router.get("/poh/requests/juror")
+def list_juror_assignments(request: Request) -> Dict[str, Any]:
+    """
+    List all upgrade requests where the current user is an assigned juror.
+    """
+    user_id = _get_current_user_id(request)
+    ledger = _get_ledger()
+    poh_root = poh_flow._ensure_poh_root(ledger)  # type: ignore[attr-defined]
+
+    assignments: List[Dict[str, Any]] = []
+    for req in poh_root["upgrade_requests"].values():
+        jurors = req.get("jurors") or {}
+        if user_id not in jurors:
             continue
-        if target_tier is not None and int(req.get("target_tier", 0)) != target_tier:
-            continue
-        out.append(PohRequest(**req))
+        assignments.append(_serialize_request(req))
 
-    # Newest first
-    out.sort(key=lambda r: r.created_at, reverse=True)
-
-    return PohRequestsResponse(ok=True, requests=out)
+    return {"ok": True, "requests": assignments}
 
 
-@router.post("/poh/requests/{request_id}/decision", response_model=dict)
-def decide_poh_request(
+# ---------------------------------------------------------------------------
+# Tier 2: async video flow
+# ---------------------------------------------------------------------------
+
+
+@router.post("/poh/upgrade/tier2")
+def upgrade_to_tier2(body: Tier2UpgradeBody, request: Request) -> Dict[str, Any]:
+    """
+    Initiate or continue the Tier 2 async video flow for the current user.
+
+    Steps:
+    - Ensure PoH record exists and is currently Tier 1.
+    - Create or reuse a Tier 2 upgrade request.
+    - Attach async video evidence (video CIDs, random phrase, device fingerprint).
+    - Move request into STATUS_AWAITING_VOTES for jurors.
+    """
+    user_id = _get_current_user_id(request)
+    ledger = _get_ledger()
+
+    try:
+        req = poh_flow.submit_upgrade_request(
+            ledger,
+            user_id,
+            target_tier=poh_flow.TIER_2,
+        )
+        req = poh_flow.submit_tier2_async_video(
+            ledger,
+            req["id"],
+            user_id,
+            video_cids=body.video_cids,
+            random_phrase=body.random_phrase,
+            device_fingerprint=body.device_fingerprint,
+            extra_metadata=body.extra_metadata,
+        )
+    except (ValueError, KeyError) as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+    return {"ok": True, "request": _serialize_request(req)}
+
+
+# ---------------------------------------------------------------------------
+# Tier 3: live call flow
+# ---------------------------------------------------------------------------
+
+
+@router.post("/poh/upgrade/tier3")
+def request_tier3_upgrade(request: Request) -> Dict[str, Any]:
+    """
+    Create (or reuse) a Tier 3 upgrade request for the current user.
+
+    This does NOT schedule a call; it simply establishes the intent
+    and moves the request into the Tier 3 pipeline. Scheduling and
+    call lifecycle are handled by other endpoints.
+    """
+    user_id = _get_current_user_id(request)
+    ledger = _get_ledger()
+
+    try:
+        req = poh_flow.submit_upgrade_request(
+            ledger,
+            user_id,
+            target_tier=poh_flow.TIER_3,
+        )
+    except (ValueError, KeyError) as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+    return {"ok": True, "request": _serialize_request(req)}
+
+
+@router.post("/poh/requests/{request_id}/tier3/schedule_call")
+def schedule_tier3_call(
     request_id: str,
-    payload: RequestDecision,
-    x_weall_user: Optional[str] = Header(default=None, alias="X-WeAll-User"),
-):
+    body: Tier3ScheduleBody,
+    request: Request,
+) -> Dict[str, Any]:
     """
-    Juror/operator decision on a PoH upgrade request.
+    Attach live-call scheduling metadata for a Tier 3 request.
 
-    For now, any caller (e.g. 'jury:local') can decide. Later we can
-    gate this to Tier 3 + juror pool membership.
+    Typically called by a backend / operator / scheduler, but we don't
+    enforce a specific role here yet.
     """
-    decider = _require_user_header(x_weall_user)
-    state = _get_poh_state()
-    requests = state["requests"]
+    _ = _get_current_user_id(request)  # reserved for auth, currently unused
+    ledger = _get_ledger()
 
-    req = requests.get(request_id)
-    if not req:
-        raise HTTPException(status_code=404, detail="PoH request not found")
+    try:
+        req = poh_flow.schedule_tier3_call(
+            ledger,
+            request_id,
+            scheduled_for=body.scheduled_for,
+            session_id=body.session_id,
+            scheduled_by=body.scheduled_by,
+        )
+    except (ValueError, KeyError) as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
 
-    if req.get("status") != "pending":
-        # Idempotent-ish behaviour: if we try to decide twice, just return.
-        raise HTTPException(status_code=400, detail="Request is already approved")
+    return {"ok": True, "request": _serialize_request(req)}
 
-    now = _now()
 
-    if payload.decision == "approve":
-        req["status"] = "approved"
-    else:
-        req["status"] = "rejected"
+@router.post("/poh/requests/{request_id}/tier3/mark_started")
+def mark_tier3_call_started(
+    request_id: str,
+    request: Request,
+) -> Dict[str, Any]:
+    """
+    Mark a Tier 3 live call as started. Typically invoked when the
+    call session actually begins.
+    """
+    _ = _get_current_user_id(request)  # reserved for auth, currently unused
+    ledger = _get_ledger()
 
-    req["decided_at"] = now
-    req["decided_by"] = decider
-    req["decision_note"] = payload.note
+    try:
+        req = poh_flow.mark_tier3_call_started(ledger, request_id)
+    except (ValueError, KeyError) as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
 
-    # IMPORTANT: recompute tier now that we have a new decision.
-    poh_id = req.get("poh_id")
-    if poh_id:
-        _recompute_and_persist_tier(poh_id)
+    return {"ok": True, "request": _serialize_request(req)}
 
-    return {"ok": True, "request": req}
+
+@router.post("/poh/requests/{request_id}/tier3/mark_ended")
+def mark_tier3_call_ended(
+    request_id: str,
+    body: Tier3MarkEndedBody,
+    request: Request,
+) -> Dict[str, Any]:
+    """
+    Mark a Tier 3 live call as ended and optionally attach recording CIDs.
+    """
+    _ = _get_current_user_id(request)  # reserved for auth, currently unused
+    ledger = _get_ledger()
+
+    try:
+        req = poh_flow.mark_tier3_call_ended(
+            ledger,
+            request_id,
+            recording_cids=body.recording_cids,
+        )
+    except (ValueError, KeyError) as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+    return {"ok": True, "request": _serialize_request(req)}
+
+
+# ---------------------------------------------------------------------------
+# Juror voting
+# ---------------------------------------------------------------------------
+
+
+@router.post("/poh/requests/{request_id}/vote")
+def juror_vote_on_poh_request(
+    request_id: str,
+    body: JurorVoteBody,
+    request: Request,
+) -> Dict[str, Any]:
+    """
+    Apply a juror's vote on a Tier 2 or Tier 3 PoH upgrade request.
+
+    Gated by:
+    - User must have SERVE_AS_JUROR capability (Tier 3 in practice).
+    """
+    user_id = _get_current_user_id(request)
+    ledger = _get_ledger()
+
+    # Check juror capability from runtime roles.
+    if not _get_effective_juror_capability(ledger, user_id):
+        raise HTTPException(status_code=403, detail="User is not authorized to serve as juror")
+
+    try:
+        req = poh_flow.apply_juror_vote(
+            ledger,
+            request_id,
+            user_id,
+            vote=body.vote,
+            reason=body.reason or "",
+        )
+    except (ValueError, KeyError) as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+    return {"ok": True, "request": _serialize_request(req)}

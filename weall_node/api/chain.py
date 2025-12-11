@@ -53,21 +53,68 @@ def _get_chain_list() -> list[dict]:
 
 @router.get("/blocks")
 def get_blocks() -> list[BlockModel]:
+    """
+    Return all committed blocks as BlockModel instances.
+
+    Supports both the legacy block shape (height/time/block_id at top-level)
+    and the newer executor shape:
+
+        {
+          "id": <block_id>,
+          "height": <h>,
+          "header": {
+            "height": <h>,
+            "prev_id": <prev_block_id>,
+            "ts": <unix_ts>,
+            "txs_root": "..."
+          },
+          "txs": [...]
+        }
+    """
     try:
         blocks = _get_chain_list()
         logger.info("Fetched %s blocks", len(blocks))
         out: list[BlockModel] = []
+
         for b in blocks:
-            header = {
-                "height": int(b.get("height", 0)),
-                "time": int(b.get("time", b.get("ts", 0))),
-                "proposer": b.get("proposer"),
-                "votes": list(b.get("votes", [])),
-                "prev_block_id": b.get("prev_block_id"),
-                "block_id": b.get("block_id") or b.get("hash") or "",
-                "txs": list(b.get("txs", [])),
-            }
-            out.append(BlockModel(**header))
+            header = b.get("header") or {}
+
+            height = int(b.get("height", header.get("height", 0)))
+            ts = int(
+                b.get(
+                    "time",
+                    b.get(
+                        "ts",
+                        header.get("ts", 0),
+                    ),
+                )
+            )
+
+            proposer = b.get("proposer")
+            votes = list(b.get("votes", []))
+
+            prev_block_id = b.get("prev_block_id") or header.get("prev_id")
+            block_id = (
+                b.get("block_id")
+                or b.get("hash")
+                or b.get("id")
+                or ""
+            )
+
+            txs = list(b.get("txs", []))
+
+            out.append(
+                BlockModel(
+                    height=height,
+                    time=ts,
+                    proposer=proposer,
+                    votes=votes,
+                    prev_block_id=prev_block_id,
+                    block_id=block_id,
+                    txs=txs,
+                )
+            )
+
         return out
     except Exception as e:
         logger.exception("Failed to fetch blocks: %s", e)
@@ -76,6 +123,12 @@ def get_blocks() -> list[BlockModel]:
 
 @router.get("/latest")
 def get_latest() -> dict:
+    """
+    Return the raw latest block dict, if any.
+
+    This mirrors the underlying executor.ledger['chain'] entry so that
+    power users / tools can inspect the full structure directly.
+    """
     try:
         blocks = _get_chain_list()
         blk = blocks[-1] if blocks else None

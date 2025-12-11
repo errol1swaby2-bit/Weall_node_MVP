@@ -4,211 +4,602 @@
   <meta charset="UTF-8">
   <title>WeAll — Encrypted Messaging</title>
   <meta name="viewport" content="width=device-width, initial-scale=1">
-  <link rel="stylesheet" href="/frontend/style.css?v=1762461479">
+
+  <!-- Global app styles -->
+  <link rel="stylesheet" href="/frontend/style.css">
+
   <style>
     body {
-      background:#000;
-      color:#fff;
-      font-family:Arial, sans-serif;
-      margin:0;
-      padding:0;
+      margin: 0;
+      padding: 0;
+      background: #020617;
+      color: #e5e7eb;
+      font-family: system-ui, -apple-system, BlinkMacSystemFont,
+        "Segoe UI", sans-serif;
     }
-    header {
-      background:#111;
-      padding:12px 16px;
-      display:flex;
-      align-items:center;
-      justify-content:space-between;
+
+    .msg-shell {
+      max-width: 960px;
+      margin: 0 auto;
+      padding: 1.5rem 1.25rem 3rem;
     }
-    header h2 { margin:0; font-size:1.2em; }
-    header a {
-      color:#2ecc71;
-      text-decoration:none;
-      font-weight:bold;
-      font-size:0.9em;
+
+    .msg-header {
+      display: flex;
+      flex-direction: column;
+      gap: 0.5rem;
+      margin-bottom: 1.5rem;
     }
-    .container {
-      max-width:800px;
-      margin:auto;
-      padding:20px;
+
+    @media (min-width: 768px) {
+      .msg-header {
+        flex-direction: row;
+        justify-content: space-between;
+        align-items: baseline;
+      }
     }
+
+    .msg-title {
+      font-size: 1.35rem;
+      font-weight: 600;
+      letter-spacing: 0.04em;
+      text-transform: uppercase;
+      color: #f9fafb;
+    }
+
+    .msg-subtitle {
+      font-size: 0.85rem;
+      color: #9ca3af;
+      max-width: 420px;
+    }
+
+    .signed-in-banner {
+      font-size: 0.78rem;
+      letter-spacing: 0.03em;
+      text-transform: uppercase;
+      color: #9ca3af;
+      text-align: right;
+    }
+
+    .signed-in-banner strong {
+      font-weight: 600;
+    }
+
+    .msg-grid {
+      display: grid;
+      grid-template-columns: minmax(0, 1.4fr) minmax(0, 1.6fr);
+      gap: 1.25rem;
+    }
+
+    @media (max-width: 880px) {
+      .msg-grid {
+        grid-template-columns: minmax(0, 1fr);
+      }
+    }
+
     .card {
-      background:#111;
-      border-radius:12px;
-      padding:16px;
-      margin-bottom:18px;
-      box-shadow:0 0 5px #222;
+      background: radial-gradient(circle at top left, rgba(56, 189, 248, 0.06), transparent 55%),
+                  radial-gradient(circle at bottom right, rgba(168, 85, 247, 0.07), transparent 55%),
+                  rgba(15, 23, 42, 0.96);
+      border-radius: 0.9rem;
+      border: 1px solid rgba(148, 163, 184, 0.25);
+      padding: 1rem 1rem 1.2rem;
+      box-shadow:
+        0 18px 45px rgba(15, 23, 42, 0.85),
+        0 0 0 1px rgba(15, 23, 42, 0.9);
+      backdrop-filter: blur(12px);
     }
-    h3 { color:#2ecc71; margin-top:0; }
-    textarea, input {
-      width:100%;
-      background:#000;
-      border:1px solid #333;
-      border-radius:8px;
-      padding:8px;
-      color:#fff;
-      margin-top:6px;
+
+    .card h3 {
+      margin: 0 0 0.35rem;
+      font-size: 0.95rem;
+      text-transform: uppercase;
+      letter-spacing: 0.12em;
+      color: #22c55e;
     }
-    button {
-      background:#2ecc71;
-      border:none;
-      color:#000;
-      border-radius:8px;
-      padding:8px 12px;
-      font-weight:bold;
-      cursor:pointer;
-      margin-top:8px;
+
+    .card-note {
+      font-size: 0.78rem;
+      color: #9ca3af;
+      margin-bottom: 0.6rem;
     }
-    button:hover { background:#27ae60; }
-    .msg { color:#aaa; font-size:0.85em; margin-top:8px; }
+
+    label {
+      display: block;
+      font-size: 0.78rem;
+      text-transform: uppercase;
+      letter-spacing: 0.06em;
+      color: #9ca3af;
+      margin-top: 0.4rem;
+    }
+
+    input, textarea {
+      width: 100%;
+      margin-top: 0.25rem;
+      border-radius: 0.7rem;
+      padding: 0.5rem 0.7rem;
+      border: 1px solid rgba(51, 65, 85, 0.9);
+      background: rgba(15, 23, 42, 0.95);
+      color: #e5e7eb;
+      font-size: 0.9rem;
+      outline: none;
+    }
+
+    input:focus,
+    textarea:focus {
+      border-color: #22c55e;
+      box-shadow: 0 0 0 1px rgba(34, 197, 94, 0.6);
+    }
+
+    textarea {
+      min-height: 120px;
+      resize: vertical;
+    }
+
+    .btn {
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      border-radius: 999px;
+      padding: 0.45rem 0.9rem;
+      border: 1px solid rgba(148, 163, 184, 0.7);
+      background: rgba(15, 23, 42, 0.96);
+      color: #e5e7eb;
+      font-size: 0.8rem;
+      font-weight: 500;
+      cursor: pointer;
+      margin-top: 0.6rem;
+    }
+
+    .btn-primary {
+      border-color: rgba(34, 197, 94, 0.9);
+      background: radial-gradient(circle at top left,
+                 rgba(34, 197, 94, 0.4), rgba(15, 23, 42, 0.96));
+      color: #ecfeff;
+    }
+
+    .btn:disabled {
+      opacity: 0.5;
+      cursor: default;
+    }
+
+    .msg-status {
+      margin-top: 0.4rem;
+      font-size: 0.78rem;
+      color: #9ca3af;
+    }
+
     .scroll-list {
-      max-height:300px;
-      overflow-y:auto;
-      border:1px solid #222;
-      border-radius:8px;
-      padding:8px;
-      background:#000;
+      max-height: 260px;
+      overflow-y: auto;
+      margin-top: 0.4rem;
+      border-radius: 0.7rem;
+      border: 1px solid rgba(30, 41, 59, 0.9);
+      background: rgba(15, 23, 42, 0.96);
+      padding: 0.6rem;
+      font-size: 0.86rem;
     }
+
     .message {
-      border-bottom:1px solid #222;
-      padding:6px 0;
+      border-bottom: 1px solid rgba(30, 41, 59, 0.85);
+      padding: 0.45rem 0;
     }
-    .message strong { color:#2ecc71; }
-    .message small { color:#999; font-size:0.8em; }
+
+    .message:last-child {
+      border-bottom: none;
+    }
+
+    .message strong {
+      color: #22c55e;
+    }
+
+    .message small {
+      display: inline-block;
+      margin-top: 0.15rem;
+      font-size: 0.72rem;
+      color: #6b7280;
+    }
+
+    footer.weall-footer {
+      border-top: 1px solid rgba(31, 41, 55, 0.9);
+      padding: 0.75rem 1.25rem 1.25rem;
+      margin-top: 2rem;
+      font-size: 0.78rem;
+      color: #6b7280;
+      text-align: center;
+    }
+
+    footer.weall-footer a {
+      color: #9ca3af;
+      text-decoration: none;
+    }
+
+    footer.weall-footer a:hover {
+      text-decoration: underline;
+    }
   </style>
-  <script src="env.js"></script>
-  <script src="api_shim.js"></script>
 </head>
 <body>
-<div id="toast" role="status" aria-live="polite"></div>
-  <header>
-    <h2>Encrypted Messaging</h2>
-    <a href="index.html">← Back to Feed</a>
-  </header>
+  <div class="msg-shell">
+    <header class="msg-header">
+      <div>
+        <h1 class="msg-title">Encrypted Messaging</h1>
+        <p class="msg-subtitle">
+          Simple, server-routed messages between WeAll IDs. Content can be
+          plaintext or client-side encrypted; keys stay on your device.
+        </p>
+      </div>
 
-  <div class="container">
-    <!-- Inbox -->
-    <div class="card">
-      <h3>Inbox</h3>
-      <div id="inbox" class="scroll-list">Loading...</div>
-      <button onclick="refreshInbox()">Refresh Inbox</button>
-      <div class="msg" id="inboxMsg"></div>
-    </div>
+      <p id="signedIn" class="signed-in-banner">
+        Loading session…
+      </p>
+    </header>
 
-    <!-- Sent Messages -->
-    <div class="card">
-      <h3>Sent</h3>
-      <div id="sent" class="scroll-list">Loading...</div>
-      <button onclick="refreshSent()">Refresh Sent</button>
-      <div class="msg" id="sentMsg"></div>
-    </div>
+    <main class="msg-main">
+      <section class="msg-grid">
+        <!-- Left column: compose + key tools -->
+        <div>
+          <div class="card">
+            <h3>Compose message</h3>
+            <p class="card-note">
+              Use a WeAll handle or messaging ID for the recipient. Messages
+              are stored locally on the network and synced via P2P.
+            </p>
 
-    <!-- Compose -->
-    <div class="card">
-      <h3>New Message</h3>
-      <input id="toUser" placeholder="Recipient User ID">
-      <textarea id="messageBody" placeholder="Type your message..." rows="3"></textarea>
-      <button onclick="sendMessage()">Send Secure Message</button>
-      <div class="msg" id="sendMsg"></div>
-    </div>
+            <label for="toUser">Recipient</label>
+            <input
+              id="toUser"
+              type="text"
+              placeholder="@handle or messaging ID"
+              autocomplete="off"
+            />
 
-    <!-- Key Export -->
-    <div class="card">
-      <h3>Export Keys</h3>
-      <button onclick="exportKeys()">Download Keys</button>
-      <div class="msg" id="keyMsg">Keep this file safe! It contains your encryption keys.</div>
-    </div>
+            <label for="messageBody">Message</label>
+            <textarea
+              id="messageBody"
+              placeholder="Type your message here…"
+            ></textarea>
+
+            <button class="btn btn-primary" id="btnSend">
+              Send message
+            </button>
+            <div class="msg-status" id="sendMsg"></div>
+          </div>
+
+          <div class="card">
+            <h3>Export keys</h3>
+            <p class="card-note">
+              This downloads your locally stored messaging keys as a JSON file.
+              Keep it safe; anyone with this file can read your encrypted
+              messages.
+            </p>
+            <button class="btn" id="btnExportKeys">
+              Download keys backup
+            </button>
+            <div class="msg-status" id="keyMsg">
+              Keys are generated and stored on-device elsewhere in the app.
+            </div>
+          </div>
+        </div>
+
+        <!-- Right column: inbox + sent -->
+        <div>
+          <div class="card">
+            <h3>Inbox</h3>
+            <div class="scroll-list" id="inbox"></div>
+            <div class="msg-status" id="inboxMsg"></div>
+          </div>
+
+          <div class="card">
+            <h3>Sent</h3>
+            <div class="scroll-list" id="sent"></div>
+            <div class="msg-status" id="sentMsg"></div>
+          </div>
+        </div>
+      </section>
+    </main>
+
+    <footer class="weall-footer">
+      <span>© <span id="footer-year">2024</span> WeAll</span>
+      &nbsp;•&nbsp;<a href="/frontend/privacy.html">Privacy</a>
+      &nbsp;•&nbsp;<a href="/frontend/terms.html">Terms</a>
+    </footer>
   </div>
 
+  <!-- Canonical script stack -->
+  <script src="/frontend/env.js"></script>
+  <script src="/frontend/auth.js"></script>
+  <script src="/frontend/session.js"></script>
+  <script src="/frontend/nav.js"></script>
+  <script src="/frontend/footer.js"></script>
+
   <script>
-    const userId = JSON.parse(localStorage.getItem('weall_keys') || '{}').public || 'unknown';
+    function escapeHtml(str) {
+      if (str === null || str === undefined) return "";
+      return String(str)
+        .replace(/&/g, "&amp;")
+        .replace(/</g, "&lt;")
+        .replace(/>/g, "&gt;")
+        .replace(/"/g, "&quot;")
+        .replace(/'/g, "&#39;");
+    }
 
-    async function refreshInbox() {
-      const box = document.getElementById('inbox');
-      const msg = document.getElementById('inboxMsg');
-      box.innerHTML = 'Loading...';
+    async function fetchJson(url, opts) {
+      const res = await fetch(url, opts || {});
+      let data = null;
       try {
-        const res = await fetch(`/messaging/inbox/${userId}`);
-        const data = await res.json();
-        if (!res.ok) throw new Error(data.detail || 'Failed to fetch inbox');
-        if (!data.length) { box.textContent = 'No messages.'; return; }
-        box.innerHTML = data.map(m => `
-          <div class="message">
-            <strong>From:</strong> ${m.sender}<br>
-            <p>${m.body}</p>
-            <small>${new Date(m.timestamp*1000).toLocaleString()}</small>
-          </div>
-        `).join('');
+        data = await res.json();
+      } catch {
+        // ignore parse error here; we'll still show status
+      }
+      if (!res.ok) {
+        const msg =
+          (data && (data.detail || data.error)) ||
+          "Request failed " + res.status;
+        throw new Error(msg);
+      }
+      return data;
+    }
+
+    function buildRoleBanner(userId, roles, nodeMeta) {
+      const parts = [];
+
+      const tier = (roles && (roles.poh_tier ?? roles.pohTier)) || 0;
+      if (tier > 0) {
+        parts.push("PoH Tier " + tier);
+      } else {
+        parts.push("Unverified");
+      }
+
+      const flags = (roles && roles.flags) || {};
+      const caps = (roles && roles.capabilities) || [];
+
+      const tags = [];
+      if (flags.wants_creator || caps.includes("earn_creator_rewards")) {
+        tags.push("Creator");
+      }
+      if (flags.wants_juror || caps.includes("serve_juror_panel")) {
+        tags.push("Juror");
+      }
+      if (flags.wants_validator || caps.includes("validator_duties")) {
+        tags.push("Validator");
+      }
+      if (flags.wants_operator || caps.includes("operator_duties")) {
+        tags.push("Operator");
+      }
+      if (flags.wants_emissary || caps.includes("act_as_emissary")) {
+        tags.push("Emissary");
+      }
+
+      if (tags.length) {
+        parts.push(tags.join(" · "));
+      }
+
+      const nodeKind = (nodeMeta && nodeMeta.node_kind) || "public_gateway";
+      if (nodeKind === "validator_node") {
+        parts.push("Validator node");
+      } else if (nodeKind === "private_node") {
+        parts.push("Private node");
+      } else {
+        parts.push("Gateway node");
+      }
+
+      return "Signed in as " + userId + " · " + parts.join(" · ");
+    }
+
+    async function refreshInbox(messagingUserId) {
+      const box = document.getElementById("inbox");
+      const msg = document.getElementById("inboxMsg");
+      if (!box || !msg) return;
+
+      box.innerHTML = "Loading…";
+      msg.textContent = "";
+
+      try {
+        const data = await fetchJson(
+          "/messaging/inbox/" + encodeURIComponent(messagingUserId)
+        );
+        if (!Array.isArray(data) || data.length === 0) {
+          box.textContent = "No messages.";
+          return;
+        }
+
+        box.innerHTML = data
+          .map((m) => {
+            const from = escapeHtml(m.sender || "");
+            const content = escapeHtml(m.content || m.body || "");
+            const ts = (m.created_at || m.timestamp || 0) * 1000;
+            const when = ts ? new Date(ts).toLocaleString() : "–";
+            return `
+              <div class="message">
+                <strong>From:</strong> ${from}<br>
+                <p>${content}</p>
+                <small>${when}</small>
+              </div>
+            `;
+          })
+          .join("");
       } catch (err) {
-        msg.textContent = '⚠️ ' + err.message;
+        console.error("Inbox error:", err);
+        msg.textContent = "⚠️ " + (err.message || "Failed to load inbox");
       }
     }
 
-    async function refreshSent() {
-      const box = document.getElementById('sent');
-      const msg = document.getElementById('sentMsg');
-      box.innerHTML = 'Loading...';
+    async function refreshSent(messagingUserId) {
+      const box = document.getElementById("sent");
+      const msg = document.getElementById("sentMsg");
+      if (!box || !msg) return;
+
+      box.innerHTML = "Loading…";
+      msg.textContent = "";
+
       try {
-        const res = await fetch(`/messaging/sent/${userId}`);
-        const data = await res.json();
-        if (!res.ok) throw new Error(data.detail || 'Failed to fetch sent messages');
-        if (!data.length) { box.textContent = 'No sent messages.'; return; }
-        box.innerHTML = data.map(m => `
-          <div class="message">
-            <strong>To:</strong> ${m.recipient}<br>
-            <p>${m.body}</p>
-            <small>${new Date(m.timestamp*1000).toLocaleString()}</small>
-          </div>
-        `).join('');
+        const data = await fetchJson(
+          "/messaging/sent/" + encodeURIComponent(messagingUserId)
+        );
+        if (!Array.isArray(data) || data.length === 0) {
+          box.textContent = "No sent messages.";
+          return;
+        }
+
+        box.innerHTML = data
+          .map((m) => {
+            const to = escapeHtml(m.recipient || "");
+            const content = escapeHtml(m.content || m.body || "");
+            const ts = (m.created_at || m.timestamp || 0) * 1000;
+            const when = ts ? new Date(ts).toLocaleString() : "–";
+            return `
+              <div class="message">
+                <strong>To:</strong> ${to}<br>
+                <p>${content}</p>
+                <small>${when}</small>
+              </div>
+            `;
+          })
+          .join("");
       } catch (err) {
-        msg.textContent = '⚠️ ' + err.message;
+        console.error("Sent error:", err);
+        msg.textContent = "⚠️ " + (err.message || "Failed to load sent");
       }
     }
 
-    async function sendMessage() {
-      const to = document.getElementById('toUser').value.trim();
-      const body = document.getElementById('messageBody').value.trim();
-      const msg = document.getElementById('sendMsg');
-      msg.textContent = '';
-      if (!to || !body) return msg.textContent = 'Enter both recipient and message.';
+    function wireExportKeys() {
+      const btn = document.getElementById("btnExportKeys");
+      const msg = document.getElementById("keyMsg");
+      if (!btn || !msg) return;
+
+      btn.addEventListener("click", () => {
+        try {
+          const keys = localStorage.getItem("weall_keys");
+          if (!keys) {
+            alert("No messaging keys stored locally.");
+            return;
+          }
+          const blob = new Blob([keys], { type: "application/json" });
+          const a = document.createElement("a");
+          a.href = URL.createObjectURL(blob);
+          a.download = "weall_keys_backup.json";
+          a.click();
+          msg.textContent = "✅ Keys exported to file.";
+        } catch (e) {
+          console.error("Export keys error:", e);
+          msg.textContent = "⚠️ Failed to export keys.";
+        }
+      });
+    }
+
+    async function sendMessage(messagingUserId) {
+      const toEl = document.getElementById("toUser");
+      const bodyEl = document.getElementById("messageBody");
+      const msg = document.getElementById("sendMsg");
+      if (!toEl || !bodyEl || !msg) return;
+
+      const recipient = toEl.value.trim();
+      const body = bodyEl.value.trim();
+      msg.textContent = "";
+
+      if (!recipient || !body) {
+        msg.textContent = "Enter both recipient and message.";
+        return;
+      }
+
       try {
-        const res = await fetch('/messaging/send', {
-          method: 'POST',
-          headers: {'Content-Type': 'application/json'},
-          body: JSON.stringify({ sender: userId, recipient: to, body })
+        await fetchJson("/messaging/send", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            sender: messagingUserId,
+            recipient,
+            content: body,
+          }),
         });
-        const data = await res.json();
-        if (!res.ok) throw new Error(data.detail || data.message);
-        msg.textContent = '✅ Message sent!';
-        document.getElementById('messageBody').value = '';
-        refreshSent();
+
+        msg.textContent = "✅ Message sent.";
+        bodyEl.value = "";
+        await refreshSent(messagingUserId);
       } catch (err) {
-        msg.textContent = '⚠️ ' + err.message;
+        console.error("Send error:", err);
+        msg.textContent = "⚠️ " + (err.message || "Failed to send message");
       }
     }
 
-    function exportKeys() {
-      const keys = localStorage.getItem('weall_keys');
-      if (!keys) return alert('No keys stored locally.');
-      const blob = new Blob([keys], { type: 'application/json' });
-      const a = document.createElement('a');
-      a.href = URL.createObjectURL(blob);
-      a.download = 'weall_keys_backup.json';
-      a.click();
-      document.getElementById('keyMsg').textContent = '✅ Keys exported to file.';
+    async function hydrateMessagingPage() {
+      const bannerEl = document.getElementById("signedIn");
+
+      // 1) Auth guard: require at least PoH Tier 1 to use messaging
+      const ok = await weallAuth.require({
+        minTier: 1,
+        redirectToLogin: "/frontend/login.html",
+      });
+      if (!ok) {
+        if (bannerEl) bannerEl.textContent = "Not signed in";
+        return;
+      }
+
+      // 2) Load auth session to get user_id
+      let sess = null;
+      try {
+        sess = await weallAuth.getSession();
+      } catch (e) {
+        console.error("getSession failed:", e);
+      }
+      const userId =
+        (sess && sess.user_id) ||
+        (weallAuth.getAccount && weallAuth.getAccount()) ||
+        "";
+
+      if (!userId) {
+        if (bannerEl) bannerEl.textContent = "Not signed in";
+        return;
+      }
+
+      // 3) Fetch roles + node meta for banner
+      const [roles, nodeMeta] = await Promise.all([
+        fetchJson("/roles/effective/me", {
+          headers: { "X-WeAll-User": userId },
+        }),
+        fetchJson("/node/meta"),
+      ]);
+
+      if (bannerEl) {
+        bannerEl.textContent = buildRoleBanner(userId, roles, nodeMeta);
+      }
+
+      // 4) Derive messaging identity from local keys, with fallback to userId
+      let messagingUserId = userId;
+      try {
+        const parsed = JSON.parse(localStorage.getItem("weall_keys") || "{}");
+        if (parsed && parsed.public) {
+          messagingUserId = String(parsed.public);
+        }
+      } catch (e) {
+        console.warn("Failed to parse weall_keys:", e);
+      }
+      window.weallMessagingUserId = messagingUserId;
+
+      // 5) Wire buttons and initial load
+      wireExportKeys();
+
+      const sendBtn = document.getElementById("btnSend");
+      if (sendBtn) {
+        sendBtn.addEventListener("click", () => {
+          sendMessage(messagingUserId);
+        });
+      }
+
+      await refreshInbox(messagingUserId);
+      await refreshSent(messagingUserId);
     }
 
-    // Auto load messages
-    refreshInbox();
-    refreshSent();
+    document.addEventListener("DOMContentLoaded", () => {
+      hydrateMessagingPage().catch((err) => {
+        console.error("Failed to hydrate messaging page:", err);
+        const bannerEl = document.getElementById("signedIn");
+        if (bannerEl) {
+          bannerEl.textContent = "Error loading session";
+        }
+      });
+    });
   </script>
-  <script src="/static/footer.js"></script>
-
-<footer class="weall-footer">
-  <span>© WeAll</span>
-  &nbsp;•&nbsp;<a href="/frontend/privacy.html">Privacy</a>
-  &nbsp;•&nbsp;<a href="/frontend/terms.html">Terms</a>
-</footer>
-
 </body>
 </html>

@@ -1,385 +1,527 @@
-<!doctype html>
+<!DOCTYPE html>
 <html lang="en">
 <head>
-  <meta charset="utf-8" />
-  <title>WeAll — Treasury</title>
+  <meta charset="UTF-8" />
+  <title>WeAll · Treasury</title>
   <meta name="viewport" content="width=device-width, initial-scale=1" />
+
+  <!-- Global app styles -->
   <link rel="stylesheet" href="/frontend/style.css" />
-  <script src="/frontend/env.js"></script>
-  <script src="/frontend/auth.js"></script>
+
   <style>
+    /* Page-specific tweaks on top of style.css */
+
     body {
-      margin: 0;
-      padding: 1.3rem 1.1rem 1.8rem;
-      font-family: system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
-      background: radial-gradient(circle at top, #22c55e22 0, #020617 55%, #020617 100%);
+      background-color: #020617;
       color: #e5e7eb;
     }
-    .wrap {
-      max-width: 880px;
+
+    .treasury-shell {
+      max-width: 1120px;
       margin: 0 auto;
+      padding: 1.5rem 1.25rem 3rem;
     }
-    header {
+
+    .treasury-header {
       display: flex;
-      align-items: center;
-      justify-content: space-between;
-      gap: 0.8rem;
-      margin-bottom: 1.1rem;
+      flex-direction: column;
+      gap: 0.5rem;
+      margin-bottom: 1.5rem;
     }
-    .back-link {
-      font-size: 0.8rem;
-      color: #9ca3af;
-      text-decoration: none;
+
+    @media (min-width: 768px) {
+      .treasury-header {
+        flex-direction: row;
+        justify-content: space-between;
+        align-items: baseline;
+      }
     }
-    .back-link:hover { text-decoration: underline; }
-    h1 {
-      margin: 0;
-      font-size: 1.35rem;
+
+    .treasury-title {
+      font-size: 1.4rem;
+      font-weight: 600;
       letter-spacing: 0.03em;
+      text-transform: uppercase;
+      color: #f9fafb;
     }
-    .sub {
-      margin: 0.1rem 0 0;
-      font-size: 0.8rem;
+
+    .treasury-subtitle {
+      font-size: 0.85rem;
       color: #9ca3af;
+      max-width: 420px;
     }
-    .pill {
-      border-radius: 999px;
-      padding: 6px 11px;
-      font-size: 0.8rem;
-      border: 1px solid rgba(148,163,184,0.6);
-      background: rgba(15,23,42,0.95);
-      color: #e5e7eb;
-      cursor: pointer;
-    }
-    main {
-      display: grid;
-      grid-template-columns: minmax(0, 1.1fr) minmax(0, 0.9fr);
-      gap: 0.9rem;
-    }
-    @media (max-width: 840px) {
-      main { grid-template-columns: minmax(0, 1fr); }
-    }
-    .card {
-      background: rgba(15,23,42,0.96);
-      border-radius: 16px;
-      padding: 14px 14px 13px;
-      border: 1px solid rgba(148,163,184,0.4);
-      box-shadow: 0 18px 50px rgba(15,23,42,0.9);
-    }
-    .card h2 {
-      margin: 0 0 0.35rem;
-      font-size: 0.95rem;
-      letter-spacing: 0.08em;
+
+    .signed-in-banner {
+      font-size: 0.78rem;
+      letter-spacing: 0.03em;
       text-transform: uppercase;
       color: #9ca3af;
     }
-    .card p {
-      margin: 0.12rem 0;
-      font-size: 0.86rem;
+
+    .signed-in-banner strong {
+      font-weight: 600;
+    }
+
+    .treasury-grid {
+      display: grid;
+      grid-template-columns: minmax(0, 2fr) minmax(0, 1.4fr);
+      gap: 1.25rem;
+    }
+
+    @media (max-width: 900px) {
+      .treasury-grid {
+        grid-template-columns: minmax(0, 1fr);
+      }
+    }
+
+    .card {
+      border-radius: 0.75rem;
+      border: 1px solid rgba(148, 163, 184, 0.25);
+      background: radial-gradient(circle at top left, rgba(56, 189, 248, 0.08), transparent 55%),
+                  radial-gradient(circle at bottom right, rgba(168, 85, 247, 0.08), transparent 55%),
+                  rgba(15, 23, 42, 0.95);
+      padding: 1rem 1rem 1.25rem;
+      backdrop-filter: blur(12px);
+    }
+
+    .card-header {
+      display: flex;
+      justify-content: space-between;
+      align-items: baseline;
+      margin-bottom: 0.5rem;
+    }
+
+    .card-title {
+      font-size: 0.9rem;
+      text-transform: uppercase;
+      letter-spacing: 0.12em;
+      color: #e5e7eb;
+    }
+
+    .card-pill {
+      font-size: 0.7rem;
+      text-transform: uppercase;
+      letter-spacing: 0.16em;
+      border-radius: 999px;
+      padding: 0.15rem 0.55rem;
+      border: 1px solid rgba(148, 163, 184, 0.7);
       color: #cbd5f5;
     }
-    .balance {
-      margin-top: 0.4rem;
-      font-size: 1.3rem;
-      font-weight: 600;
-    }
-    .status {
-      margin-top: 0.5rem;
-      font-size: 0.8rem;
-      color: #9ca3af;
-      min-height: 1.2em;
-    }
-    label {
-      display: block;
-      margin-top: 8px;
-      margin-bottom: 4px;
-      font-size: 0.78rem;
-      text-transform: uppercase;
-      letter-spacing: 0.06em;
-      color: #9ca3af;
-    }
-    input, textarea {
-      width: 100%;
-      border-radius: 10px;
-      padding: 8px 10px;
-      border: 1px solid rgba(148,163,184,0.6);
-      background: rgba(15,23,42,0.9);
-      color: #e5e7eb;
-      font-size: 0.9rem;
-      outline: none;
-    }
-    input:focus, textarea:focus {
-      border-color: #22c55e;
-      box-shadow: 0 0 0 1px rgba(34,197,94,0.5);
-    }
-    textarea {
-      resize: vertical;
-      min-height: 80px;
-    }
-    .btn-row {
-      margin-top: 12px;
+
+    .metric-row {
       display: flex;
-      gap: 0.6rem;
-      flex-wrap: wrap;
+      justify-content: space-between;
+      align-items: center;
+      font-size: 0.86rem;
+      margin-top: 0.35rem;
     }
+
+    .metric-key {
+      color: #9ca3af;
+    }
+
+    .metric-value {
+      font-variant-numeric: tabular-nums;
+      font-weight: 500;
+      color: #e5e7eb;
+    }
+
+    .metric-tagline {
+      margin-top: 0.4rem;
+      font-size: 0.75rem;
+      color: #9ca3af;
+    }
+
+    .treasury-actions {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 0.5rem;
+      margin-top: 0.75rem;
+    }
+
     .btn {
       border-radius: 999px;
-      padding: 8px 12px;
-      border: 1px solid rgba(148,163,184,0.7);
-      background: rgba(15,23,42,0.95);
-      color: #e5e7eb;
-      font-size: 0.86rem;
-      cursor: pointer;
-      display: inline-flex;
-      align-items: center;
-      justify-content: center;
-      gap: 6px;
-    }
-    .btn.primary {
-      border: none;
-      background: linear-gradient(135deg, #22c55e, #4ade80);
-      color: #020617;
-      font-weight: 600;
-      box-shadow: 0 14px 40px rgba(16, 185, 129, 0.8);
-    }
-    .btn:disabled {
-      opacity: 0.6;
-      cursor: wait;
-      box-shadow: none;
-    }
-    code {
-      font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", "Courier New", monospace;
+      padding: 0.45rem 0.9rem;
       font-size: 0.8rem;
-      padding: 2px 4px;
-      background: rgba(15,23,42,0.9);
-      border-radius: 4px;
+      font-weight: 500;
+      border: 1px solid rgba(148, 163, 184, 0.6);
+      background: rgba(15, 23, 42, 0.9);
+      color: #e5e7eb;
+      cursor: pointer;
     }
-    a {
-      color: #22c55e;
-      text-decoration: none;
+
+    .btn-primary {
+      border-color: rgba(56, 189, 248, 0.7);
+      background: radial-gradient(circle at top left, rgba(56, 189, 248, 0.35), rgba(15, 23, 42, 0.95));
+      color: #ecfeff;
     }
-    a:hover { text-decoration: underline; }
+
+    .btn:disabled {
+      opacity: 0.5;
+      cursor: default;
+    }
+
+    .treasury-footnote {
+      margin-top: 1.25rem;
+      font-size: 0.75rem;
+      color: #6b7280;
+    }
   </style>
 </head>
 <body>
-  <div class="wrap">
-    <header>
+  <div class="treasury-shell">
+    <header class="treasury-header">
       <div>
-        <a href="/frontend/tiktok.html" class="back-link">&larr; Back to Feed</a>
-        <h1>Treasury</h1>
-        <p class="sub" id="treUser">Checking session…</p>
+        <h1 class="treasury-title">Network Treasury</h1>
+        <p class="treasury-subtitle">
+          Protocol-level view of pooled WeCoin flows &amp; epoch rewards
+          across Validators, Operators, Jurors, Creators, and Commons.
+        </p>
       </div>
-      <button class="pill" id="logoutBtn">Log out</button>
+
+      <!-- Shared, spec-compliant typography banner -->
+      <p id="signedIn" class="signed-in-banner">
+        Loading session…
+      </p>
     </header>
 
     <main>
-      <!-- Left: Treasury state -->
-      <section class="card">
-        <h2>Treasury account</h2>
-        <p>
-          The treasury is just another ledger account, governed by proposals and emissary
-          decisions. No tokens are ever burned here; all movements are simple transfers
-          between accounts.
-        </p>
-        <p style="margin-top:0.4rem;">
-          Treasury account id:
-          <code id="treAccount">loading…</code>
-        </p>
-        <p class="balance" id="treBalance">– WCN</p>
-        <p class="status" id="treMetaStatus"></p>
-      </section>
+      <section class="treasury-grid" id="treasuryRoot">
+        <!-- Left: network-level metrics -->
+        <div class="card" id="networkTreasuryCard">
+          <div class="card-header">
+            <h2 class="card-title">Global Pools</h2>
+            <span class="card-pill">Epoch Snapshot</span>
+          </div>
 
-      <!-- Right: Operator transfer form -->
-      <section class="card">
-        <h2>Operator transfer</h2>
-        <p>
-          This tool is only for Tier-2+ operators/emissaries. For production, it should be
-          wrapped by multi-sig and governance controls.
-        </p>
+          <div class="metric-row">
+            <span class="metric-key">Current epoch</span>
+            <span class="metric-value" id="metricEpoch">–</span>
+          </div>
+          <div class="metric-row">
+            <span class="metric-key">Block height</span>
+            <span class="metric-value" id="metricHeight">–</span>
+          </div>
+          <div class="metric-row">
+            <span class="metric-key">GSM / Genesis mode</span>
+            <span class="metric-value" id="metricBootstrap">–</span>
+          </div>
 
-        <label for="toAcct">Recipient account id</label>
-        <input id="toAcct" placeholder="e.g. user wallet id or group account" />
+          <div class="metric-row">
+            <span class="metric-key">Validators pool</span>
+            <span class="metric-value" id="metricValidatorsPool">–</span>
+          </div>
+          <div class="metric-row">
+            <span class="metric-key">Operators pool</span>
+            <span class="metric-value" id="metricOperatorsPool">–</span>
+          </div>
+          <div class="metric-row">
+            <span class="metric-key">Jurors pool</span>
+            <span class="metric-value" id="metricJurorsPool">–</span>
+          </div>
+          <div class="metric-row">
+            <span class="metric-key">Creators pool</span>
+            <span class="metric-value" id="metricCreatorsPool">–</span>
+          </div>
+          <div class="metric-row">
+            <span class="metric-key">Treasury / Commons</span>
+            <span class="metric-value" id="metricCommonsPool">–</span>
+          </div>
 
-        <label for="amount">Amount (WCN)</label>
-        <input id="amount" type="number" min="0" step="0.00000001" placeholder="0.0" />
+          <p class="metric-tagline">
+            Pool splits and epoch rewards are defined at the protocol
+            level and can only be changed via governance proposals.
+          </p>
 
-        <label for="reason">Reason / memo</label>
-        <textarea id="reason" placeholder="Explain why this transfer is happening (e.g., juror rewards, grant payout, ops budget)."></textarea>
-
-        <div class="btn-row">
-          <button class="btn primary" id="btnSend">Send from treasury</button>
-          <button class="btn" id="btnRefresh">Refresh balance</button>
+          <div class="treasury-actions">
+            <button class="btn-primary btn" id="btnRefreshTreasury">
+              Refresh snapshot
+            </button>
+            <button class="btn btn" id="btnViewEvents">
+              View epoch events
+            </button>
+          </div>
         </div>
 
-        <div class="status" id="treTransferStatus"></div>
+        <!-- Right: your position / eligibility -->
+        <div class="card" id="roleEligibilityCard">
+          <div class="card-header">
+            <h2 class="card-title">Your Reward Tracks</h2>
+            <span class="card-pill" id="pillTier">Tier –</span>
+          </div>
+
+          <div class="metric-row">
+            <span class="metric-key">Reward-eligible pools</span>
+            <span class="metric-value" id="metricEligiblePools">–</span>
+          </div>
+
+          <div class="metric-row">
+            <span class="metric-key">Juror / dispute track</span>
+            <span class="metric-value" id="metricJurorTrack">–</span>
+          </div>
+
+          <div class="metric-row">
+            <span class="metric-key">Creator track</span>
+            <span class="metric-value" id="metricCreatorTrack">–</span>
+          </div>
+
+          <div class="metric-row">
+            <span class="metric-key">Operator / validator track</span>
+            <span class="metric-value" id="metricOpValTrack">–</span>
+          </div>
+
+          <p class="metric-tagline">
+            Eligibility is derived from your PoH tier, juror history,
+            creator status, and node role. Opt in or out of any track
+            from your profile and node settings.
+          </p>
+
+          <div class="treasury-actions">
+            <button class="btn btn" id="btnGoProfile">
+              Open profile
+            </button>
+            <button class="btn btn" id="btnGoGovernance">
+              Go to governance
+            </button>
+          </div>
+        </div>
       </section>
+
+      <p class="treasury-footnote">
+        This is a Genesis reference view. Exact numbers and reward
+        draws are tracked in the on-chain WeCoin ledger and can be
+        independently verified from any validator node.
+      </p>
     </main>
   </div>
 
+  <!-- Canonical script stack for app pages -->
+  <script src="/frontend/env.js"></script>
+  <script src="/frontend/auth.js"></script>
+  <script src="/frontend/nav.js"></script>
+
   <script>
-    (function () {
-      const $ = (id) => document.getElementById(id);
-
-      function apiBase() {
-        return (window.ENV && window.ENV.VITE_API_BASE) || "";
+    async function fetchJson(url, opts) {
+      const res = await fetch(url, opts || {});
+      if (!res.ok) {
+        const text = await res.text();
+        throw new Error("HTTP " + res.status + " for " + url + ": " + text);
       }
+      return res.json();
+    }
 
-      async function jsonFetch(path, opts) {
-        const url = apiBase() + path;
-        const options = Object.assign(
-          {
-            headers: { "Accept": "application/json" },
-            credentials: "include",
-          },
-          opts || {}
-        );
-        if (options.body && typeof options.body !== "string") {
-          options.headers["Content-Type"] =
-            options.headers["Content-Type"] || "application/json";
-          options.body = JSON.stringify(options.body);
-        }
-        const res = await fetch(url, options);
-        let data = null;
-        try { data = await res.json(); } catch {}
-        if (!res.ok) {
-          const msg =
-            (data && (data.detail || data.error || data.message)) ||
-            ("Request failed with " + res.status);
-          throw new Error(msg);
-        }
-        return data;
-      }
+    function buildRoleBanner(userId, roles, nodeMeta) {
+      const parts = [];
 
-      async function hydrateHeader() {
-        const el = $("treUser");
-        if (!el) return;
-        try {
-          const sess = await weallAuth.getSession();
-          if (!sess || !sess.user_id) {
-            el.textContent = "Not signed in.";
-            return;
-          }
-          const poh = await weallAuth.getPohMe().catch(() => null);
-          const tier = poh && typeof poh.tier === "number" ? poh.tier : 0;
-          const status = poh && poh.status ? poh.status : "ok";
-          el.textContent =
-            "Signed in as " + sess.user_id + " · PoH Tier " + tier + " (" + status + ")";
-        } catch {
-          el.textContent = "Unable to load session.";
-        }
-      }
-
-      async function loadMeta() {
-        const acctEl = $("treAccount");
-        const balEl = $("treBalance");
-        const statusEl = $("treMetaStatus");
-        if (statusEl) {
-          statusEl.textContent = "Loading treasury meta…";
-        }
-
-        try {
-          const data = await jsonFetch("/treasury/meta", { method: "GET" });
-          if (acctEl) acctEl.textContent = data.account_id || "treasury-main";
-          if (balEl) {
-            const b = typeof data.balance_wcn === "number" ? data.balance_wcn : 0;
-            balEl.textContent = b.toFixed(8) + " WCN";
-          }
-          if (statusEl) {
-            statusEl.textContent = "Read-only view of treasury balance. All changes must come from explicit transfers.";
-          }
-        } catch (e) {
-          if (acctEl) acctEl.textContent = "error";
-          if (balEl) balEl.textContent = "– WCN";
-          if (statusEl) {
-            statusEl.textContent = "Failed to load treasury meta: " + e.message;
-          }
-        }
-      }
-
-      async function sendTransfer() {
-        const toAcctEl = $("toAcct");
-        const amountEl = $("amount");
-        const reasonEl = $("reason");
-        const statusEl = $("treTransferStatus");
-        const btn = $("btnSend");
-
-        if (!toAcctEl || !amountEl || !reasonEl || !statusEl || !btn) return;
-
-        const toAcct = toAcctEl.value.trim();
-        const amount = Number(amountEl.value || "0");
-        const reason = reasonEl.value.trim();
-
-        if (!toAcct) {
-          statusEl.textContent = "Please enter a recipient account id.";
-          statusEl.className = "status err";
-          return;
-        }
-        if (!(amount > 0)) {
-          statusEl.textContent = "Please enter a positive amount.";
-          statusEl.className = "status err";
-          return;
-        }
-        if (!reason) {
-          statusEl.textContent = "Please describe the reason for this transfer.";
-          statusEl.className = "status err";
-          return;
-        }
-
-        statusEl.textContent = "Submitting transfer…";
-        statusEl.className = "status";
-        btn.disabled = true;
-
-        try {
-          await jsonFetch("/treasury/transfer", {
-            method: "POST",
-            body: {
-              to_account_id: toAcct,
-              amount_wcn: amount,
-              reason: reason,
-            },
-          });
-          statusEl.textContent = "Transfer recorded successfully.";
-          statusEl.className = "status ok";
-          await loadMeta();
-        } catch (e) {
-          statusEl.textContent = "Transfer failed: " + e.message;
-          statusEl.className = "status err";
-        } finally {
-          btn.disabled = false;
-        }
-      }
-
-      async function init() {
-        // Gate: Tier-2 required (operator baseline)
-        const ok = await weallAuth.require({
-          minTier: 2,
-          redirectToLogin: "/frontend/login.html",
-        });
-        if (!ok) return;
-
-        const logoutBtn = $("logoutBtn");
-        if (logoutBtn) {
-          logoutBtn.onclick = async () => {
-            await weallAuth.logout();
-            window.location.replace("/frontend/login.html");
-          };
-        }
-
-        const sendBtn = $("btnSend");
-        const refreshBtn = $("btnRefresh");
-        if (sendBtn) sendBtn.onclick = sendTransfer;
-        if (refreshBtn) refreshBtn.onclick = loadMeta;
-
-        await hydrateHeader();
-        await loadMeta();
-      }
-
-      if (document.readyState === "loading") {
-        document.addEventListener("DOMContentLoaded", init);
+      const tier = (roles && (roles.poh_tier ?? roles.pohTier)) || 0;
+      if (tier > 0) {
+        parts.push("PoH Tier " + tier);
       } else {
-        init();
+        parts.push("Unverified");
       }
-    })();
+
+      const flags = (roles && roles.flags) || {};
+      const caps = (roles && roles.capabilities) || [];
+
+      const tags = [];
+      if (flags.wants_creator || caps.includes("earn_creator_rewards")) tags.push("Creator");
+      if (flags.wants_juror || caps.includes("serve_juror_panel")) tags.push("Juror");
+      if (flags.wants_validator || caps.includes("validator_duties")) tags.push("Validator");
+      if (flags.wants_operator || caps.includes("operator_duties")) tags.push("Operator");
+      if (flags.wants_emissary || caps.includes("act_as_emissary")) tags.push("Emissary");
+
+      if (tags.length) {
+        parts.push(tags.join(" · "));
+      }
+
+      const nodeKind = (nodeMeta && nodeMeta.node_kind) || "public_gateway";
+      if (nodeKind === "validator_node") {
+        parts.push("Validator node");
+      } else if (nodeKind === "private_node") {
+        parts.push("Private node");
+      } else {
+        parts.push("Gateway node");
+      }
+
+      return "Signed in as " + userId + " · " + parts.join(" · ");
+    }
+
+    function formatSplit(poolSplit, key) {
+      if (!poolSplit || typeof poolSplit[key] === "undefined") return "–";
+      const frac = Number(poolSplit[key]);
+      if (!Number.isFinite(frac) || frac <= 0) return "–";
+      return (frac * 100).toFixed(1).replace(/\.0$/, "") + " %";
+    }
+
+    async function hydrateTreasuryPage() {
+      const bannerEl = document.getElementById("signedIn");
+
+      // 1) Basic auth: require Tier 2+ to view Treasury
+      const sess = await weallAuth.require({
+        minTier: 2,
+        redirectToLogin: "/frontend/login.html",
+      });
+
+      if (!sess || !sess.user_id) {
+        if (bannerEl) bannerEl.textContent = "Not signed in";
+        return;
+      }
+
+      const userId = sess.user_id;
+
+      // 2) Fetch roles + node meta + consensus meta
+      const [roles, nodeMeta, consensus] = await Promise.all([
+        fetchJson("/roles/effective/me", {
+          headers: { "X-WeAll-User": userId },
+        }),
+        fetchJson("/node/meta"),
+        fetchJson("/consensus/meta"),
+      ]);
+
+      if (bannerEl) {
+        bannerEl.textContent = buildRoleBanner(userId, roles, nodeMeta);
+      }
+
+      // 3) Fill in network treasury metrics from node meta + consensus meta
+      const heightEl = document.getElementById("metricHeight");
+      const epochEl = document.getElementById("metricEpoch");
+      const bootstrapEl = document.getElementById("metricBootstrap");
+
+      if (heightEl) heightEl.textContent = String(consensus.height ?? nodeMeta.height ?? "–");
+      if (epochEl) epochEl.textContent = String(consensus.epoch ?? 0);
+      if (bootstrapEl) {
+        const bs = Boolean(consensus.bootstrap_mode ?? nodeMeta.bootstrap_mode);
+        bootstrapEl.textContent = bs ? "Active (GSM)" : "Inactive";
+      }
+
+      const split = nodeMeta.pool_split || {};
+      const validatorsPoolEl = document.getElementById("metricValidatorsPool");
+      const operatorsPoolEl = document.getElementById("metricOperatorsPool");
+      const jurorsPoolEl = document.getElementById("metricJurorsPool");
+      const creatorsPoolEl = document.getElementById("metricCreatorsPool");
+      const commonsPoolEl = document.getElementById("metricCommonsPool");
+
+      if (validatorsPoolEl) validatorsPoolEl.textContent = formatSplit(split, "validators");
+      if (operatorsPoolEl) operatorsPoolEl.textContent = formatSplit(split, "operators");
+      if (jurorsPoolEl) jurorsPoolEl.textContent = formatSplit(split, "jurors");
+      if (creatorsPoolEl) creatorsPoolEl.textContent = formatSplit(split, "creators");
+      if (commonsPoolEl) commonsPoolEl.textContent = formatSplit(split, "treasury");
+
+      // 4) “Your reward tracks” — approximate from flags/capabilities and node kind
+      const tier = (roles && (roles.poh_tier ?? roles.pohTier)) || 0;
+      const flags = (roles && roles.flags) || {};
+      const caps = (roles && roles.capabilities) || [];
+      const nodeKind = (nodeMeta && nodeMeta.node_kind) || "public_gateway";
+
+      const pillTier = document.getElementById("pillTier");
+      if (pillTier) {
+        pillTier.textContent = "Tier " + (tier || "0");
+      }
+
+      const eligiblePoolsEl = document.getElementById("metricEligiblePools");
+      const jurorTrackEl = document.getElementById("metricJurorTrack");
+      const creatorTrackEl = document.getElementById("metricCreatorTrack");
+      const opValTrackEl = document.getElementById("metricOpValTrack");
+
+      const eligible = [];
+
+      if (flags.wants_validator || caps.includes("validator_duties") || nodeKind === "validator_node") {
+        eligible.push("Validators");
+      }
+      if (flags.wants_operator || caps.includes("operator_duties")) {
+        eligible.push("Operators");
+      }
+      if (flags.wants_juror || caps.includes("serve_juror_panel")) {
+        eligible.push("Jurors");
+      }
+      if (flags.wants_creator || caps.includes("earn_creator_rewards")) {
+        eligible.push("Creators");
+      }
+      // everyone contributes to Commons pool implicitly
+
+      if (eligiblePoolsEl) {
+        eligiblePoolsEl.textContent = eligible.length ? eligible.join(" · ") : "None selected yet";
+      }
+
+      if (jurorTrackEl) {
+        if (tier >= 3 && (flags.wants_juror || caps.includes("serve_juror_panel"))) {
+          jurorTrackEl.textContent = "Active (Tier 3 + opted in)";
+        } else if (tier >= 3) {
+          jurorTrackEl.textContent = "Available (Tier 3, not opted in)";
+        } else {
+          jurorTrackEl.textContent = "Locked (needs Tier 3)";
+        }
+      }
+
+      if (creatorTrackEl) {
+        if (flags.wants_creator || caps.includes("earn_creator_rewards")) {
+          creatorTrackEl.textContent = "Active (earning creator tickets)";
+        } else {
+          creatorTrackEl.textContent = "Available (opt in from profile)";
+        }
+      }
+
+      if (opValTrackEl) {
+        const isValidatorNode = nodeKind === "validator_node";
+        if (isValidatorNode) {
+          opValTrackEl.textContent = "Active validator node";
+        } else if (flags.wants_operator || caps.includes("operator_duties") || flags.wants_validator) {
+          opValTrackEl.textContent = "Available (run validator / operator node)";
+        } else {
+          opValTrackEl.textContent = "Optional (node rewards opt-in)";
+        }
+      }
+
+      // 5) Wire primary CTA buttons
+      const refreshBtn = document.getElementById("btnRefreshTreasury");
+      if (refreshBtn) {
+        refreshBtn.addEventListener("click", () => {
+          hydrateTreasuryPage().catch((err) => {
+            console.error("Failed to refresh treasury snapshot", err);
+            alert("Failed to refresh snapshot. Please try again.");
+          });
+        });
+      }
+
+      const eventsBtn = document.getElementById("btnViewEvents");
+      if (eventsBtn) {
+        eventsBtn.addEventListener("click", () => {
+          window.location.href = "/frontend/state_export.html";
+        });
+      }
+
+      const goProfileBtn = document.getElementById("btnGoProfile");
+      if (goProfileBtn) {
+        goProfileBtn.addEventListener("click", () => {
+          window.location.href = "/frontend/profile.html";
+        });
+      }
+
+      const goGovernanceBtn = document.getElementById("btnGoGovernance");
+      if (goGovernanceBtn) {
+        goGovernanceBtn.addEventListener("click", () => {
+          window.location.href = "/frontend/governance.html";
+        });
+      }
+
+      // 6) If the legacy page had a JS entrypoint (e.g., initTreasury),
+      //    we call it here so nothing breaks.
+      if (typeof window.initTreasury === "function") {
+        try {
+          window.initTreasury({ roles, nodeMeta, consensus, session: sess });
+        } catch (e) {
+          console.warn("initTreasury threw an error:", e);
+        }
+      }
+    }
+
+    document.addEventListener("DOMContentLoaded", () => {
+      hydrateTreasuryPage().catch((err) => {
+        console.error("Failed to hydrate treasury page", err);
+        const bannerEl = document.getElementById("signedIn");
+        if (bannerEl) bannerEl.textContent = "Error loading session";
+      });
+    });
   </script>
 </body>
 </html>

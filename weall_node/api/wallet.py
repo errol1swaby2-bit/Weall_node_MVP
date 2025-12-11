@@ -48,7 +48,7 @@ def _wallet_state() -> Dict[str, Any]:
         {
             "token_symbol": "WEC",
             "decimals": 8,
-            "notes": "MVP wallets; balances not yet wired to on-chain rewards.",
+            "notes": "MVP wallets; WEC balance is mirrored from WeCoin ledger when available.",
         },
     )
 
@@ -79,6 +79,26 @@ def _get_or_create_account(user_handle: str) -> Dict[str, Any]:
     return acct
 
 
+def _wecoin_balance_for(user_handle: str) -> float:
+    """
+    Read the canonical WEC (WeCoin) balance for this user from the WeCoin ledger,
+    if the runtime is available.
+
+    Falls back to 0.0 if WeCoin is not wired or any error occurs.
+    """
+    if not user_handle:
+        return 0.0
+
+    wecoin = getattr(executor, "wecoin", None)
+    if wecoin is None or not hasattr(wecoin, "get_balance"):
+        return 0.0
+
+    try:
+        return float(wecoin.get_balance(user_handle))
+    except Exception:
+        return 0.0
+
+
 # ---------------------------------------------------------------------------
 # Wallet routes
 # ---------------------------------------------------------------------------
@@ -102,12 +122,22 @@ def wallets_meta():
 def wallet_for_user(user_handle: str):
     """
     Return (and lazily create) a wallet for the given @handle.
+
+    The WEC balance reported here is **mirrored** from the WeCoinLedger
+    when available, so it reflects real protocol rewards rather than
+    just the local wallet subtree.
     """
     acct = _get_or_create_account(user_handle)
+
+    # Mirror canonical WeCoin balance into the WEC balance field if possible.
+    wec_balance = _wecoin_balance_for(user_handle)
+    balances = acct.setdefault("balances", {})
+    balances["WEC"] = wec_balance
+
     return {
         "ok": True,
         "user": user_handle,
-        "balances": acct.get("balances", {}),
+        "balances": balances,
         "nfts": acct.get("nfts", []),
         "last_update": acct.get("last_update"),
     }
@@ -152,7 +182,7 @@ def mint_nft(user_handle: str, body: MintNftRequest):
 
 
 # ---------------------------------------------------------------------------
-# Faucet routes
+# Faucet routes (dev-only; separate from WeCoin runtime)
 # ---------------------------------------------------------------------------
 
 class FaucetRequest(BaseModel):
@@ -164,6 +194,9 @@ class FaucetRequest(BaseModel):
 def faucet_drip(req: FaucetRequest):
     """
     Very simple dev faucet – credits `amount` WEC to the target wallet.
+
+    NOTE: This only updates the local wallet ledger balances and does NOT
+    affect the WeCoin ledger. It is intended strictly for testing / dev UIs.
     """
     acct = _get_or_create_account(req.target)
     balances = acct.setdefault("balances", {})

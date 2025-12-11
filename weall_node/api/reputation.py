@@ -1,264 +1,301 @@
 """
 weall_node/api/reputation.py
---------------------------------------------------
-MVP reputation system for WeAll.
+---------------------------------
+Reputation API + shared helpers.
 
-- Stores a simple numeric score per user.
-- Keeps an append-only history of events (who, delta, reason, source).
-- Provides an internal helper apply_reputation_event(...) that other
-  modules (like api.disputes) can call without worrying about the ledger
-  layout.
+Ledger layout under executor.ledger["reputation"]:
 
-Ledger layout:
-
-executor.ledger["reputation"] = {
+{
     "scores": {
         "<user_id>": float,
         ...
     },
-    "history": [
+    "events": [
         {
+            "id": str,
             "user_id": str,
             "delta": float,
+            "score_after": float,
             "reason": str,
             "source": str,
-            "meta": dict,
-            "timestamp": int,
-            "score_after": float,
+            "context": dict | None,
+            "created_at": int,
         },
         ...
     ],
-    "last_update": int,
 }
-
-If an older deployment stored reputation as a bare dict {user_id: score},
-we upgrade it on first access to match the above layout.
 """
 
 import time
-from typing import Dict, Any, List, Optional
+import secrets
+from typing import Dict, List, Optional, Any
 
-from fastapi import APIRouter, HTTPException, Query, Request
+from fastapi import APIRouter, Depends, Header, HTTPException, Query, status
 from pydantic import BaseModel, Field
 
 from ..weall_executor import executor
+from .roles import get_effective_profile_for_user
 
-# NOTE: no prefix here; weall_api.py mounts this router at /reputation
-router = APIRouter(tags=["Reputation"])
+router = APIRouter(tags=["reputation"])
 
 
-# ---------------------------------------------------------------------------
+# ---------------------------------------------------------------------
 # Internal helpers
-# ---------------------------------------------------------------------------
+# ---------------------------------------------------------------------
 
 
-def _root() -> Dict[str, Any]:
+def _now() -> int:
+    return int(time.time())
+
+
+def _get_rep_state() -> Dict[str, Any]:
     """
-    Return the normalized reputation root object.
-
-    Handles older layouts where executor.ledger["reputation"] was just a
-    dict of {user_id: score}.
+    Ensure executor.ledger has a well-formed 'reputation' root.
     """
-    ledger = executor.ledger
-    rep = ledger.get("reputation")
-
-    # First run, nothing there yet: create fresh structure.
-    if rep is None:
-        rep = {"scores": {}, "history": [], "last_update": None}
-        ledger["reputation"] = rep
-        return rep
-
-    # If it's already in the new shape, ensure required keys exist.
-    if isinstance(rep, dict) and ("scores" in rep or "history" in rep):
-        rep.setdefault("scores", {})
-        rep.setdefault("history", [])
-        rep.setdefault("last_update", None)
-        return rep
-
-    # If it's a bare dict of {user_id: score}, upgrade it.
-    if isinstance(rep, dict):
-        scores = {}
-        for k, v in rep.items():
-            try:
-                scores[str(k)] = float(v)
-            except Exception:
-                continue
-        upgraded = {"scores": scores, "history": [], "last_update": None}
-        ledger["reputation"] = upgraded
-        return upgraded
-
-    # Fallback: if something weird, overwrite with an empty structure.
-    upgraded = {"scores": {}, "history": [], "last_update": None}
-    ledger["reputation"] = upgraded
-    return upgraded
+    state = executor.ledger.setdefault("reputation", {})
+    state.setdefault("scores", {})
+    state.setdefault("events", [])
+    return state
 
 
-def _save():
-    try:
-        executor.save_state()
-    except Exception:
-        pass
-
-
-# ---------------------------------------------------------------------------
-# Public helper for other modules
-# ---------------------------------------------------------------------------
-
-
-def apply_reputation_event(
+def record_reputation_event(
     user_id: str,
     delta: float,
-    *,
     reason: str,
-    source: str = "system",
-    meta: Optional[Dict[str, Any]] = None,
+    source: str,
+    context: Optional[Dict[str, Any]] = None,
 ) -> Dict[str, Any]:
     """
-    Adjust the reputation score for a user and append a history record.
+    Shared helper that adjusts a user's reputation and records an event.
 
-    This is safe to import from other api modules:
-        from . import reputation as reputation_api
-        reputation_api.apply_reputation_event("user", +1.0, reason="...", source="disputes")
+    This can be imported by other API modules (e.g. disputes.py).
     """
-    user_id = str(user_id)
-    rep = _root()
-    scores: Dict[str, float] = rep["scores"]
-    history: List[Dict[str, Any]] = rep["history"]
+    state = _get_rep_state()
+    scores: Dict[str, float] = state["scores"]
+    events: List[Dict[str, Any]] = state["events"]
 
-    try:
-        delta_f = float(delta)
-    except Exception:
-        delta_f = 0.0
-
-    now = int(time.time())
-    current = float(scores.get(user_id, 0.0))
-    new_score = current + delta_f
+    current_score = float(scores.get(user_id, 0.0))
+    new_score = current_score + float(delta)
 
     scores[user_id] = new_score
-    event = {
+
+    ev = {
+        "id": secrets.token_hex(8),
         "user_id": user_id,
-        "delta": delta_f,
+        "delta": float(delta),
+        "score_after": float(new_score),
         "reason": reason,
         "source": source,
-        "meta": meta or {},
-        "timestamp": now,
-        "score_after": new_score,
+        "context": context or {},
+        "created_at": _now(),
     }
-    history.append(event)
-    rep["last_update"] = now
-
-    _save()
-    return event
+    events.append(ev)
+    return ev
 
 
-# ---------------------------------------------------------------------------
-# Models for API
-# ---------------------------------------------------------------------------
+def _require_rep_admin():
+    """
+    Require a Tier 3 human (or higher, if future tiers are added) to adjust reputation.
+    """
+    async def dependency(
+        x_weall_user: str = Header(
+            ...,
+            alias="X-WeAll-User",
+            description="WeAll user identifier (e.g. '@handle' or wallet id).",
+        )
+    ) -> str:
+        profile = get_effective_profile_for_user(x_weall_user)
+        # Try multiple common attribute names for tier; default to 0 if missing.
+        tier = getattr(profile, "tier", None)
+        if tier is None:
+            tier = getattr(profile, "poh_tier", 0)
+
+        try:
+            tier_int = int(tier or 0)
+        except Exception:
+            tier_int = 0
+
+        if tier_int < 3:
+            raise HTTPException(
+                status_code=status.HTTP_403_FORBIDDEN,
+                detail="Tier 3 is required to adjust reputation.",
+            )
+        return x_weall_user
+
+    return dependency
 
 
-class AdjustRequest(BaseModel):
-    user_id: str = Field(..., description="User id / handle whose reputation to adjust.")
-    delta: float = Field(..., description="Signed reputation change.")
-    reason: str = Field(..., max_length=280)
-    source: str = Field("manual", max_length=64)
-    meta: Optional[Dict[str, Any]] = None
+RequireRepAdmin = _require_rep_admin()
 
 
-class ScoreResponse(BaseModel):
+# ---------------------------------------------------------------------
+# Models
+# ---------------------------------------------------------------------
+
+
+class ReputationEvent(BaseModel):
+    id: str
     user_id: str
+    delta: float
+    score_after: float
+    reason: str
+    source: str
+    context: Dict[str, Any] = Field(default_factory=dict)
+    created_at: int
+
+
+class ReputationSummary(BaseModel):
+    ok: bool = True
+    user: str
     score: float
-    history: List[Dict[str, Any]] = []
+    recent_events: List[ReputationEvent] = Field(
+        default_factory=list,
+        description="Most recent events, newest first.",
+    )
 
 
-# ---------------------------------------------------------------------------
-# Endpoints
-# ---------------------------------------------------------------------------
+class ReputationEventsResponse(BaseModel):
+    ok: bool = True
+    user: str
+    events: List[ReputationEvent]
+    total_events: int
 
 
-@router.get("/meta")
-def get_meta() -> Dict[str, Any]:
-    rep = _root()
-    scores: Dict[str, float] = rep["scores"]
-    if scores:
-        values = list(scores.values())
-        total = len(values)
-        avg = sum(values) / total
-        return {
-            "total_users": total,
-            "avg_score": avg,
-            "min_score": min(values),
-            "max_score": max(values),
-            "last_update": rep.get("last_update"),
-        }
-    else:
-        return {
-            "total_users": 0,
-            "avg_score": 0.0,
-            "min_score": 0.0,
-            "max_score": 0.0,
-            "last_update": rep.get("last_update"),
-        }
+class ReputationAdjustRequest(BaseModel):
+    user_id: str = Field(..., description="User whose reputation we want to adjust.")
+    delta: float = Field(..., description="Amount to add (can be negative).")
+    reason: str = Field(..., max_length=4000)
+    source: str = Field(
+        ...,
+        description="System source identifier, e.g. 'dispute:case123', 'manual:admin'.",
+    )
+    context: Optional[Dict[str, Any]] = Field(
+        default=None,
+        description="Optional structured context for this adjustment.",
+    )
+    preview: bool = Field(
+        False,
+        description="If true, do not persist; just return the would-be score.",
+    )
 
 
-@router.get("/", response_model=Dict[str, Any])
-def list_scores(
-    limit: int = Query(100, ge=1, le=500),
-) -> Dict[str, Any]:
+class ReputationAdjustResponse(BaseModel):
+    ok: bool = True
+    user: str
+    score_before: float
+    score_after: float
+    event: Optional[ReputationEvent] = None
+    preview: bool = False
+
+
+# ---------------------------------------------------------------------
+# Routes
+# ---------------------------------------------------------------------
+
+
+@router.get("/{user_id}", response_model=ReputationSummary)
+def get_reputation(user_id: str) -> ReputationSummary:
     """
-    Return the top N scores (by value, descending).
+    Get current reputation score and a handful of the most recent events.
     """
-    rep = _root()
-    scores: Dict[str, float] = rep["scores"]
-    sorted_items = sorted(scores.items(), key=lambda kv: kv[1], reverse=True)
-    limited = sorted_items[:limit]
-    return {
-        "scores": [{"user_id": k, "score": v} for k, v in limited],
-        "total": len(scores),
-        "last_update": rep.get("last_update"),
-    }
-
-
-@router.get("/{user_id}", response_model=ScoreResponse)
-def get_user_score(user_id: str) -> ScoreResponse:
-    rep = _root()
-    scores: Dict[str, float] = rep["scores"]
-    history: List[Dict[str, Any]] = rep["history"]
+    state = _get_rep_state()
+    scores: Dict[str, float] = state["scores"]
+    events: List[Dict[str, Any]] = state["events"]
 
     score = float(scores.get(user_id, 0.0))
-    user_history = [ev for ev in history if ev.get("user_id") == user_id]
 
-    return ScoreResponse(user_id=user_id, score=score, history=user_history)
+    user_events = [
+        ReputationEvent(**ev)
+        for ev in events
+        if ev.get("user_id") == user_id
+    ]
+    # Newest first
+    user_events.sort(key=lambda e: e.created_at, reverse=True)
+    recent = user_events[:50]
+
+    return ReputationSummary(
+        ok=True,
+        user=user_id,
+        score=score,
+        recent_events=recent,
+    )
 
 
-@router.get("/me", response_model=ScoreResponse)
-def get_me(request: Request, user_id: Optional[str] = None) -> ScoreResponse:
+@router.get("/{user_id}/events", response_model=ReputationEventsResponse)
+def get_reputation_events(
+    user_id: str,
+    limit: int = Query(
+        200,
+        ge=1,
+        le=1000,
+        description="Max number of events to return (newest first).",
+    ),
+) -> ReputationEventsResponse:
     """
-    Simple helper endpoint.
-
-    We try, in order:
-      - query parameter user_id
-      - X-WeAll-User header
-      - X-User-Id header
-
-    This keeps it flexible for your current frontend wiring.
+    Get the full event history (or a truncated view) for a user.
     """
-    uid = user_id
-    if not uid:
-        uid = request.headers.get("X-WeAll-User") or request.headers.get("X-User-Id")
+    state = _get_rep_state()
+    events: List[Dict[str, Any]] = state["events"]
 
-    if not uid:
-        raise HTTPException(status_code=400, detail="user_id_required")
+    user_events = [
+        ReputationEvent(**ev)
+        for ev in events
+        if ev.get("user_id") == user_id
+    ]
+    user_events.sort(key=lambda e: e.created_at, reverse=True)
+    limited = user_events[:limit]
 
-    return get_user_score(uid)
+    return ReputationEventsResponse(
+        ok=True,
+        user=user_id,
+        events=limited,
+        total_events=len(user_events),
+    )
 
 
-@router.post("/adjust", response_model=ScoreResponse)
-def adjust_score(payload: AdjustRequest) -> ScoreResponse:
-    apply_reputation_event(
-        payload.user_id,
-        payload.delta,
+@router.post("/adjust", response_model=ReputationAdjustResponse)
+def adjust_reputation(
+    payload: ReputationAdjustRequest,
+    x_weall_user: str = Depends(RequireRepAdmin),
+) -> ReputationAdjustResponse:
+    """
+    Adjust reputation for a user.
+
+    - Requires a Tier 3 human (or higher) caller.
+    - If preview=True, does NOT persist the change, only returns the
+      hypothetical score_after.
+    """
+    state = _get_rep_state()
+    scores: Dict[str, float] = state["scores"]
+
+    before = float(scores.get(payload.user_id, 0.0))
+
+    if payload.preview:
+        after = before + float(payload.delta)
+        return ReputationAdjustResponse(
+            ok=True,
+            user=payload.user_id,
+            score_before=before,
+            score_after=after,
+            event=None,
+            preview=True,
+        )
+
+    ev_dict = record_reputation_event(
+        user_id=payload.user_id,
+        delta=payload.delta,
         reason=payload.reason,
         source=payload.source,
-        meta=payload.meta,
+        context=payload.context,
     )
-    return get_user_score(payload.user_id)
+    after = float(ev_dict["score_after"])
+    ev_model = ReputationEvent(**ev_dict)
+
+    return ReputationAdjustResponse(
+        ok=True,
+        user=payload.user_id,
+        score_before=before,
+        score_after=after,
+        event=ev_model,
+        preview=False,
+    )

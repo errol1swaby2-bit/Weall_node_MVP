@@ -195,6 +195,15 @@ def create_post(payload: PostCreate) -> Dict[str, Any]:
     posts.append(post)
     state["posts"] = posts
 
+    # Creator rewards: give the author a creator ticket for new content.
+    # This does NOT mint coins; it only records a ticket in the WeCoin
+    # 'creators' pool. Any errors are swallowed so we never break posting.
+    try:
+        if hasattr(executor, "add_creator_ticket"):
+            executor.add_creator_ticket(payload.author, weight=1.0)
+    except Exception:
+        pass
+
     # We rely on the executor's own persistence; no explicit save() call here.
     return {
         "ok": True,

@@ -1,545 +1,714 @@
 <!doctype html>
 <html lang="en">
-  <head>
-    <meta charset="utf-8" />
-    <title>Profile — WeAll</title>
-    <meta name="viewport" content="width=device-width, initial-scale=1" />
+<head>
+  <meta charset="utf-8" />
+  <title>WeAll — Profile</title>
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <link rel="icon" href="/frontend/favicon.svg" />
+  <link rel="stylesheet" href="/frontend/style.css" />
+  <style>
+    body {
+      margin: 0;
+      padding: 1.2rem 1.1rem 1.6rem;
+      font-family: system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+      background:
+        radial-gradient(circle at top, #22c55e22 0, #020617 55%, #020617 100%);
+      color: #e5e7eb;
+    }
 
-    <!-- If styles.css exists it will be used; otherwise the inline styles below are enough -->
-    <link rel="stylesheet" href="/frontend/styles.css" />
+    .wrap {
+      max-width: 1120px;
+      margin: 0 auto;
+    }
 
-    <style>
-      :root {
-        color-scheme: dark;
-        --bg: #050816;
-        --bg-soft: #0b1020;
-        --card-bg: #101626;
-        --card-border: #262f46;
-        --accent: #22c55e;
-        --accent-soft: rgba(34, 197, 94, 0.15);
-        --accent-yellow: #facc15;
-        --accent-red: #f97373;
-        --text-main: #e5e7eb;
-        --text-sub: #9ca3af;
+    .page-header {
+      display: flex;
+      flex-wrap: wrap;
+      align-items: flex-start;
+      justify-content: space-between;
+      gap: 0.9rem;
+      margin-bottom: 1.1rem;
+    }
+
+    .page-header-main {
+      display: flex;
+      flex-direction: column;
+      gap: 0.25rem;
+    }
+
+    .page-kicker {
+      font-size: 0.76rem;
+      text-transform: uppercase;
+      letter-spacing: 0.14em;
+      color: #9ca3af;
+    }
+
+    .page-header-main h1 {
+      margin: 0;
+      font-size: 1.35rem;
+      letter-spacing: 0.06em;
+      text-transform: uppercase;
+      color: #f9fafb;
+    }
+
+    .page-blurb {
+      margin: 0;
+      font-size: 0.86rem;
+      color: #cbd5f5;
+      max-width: 460px;
+    }
+
+    .signed-in-banner {
+      font-size: 0.78rem;
+      letter-spacing: 0.03em;
+      text-transform: uppercase;
+      color: #9ca3af;
+      text-align: right;
+      min-width: 220px;
+    }
+
+    .nav-row {
+      margin-top: 0.35rem;
+      display: flex;
+      flex-wrap: wrap;
+      gap: 0.4rem;
+    }
+
+    .chip-link {
+      border-radius: 999px;
+      border: 1px solid rgba(55,65,81,0.9);
+      padding: 0.2rem 0.65rem;
+      font-size: 0.78rem;
+      color: #9ca3af;
+      text-decoration: none;
+    }
+    .chip-link:hover {
+      border-color: rgba(148,163,184,1);
+      color: #e5e7eb;
+    }
+
+    main {
+      display: grid;
+      grid-template-columns: minmax(0, 1.1fr) minmax(0, 1.4fr);
+      gap: 1.1rem;
+    }
+
+    @media (max-width: 900px) {
+      main {
+        grid-template-columns: minmax(0, 1fr);
+      }
+    }
+
+    .card {
+      background:
+        radial-gradient(circle at top left, rgba(56,189,248,0.18), transparent 55%),
+        radial-gradient(circle at bottom right, rgba(34,197,94,0.22), transparent 50%),
+        rgba(15,23,42,0.96);
+      border-radius: 0.9rem;
+      border: 1px solid rgba(148,163,184,0.35);
+      padding: 0.95rem 1.0rem 1.15rem;
+      box-shadow:
+        0 18px 40px rgba(15,23,42,0.9),
+        0 0 0 1px rgba(15,23,42,0.92);
+    }
+
+    .card h2 {
+      margin: 0 0 0.3rem;
+      font-size: 0.96rem;
+      letter-spacing: 0.08em;
+      text-transform: uppercase;
+      color: #e5e7eb;
+    }
+
+    .card p {
+      margin: 0.15rem 0;
+      font-size: 0.86rem;
+      color: #cbd5f5;
+    }
+
+    .section-title {
+      margin-top: 0.6rem;
+      margin-bottom: 0.2rem;
+      font-size: 0.84rem;
+      letter-spacing: 0.1em;
+      text-transform: uppercase;
+      color: #e5e7eb;
+    }
+
+    .metric-row {
+      display: flex;
+      justify-content: space-between;
+      align-items: baseline;
+      margin-top: 0.25rem;
+      font-size: 0.86rem;
+    }
+
+    .metric-key {
+      color: #9ca3af;
+    }
+
+    .metric-value {
+      color: #e5e7eb;
+      font-weight: 500;
+      margin-left: 0.35rem;
+    }
+
+    .pill {
+      display: inline-flex;
+      align-items: center;
+      gap: 0.3rem;
+      font-size: 0.72rem;
+      padding: 0.1rem 0.55rem;
+      border-radius: 999px;
+      border: 1px solid rgba(148,163,184,0.85);
+      text-transform: uppercase;
+      letter-spacing: 0.08em;
+      color: #e5e7eb;
+    }
+
+    .pill .dot {
+      width: 0.38rem;
+      height: 0.38rem;
+      border-radius: 999px;
+      background: #22c55e;
+    }
+
+    .pill.muted {
+      border-color: rgba(75,85,99,0.9);
+      color: #9ca3af;
+    }
+
+    .json-box {
+      margin-top: 0.4rem;
+      border-radius: 0.65rem;
+      border: 1px solid rgba(15,23,42,0.9);
+      background: rgba(15,23,42,0.98);
+      padding: 0.45rem 0.6rem;
+      font-family: ui-monospace, Menlo, Consolas, monospace;
+      font-size: 0.78rem;
+      white-space: pre-wrap;
+      word-break: break-word;
+      max-height: 260px;
+      overflow: auto;
+      color: #e5e7eb;
+    }
+
+    .status {
+      margin-top: 0.35rem;
+      font-size: 0.78rem;
+      color: #9ca3af;
+    }
+    .status.ok { color: #4ade80; }
+    .status.err { color: #fb7185; }
+
+    .btn-row {
+      margin-top: 0.5rem;
+      display: flex;
+      flex-wrap: wrap;
+      gap: 0.45rem;
+    }
+
+    .btn {
+      border-radius: 999px;
+      border: 1px solid rgba(148,163,184,0.85);
+      padding: 0.38rem 0.9rem;
+      font-size: 0.8rem;
+      font-weight: 500;
+      text-transform: uppercase;
+      letter-spacing: 0.12em;
+      background: rgba(15,23,42,0.96);
+      color: #e5e7eb;
+      cursor: pointer;
+      flex: 0 0 auto;
+    }
+
+    .btn.primary {
+      border-color: rgba(34,197,94,0.9);
+      background: radial-gradient(circle at 30% 0%,
+                  rgba(34,197,94,0.65), rgba(15,23,42,0.98));
+      color: #ecfeff;
+    }
+
+    .btn:disabled {
+      opacity: 0.55;
+      cursor: default;
+    }
+
+    .hint {
+      margin-top: 0.4rem;
+      font-size: 0.8rem;
+      color: #9ca3af;
+    }
+
+    footer.weall-footer {
+      border-top: 1px solid rgba(31,41,55,0.9);
+      padding: 0.75rem 0.1rem 1.1rem;
+      margin-top: 1.5rem;
+      font-size: 0.78rem;
+      color: #6b7280;
+      text-align: center;
+    }
+
+    footer.weall-footer a {
+      color: #9ca3af;
+      text-decoration: none;
+    }
+
+    footer.weall-footer a:hover {
+      text-decoration: underline;
+    }
+  </style>
+</head>
+<body>
+  <div class="wrap">
+    <header class="page-header">
+      <div class="page-header-main">
+        <div class="page-kicker">Account · Node · Rewards</div>
+        <h1>Profile</h1>
+        <p class="page-blurb" id="profileSubtitle">
+          Loading your profile from this node…
+        </p>
+        <div class="nav-row">
+          <a class="chip-link" href="/frontend/index.html">Feed</a>
+          <a class="chip-link" href="/frontend/groups.html">Groups</a>
+          <a class="chip-link" href="/frontend/juror.html">Juror</a>
+          <a class="chip-link" href="/frontend/onboarding.html">Onboarding</a>
+        </div>
+      </div>
+      <p id="signedIn" class="signed-in-banner">
+        Checking session…
+      </p>
+    </header>
+
+    <main>
+      <!-- LEFT COLUMN: account, PoH, node -->
+      <section class="card">
+        <h2>Account &amp; PoH</h2>
+        <p>
+          This view is built from your active session, Proof-of-Humanity record,
+          and effective role profile on this node.
+        </p>
+
+        <div class="section-title">Account</div>
+        <div class="metric-row">
+          <span class="metric-key">Handle</span>
+          <span class="metric-value" id="metricHandle">–</span>
+        </div>
+        <div class="metric-row">
+          <span class="metric-key">Effective roles</span>
+          <span class="metric-value" id="metricRoles">–</span>
+        </div>
+
+        <div class="section-title" style="margin-top:0.8rem;">PoH status</div>
+        <div class="pill muted" id="pohPill">
+          <span class="dot"></span>
+          <span id="pohPillText">Tier –</span>
+        </div>
+
+        <div class="metric-row">
+          <span class="metric-key">Tier</span>
+          <span class="metric-value" id="metricTier">–</span>
+        </div>
+        <div class="metric-row">
+          <span class="metric-key">Status</span>
+          <span class="metric-value" id="metricPohStatus">–</span>
+        </div>
+        <div class="metric-row">
+          <span class="metric-key">Last updated</span>
+          <span class="metric-value" id="metricPohUpdated">–</span>
+        </div>
+        <div class="metric-row">
+          <span class="metric-key">Juror-eligible</span>
+          <span class="metric-value" id="metricJurorEligible">–</span>
+        </div>
+
+        <div class="btn-row">
+          <button class="btn primary" id="btnRefreshProfile">Refresh</button>
+          <button class="btn" id="btnOpenJuror">Open juror console</button>
+          <button class="btn" id="btnOpenOnboarding">Onboarding overview</button>
+        </div>
+
+        <div class="status" id="profileError"></div>
+
+        <div class="section-title" style="margin-top:0.9rem;">Raw PoH record</div>
+        <div class="json-box" id="pohBox">
+          PoH JSON will appear here.
+        </div>
+      </section>
+
+      <!-- RIGHT COLUMN: wallet + rewards + node info -->
+      <section class="card">
+        <h2>Wallet, rewards &amp; node</h2>
+        <p>
+          Wallet + rewards views are MVP-only: they show node-local balances and
+          pending rewards, not a live on-chain ledger yet.
+        </p>
+
+        <div class="section-title">Wallet</div>
+        <div class="metric-row">
+          <span class="metric-key">Summary</span>
+          <span class="metric-value" id="walletSummary">–</span>
+        </div>
+
+        <div class="json-box" id="walletBox">
+          Wallet JSON will appear here.
+        </div>
+
+        <div class="section-title" style="margin-top:0.9rem;">Rewards</div>
+        <div class="metric-row">
+          <span class="metric-key">Pending total</span>
+          <span class="metric-value" id="rewardsTotal">–</span>
+        </div>
+        <div class="metric-row">
+          <span class="metric-key">Pools</span>
+          <span class="metric-value" id="rewardsPools">–</span>
+        </div>
+        <div class="json-box" id="rewardsBox">
+          Pending rewards JSON will appear here.
+        </div>
+
+        <div class="section-title" style="margin-top:0.9rem;">Node context</div>
+        <div class="metric-row">
+          <span class="metric-key">Node kind</span>
+          <span class="metric-value" id="nodeKind">–</span>
+        </div>
+        <div class="json-box" id="nodeBox">
+          Node meta JSON will appear here.
+        </div>
+
+        <div class="hint">
+          This is a single-node view. In a multi-node mesh, your balances,
+          roles and PoH record are replicated and reconciled across peers.
+        </div>
+      </section>
+    </main>
+
+    <footer class="weall-footer">
+      <span>© <span id="footer-year">2024</span> WeAll</span>
+      &nbsp;•&nbsp;<a href="/frontend/privacy.html">Privacy</a>
+      &nbsp;•&nbsp;<a href="/frontend/terms.html">Terms</a>
+    </footer>
+  </div>
+
+  <script src="/frontend/env.js"></script>
+  <script src="/frontend/auth.js"></script>
+  <script src="/frontend/session.js"></script>
+  <script src="/frontend/nav.js"></script>
+  <script src="/frontend/footer.js"></script>
+  <script>
+    (function () {
+      const $ = (id) => document.getElementById(id);
+
+      function apiBase() {
+        return (window.ENV && window.ENV.VITE_API_BASE) || "";
       }
 
-      * {
-        box-sizing: border-box;
+      async function jsonFetch(path, opts) {
+        const url = apiBase() + path;
+        const options = Object.assign(
+          {
+            method: "GET",
+            headers: { Accept: "application/json" },
+            credentials: "include",
+          },
+          opts || {}
+        );
+        if (options.body && typeof options.body !== "string") {
+          options.headers["Content-Type"] =
+            options.headers["Content-Type"] || "application/json";
+          options.body = JSON.stringify(options.body);
+        }
+        const res = await fetch(url, options);
+        let data = null;
+        try {
+          data = await res.json();
+        } catch {
+          data = null;
+        }
+        if (!res.ok) {
+          const msg =
+            (data && (data.detail || data.error || data.message)) ||
+            "Request failed with " + res.status;
+          throw new Error(msg);
+        }
+        return data;
       }
 
-      body {
-        margin: 0;
-        min-height: 100vh;
-        font-family: system-ui, -apple-system, BlinkMacSystemFont, "SF Pro Text",
-          sans-serif;
-        background: radial-gradient(circle at top, #1f2937 0, #020617 55%);
-        color: var(--text-main);
-      }
-
-      .page-shell {
-        max-width: 720px;
-        margin: 0 auto;
-        padding: 16px 16px 40px;
-      }
-
-      header {
-        margin-bottom: 20px;
-      }
-
-      .page-title {
-        font-size: 1.8rem;
-        font-weight: 700;
-        letter-spacing: 0.03em;
-      }
-
-      .page-subtitle {
-        margin-top: 4px;
-        font-size: 0.9rem;
-        color: var(--text-sub);
-      }
-
-      .pill {
-        display: inline-flex;
-        align-items: center;
-        gap: 6px;
-        border-radius: 999px;
-        padding: 3px 10px;
-        font-size: 0.75rem;
-        font-weight: 500;
-        border: 1px solid rgba(148, 163, 184, 0.3);
-        background: rgba(15, 23, 42, 0.9);
-        color: var(--text-sub);
-      }
-
-      .pill-dot {
-        width: 8px;
-        height: 8px;
-        border-radius: 999px;
-        background: var(--accent-yellow);
-      }
-
-      .cards-grid {
-        display: flex;
-        flex-direction: column;
-        gap: 16px;
-        margin-top: 12px;
-      }
-
-      .card {
-        border-radius: 18px;
-        background: radial-gradient(circle at top left, #111827, #020617 70%);
-        border: 1px solid var(--card-border);
-        padding: 16px 14px 14px;
-        box-shadow: 0 18px 35px rgba(15, 23, 42, 0.9);
-      }
-
-      .card-header {
-        display: flex;
-        justify-content: space-between;
-        align-items: center;
-        margin-bottom: 10px;
-      }
-
-      .card-title {
-        font-size: 0.95rem;
-        letter-spacing: 0.12em;
-        text-transform: uppercase;
-        color: var(--text-sub);
-      }
-
-      .card-tag {
-        font-size: 0.75rem;
-        padding: 3px 8px;
-        border-radius: 999px;
-        border: 1px solid rgba(148, 163, 184, 0.3);
-        color: var(--text-sub);
-      }
-
-      .poh-tier-label {
-        font-size: 1rem;
-        font-weight: 600;
-      }
-
-      .poh-row {
-        display: flex;
-        align-items: center;
-        justify-content: space-between;
-        gap: 8px;
-        margin-top: 4px;
-      }
-
-      .poh-meta {
-        font-size: 0.8rem;
-        color: var(--text-sub);
-      }
-
-      .btn-row {
-        display: flex;
-        flex-wrap: wrap;
-        gap: 8px;
-        margin-top: 12px;
-      }
-
-      .btn {
-        border-radius: 999px;
-        border: 1px solid rgba(148, 163, 184, 0.4);
-        padding: 7px 12px;
-        font-size: 0.8rem;
-        font-weight: 500;
-        background: rgba(15, 23, 42, 0.9);
-        color: var(--text-main);
-        cursor: pointer;
-        display: inline-flex;
-        align-items: center;
-        gap: 6px;
-      }
-
-      .btn-primary {
-        background: linear-gradient(135deg, #22c55e, #4ade80);
-        border-color: transparent;
-        color: #020617;
-      }
-
-      .btn:disabled {
-        opacity: 0.45;
-        cursor: default;
-      }
-
-      .roles-grid {
-        display: grid;
-        grid-template-columns: repeat(3, minmax(0, 1fr));
-        gap: 10px;
-        margin-top: 6px;
-      }
-
-      @media (max-width: 640px) {
-        .roles-grid {
-          grid-template-columns: 1fr;
+      function J(obj) {
+        try {
+          return JSON.stringify(obj, null, 2);
+        } catch {
+          return String(obj);
         }
       }
 
-      .role-card {
-        border-radius: 14px;
-        padding: 10px 10px 9px;
-        background: linear-gradient(145deg, #020617, #0b1120);
-        border: 1px solid rgba(55, 65, 81, 0.9);
+      function formatAmount(x, decimals) {
+        if (x === null || x === undefined || isNaN(x)) return "0";
+        const d = typeof decimals === "number" ? decimals : 4;
+        return Number(x).toFixed(d);
       }
 
-      .role-title-row {
-        display: flex;
-        justify-content: space-between;
-        align-items: center;
-        font-size: 0.8rem;
+      function buildRoleBanner(userId, roles, nodeMeta, poh) {
+        const parts = [];
+
+        const tier =
+          (roles && (roles.poh_tier ?? roles.pohTier)) ||
+          (poh && typeof poh.tier === "number" ? poh.tier : 0) ||
+          0;
+        const status = (poh && poh.status) || "ok";
+
+        parts.push("PoH Tier " + tier + " (" + status + ")");
+
+        const flags = (roles && roles.flags) || {};
+        const caps = (roles && roles.capabilities) || [];
+        const tags = [];
+
+        if (flags.wants_creator || caps.includes("earn_creator_rewards")) {
+          tags.push("Creator");
+        }
+        if (flags.wants_juror || caps.includes("serve_juror_panel")) {
+          tags.push("Juror");
+        }
+        if (flags.wants_validator || caps.includes("validator_duties")) {
+          tags.push("Validator");
+        }
+        if (flags.wants_operator || caps.includes("operator_duties")) {
+          tags.push("Operator");
+        }
+        if (flags.wants_emissary || caps.includes("act_as_emissary")) {
+          tags.push("Emissary");
+        }
+
+        if (tags.length) {
+          parts.push(tags.join(" · "));
+        }
+
+        const nodeKind = (nodeMeta && nodeMeta.node_kind) || "public_gateway";
+        if (nodeKind === "validator_node") {
+          parts.push("Validator node");
+        } else if (nodeKind === "private_node") {
+          parts.push("Private node");
+        } else {
+          parts.push("Gateway node");
+        }
+
+        return "Signed in as " + userId + " · " + parts.join(" · ");
       }
 
-      .role-name {
-        font-weight: 600;
+      async function hydrateProfile() {
+        const bannerEl = $("signedIn");
+        const subtitleEl = $("profileSubtitle");
+        const errEl = $("profileError");
+
+        try {
+          const sess = await weallAuth.getSession();
+          if (!sess || !sess.user_id) {
+            if (bannerEl) bannerEl.textContent = "Not signed in.";
+            if (subtitleEl) subtitleEl.textContent = "Please sign in to view your profile.";
+            if (errEl) {
+              errEl.textContent = "No active session found.";
+              errEl.className = "status err";
+            }
+            return null;
+          }
+
+          const rawHandle = String(sess.user_id);
+          const handle = rawHandle.startsWith("@") ? rawHandle : "@" + rawHandle;
+          const bareId = rawHandle.startsWith("@") ? rawHandle.slice(1) : rawHandle;
+
+          if ($("metricHandle")) $("metricHandle").textContent = handle;
+          if (subtitleEl) {
+            subtitleEl.textContent = "Signed in as " + handle + ".";
+          }
+
+          const [poh, roles, nodeMeta, walletMeta, walletInfo, rewardsMeta, rewardsPending] =
+            await Promise.all([
+              weallAuth.getPohMe().catch(() => null),
+              jsonFetch("/roles/effective/me", {
+                headers: { "X-WeAll-User": sess.user_id },
+              }).catch(() => null),
+              jsonFetch("/node/meta").catch(() => null),
+              jsonFetch("/wallets/meta").catch(() => null),
+              jsonFetch("/wallets/" + encodeURIComponent(handle)).catch(() => null),
+              jsonFetch("/rewards/meta").catch(() => null),
+              jsonFetch("/rewards/pending/" + encodeURIComponent(bareId)).catch(
+                () => null
+              ),
+            ]);
+
+          // Header banner
+          if (bannerEl) {
+            bannerEl.textContent = buildRoleBanner(
+              sess.user_id,
+              roles,
+              nodeMeta,
+              poh
+            );
+          }
+
+          // Roles summary
+          if (roles && $("metricRoles")) {
+            const caps = roles.capabilities || [];
+            const short = caps.slice(0, 4).join(", ");
+            $("metricRoles").textContent = short || "Tier-only role";
+          }
+
+          // PoH metrics
+          const tier =
+            poh && typeof poh.tier === "number" ? poh.tier : (roles && roles.poh_tier) || 0;
+          const pohStatus = (poh && poh.status) || "unknown";
+          const updatedAt =
+            poh && poh.updated_at
+              ? new Date(poh.updated_at * 1000).toLocaleString()
+              : "–";
+          const jurorEligible = tier >= 3 && pohStatus === "ok";
+
+          if ($("metricTier")) $("metricTier").textContent = String(tier || "0");
+          if ($("metricPohStatus"))
+            $("metricPohStatus").textContent = pohStatus;
+          if ($("metricPohUpdated"))
+            $("metricPohUpdated").textContent = updatedAt;
+          if ($("metricJurorEligible"))
+            $("metricJurorEligible").textContent = jurorEligible
+              ? "Yes (Tier 3, status ok)"
+              : "No (requires Tier 3 & good standing)";
+
+          const pohPill = $("pohPill");
+          const pohPillText = $("pohPillText");
+          if (pohPillText) {
+            pohPillText.textContent = "Tier " + (tier || 0);
+          }
+          if (pohPill) {
+            pohPill.className =
+              "pill" + (pohStatus === "ok" ? "" : " muted");
+          }
+
+          if ($("pohBox")) {
+            $("pohBox").textContent = poh ? J(poh) : "No PoH record found.";
+          }
+
+          // Wallet summary
+          if (walletInfo) {
+            const symbol =
+              (walletMeta && walletMeta.token_symbol) ||
+              (walletInfo.balances &&
+                Object.keys(walletInfo.balances)[0]) ||
+              "WEC";
+            const balances = walletInfo.balances || {};
+            const dec =
+              (walletMeta && walletMeta.decimals) || 4;
+            const bal = balances[symbol] !== undefined
+              ? formatAmount(balances[symbol], dec)
+              : "0";
+            const note = walletMeta && walletMeta.notes
+              ? walletMeta.notes
+              : "";
+            const summary = `${bal} ${symbol}` + (note ? ` · ${note}` : "");
+            if ($("walletSummary")) $("walletSummary").textContent = summary;
+          } else if (walletMeta && $("walletSummary")) {
+            $("walletSummary").textContent =
+              walletMeta.notes ||
+              "Wallet meta available but no wallet record yet for this user.";
+          }
+
+          if ($("walletBox")) {
+            $("walletBox").textContent = walletInfo
+              ? J(walletInfo)
+              : "Wallet info unavailable.";
+          }
+
+          // Rewards summary
+          let totalPending = 0;
+          if (rewardsPending && typeof rewardsPending.total_pending === "number") {
+            totalPending = rewardsPending.total_pending;
+          }
+          const symbol =
+            (walletMeta && walletMeta.token_symbol) || "WEC";
+          if ($("rewardsTotal")) {
+            $("rewardsTotal").textContent =
+              formatAmount(totalPending, 4) + " " + symbol;
+          }
+
+          if (rewardsMeta && $("rewardsPools")) {
+            const pools = rewardsMeta.pools || [];
+            $("rewardsPools").textContent = pools.join(", ") || "–";
+          }
+
+          if ($("rewardsBox")) {
+            $("rewardsBox").textContent = rewardsPending
+              ? J(rewardsPending)
+              : "No pending rewards.";
+          }
+
+          // Node meta
+          if (nodeMeta && $("nodeKind")) {
+            $("nodeKind").textContent = nodeMeta.node_kind || "unknown";
+          }
+          if ($("nodeBox")) {
+            $("nodeBox").textContent = nodeMeta
+              ? J(nodeMeta)
+              : "Node meta unavailable.";
+          }
+
+          if (errEl) {
+            errEl.textContent = "Profile loaded from node APIs.";
+            errEl.className = "status ok";
+          }
+
+          return { sess, poh, roles, nodeMeta, walletInfo, rewardsMeta, rewardsPending };
+        } catch (err) {
+          console.error("[profile] Failed to load profile", err);
+          if (errEl) {
+            errEl.textContent =
+              "Failed to load profile data: " + err.message;
+            errEl.className = "status err";
+          }
+          return null;
+        }
       }
 
-      .role-chip {
-        font-size: 0.7rem;
-        padding: 1px 7px;
-        border-radius: 999px;
-        border: 1px solid rgba(148, 163, 184, 0.5);
-        color: var(--text-sub);
+      function wireButtons() {
+        const refreshBtn = $("btnRefreshProfile");
+        const jurorBtn = $("btnOpenJuror");
+        const onboardingBtn = $("btnOpenOnboarding");
+
+        if (refreshBtn) {
+          refreshBtn.addEventListener("click", () => {
+            hydrateProfile();
+          });
+        }
+
+        if (jurorBtn) {
+          jurorBtn.addEventListener("click", () => {
+            window.location.href = "/frontend/juror.html";
+          });
+        }
+
+        if (onboardingBtn) {
+          onboardingBtn.addEventListener("click", () => {
+            window.location.href = "/frontend/onboarding.html";
+          });
+        }
       }
 
-      .toggle-row {
-        display: flex;
-        align-items: center;
-        justify-content: space-between;
-        margin-top: 6px;
-        font-size: 0.8rem;
+      async function init() {
+        // Profile requires at least Tier 1 (logged in).
+        const ok = await weallAuth.require({
+          minTier: 1,
+          redirectToLogin: "/frontend/login.html",
+        });
+        if (!ok) return;
+
+        wireButtons();
+        await hydrateProfile();
       }
 
-      .toggle-label {
-        color: var(--text-sub);
+      if (document.readyState === "loading") {
+        document.addEventListener("DOMContentLoaded", init);
+      } else {
+        init();
       }
-
-      .switch {
-        position: relative;
-        display: inline-block;
-        width: 34px;
-        height: 18px;
-      }
-
-      .switch input {
-        opacity: 0;
-        width: 0;
-        height: 0;
-      }
-
-      .slider {
-        position: absolute;
-        cursor: pointer;
-        inset: 0;
-        background-color: #111827;
-        border-radius: 999px;
-        transition: 0.2s;
-        border: 1px solid #4b5563;
-      }
-
-      .slider:before {
-        position: absolute;
-        content: "";
-        height: 14px;
-        width: 14px;
-        left: 2px;
-        bottom: 1px;
-        background-color: #9ca3af;
-        transition: 0.2s;
-        border-radius: 50%;
-      }
-
-      .switch input:checked + .slider {
-        background-color: var(--accent-soft);
-        border-color: var(--accent);
-      }
-
-      .switch input:checked + .slider:before {
-        transform: translateX(14px);
-        background-color: #bbf7d0;
-      }
-
-      .switch input:disabled + .slider {
-        opacity: 0.4;
-        cursor: default;
-      }
-
-      .roles-note {
-        font-size: 0.78rem;
-        color: var(--text-sub);
-        margin-top: 8px;
-      }
-
-      .roles-note strong {
-        color: var(--accent-yellow);
-        font-weight: 600;
-      }
-
-      .roles-note.error {
-        color: #fecaca;
-      }
-
-      .intensity-row {
-        margin-top: 8px;
-        font-size: 0.8rem;
-        display: flex;
-        align-items: center;
-        justify-content: space-between;
-        gap: 8px;
-      }
-
-      .intensity-row select {
-        flex-shrink: 0;
-        border-radius: 999px;
-        border: 1px solid rgba(148, 163, 184, 0.5);
-        background: rgba(15, 23, 42, 0.9);
-        color: var(--text-main);
-        padding: 4px 10px;
-        font-size: 0.8rem;
-      }
-
-      .nav-row {
-        margin-top: 10px;
-        display: flex;
-        flex-wrap: wrap;
-        gap: 8px;
-      }
-
-      .nav-row .btn {
-        border-radius: 14px;
-      }
-
-      .badge-tier3 {
-        color: var(--accent);
-      }
-
-      .badge-tier-lock {
-        color: var(--accent-yellow);
-      }
-
-      .hidden {
-        display: none !important;
-      }
-    </style>
-
-    <script defer src="/frontend/session.js"></script>
-    <script defer src="/frontend/profile.js"></script>
-  </head>
-  <body>
-    <div class="page-shell">
-      <header>
-        <div class="page-title" id="profileTitle">Profile</div>
-        <div class="page-subtitle" id="profileSubtitle">
-          Loading session…
-        </div>
-      </header>
-
-      <div class="cards-grid">
-        <!-- PoH / Identity card -->
-        <section class="card">
-          <div class="card-header">
-            <div>
-              <div class="card-title">Proof-of-Humanity</div>
-              <div class="poh-tier-label" id="pohTierLabel">
-                Tier — loading…
-              </div>
-            </div>
-            <div class="pill" id="pohBadge">
-              <span class="pill-dot"></span>
-              <span id="pohBadgeText">Checking status…</span>
-            </div>
-          </div>
-
-          <div class="poh-row">
-            <div class="poh-meta">
-              PoH ID:
-              <span id="pohIdText" style="color: #e5e7eb">—</span>
-            </div>
-            <div class="poh-meta">
-              Status:
-              <span id="pohStatusText" style="color: #22c55e">—</span>
-            </div>
-          </div>
-
-          <div class="btn-row">
-            <button id="btnAccountRecovery" class="btn">
-              🔐 Account recovery
-            </button>
-            <button id="btnPohUpgrade" class="btn btn-primary">
-              ⚡ Request PoH upgrade
-            </button>
-          </div>
-        </section>
-
-        <!-- Roles & validation card -->
-        <section class="card">
-          <div class="card-header">
-            <div>
-              <div class="card-title">Roles & Validation</div>
-              <div style="font-size: 0.8rem; color: var(--text-sub)">
-                Configure how this device participates in the protocol.
-              </div>
-            </div>
-            <div class="card-tag" id="rolesTierTag">Tier — loading…</div>
-          </div>
-
-          <div id="rolesLocked" class="roles-note hidden">
-            This device is currently
-            <strong>below Tier 3</strong>. Validation, juror, and operator
-            roles unlock once you complete live jury verification.
-          </div>
-
-          <div id="rolesError" class="roles-note error hidden"></div>
-
-          <div id="rolesGrid" class="roles-grid hidden">
-            <!-- Validator role -->
-            <div class="role-card">
-              <div class="role-title-row">
-                <div class="role-name">Validator</div>
-                <div class="role-chip">Block rewards</div>
-              </div>
-
-              <div class="toggle-row">
-                <span class="toggle-label">Enable on this device</span>
-                <label class="switch">
-                  <input
-                    id="toggleValidatorEnabled"
-                    type="checkbox"
-                  />
-                  <span class="slider"></span>
-                </label>
-              </div>
-
-              <div class="toggle-row">
-                <span class="toggle-label">Run in background</span>
-                <label class="switch">
-                  <input
-                    id="toggleValidatorBackground"
-                    type="checkbox"
-                  />
-                  <span class="slider"></span>
-                </label>
-              </div>
-
-              <div class="toggle-row">
-                <span class="toggle-label">Wi-Fi only</span>
-                <label class="switch">
-                  <input id="toggleValidatorWifiOnly" type="checkbox" />
-                  <span class="slider"></span>
-                </label>
-              </div>
-
-              <div class="toggle-row">
-                <span class="toggle-label">Only while charging</span>
-                <label class="switch">
-                  <input
-                    id="toggleValidatorChargingOnly"
-                    type="checkbox"
-                  />
-                  <span class="slider"></span>
-                </label>
-              </div>
-
-              <div class="intensity-row">
-                <span class="toggle-label">Intensity</span>
-                <select id="selectValidatorIntensity">
-                  <option value="low">Low</option>
-                  <option value="medium">Medium</option>
-                  <option value="high">High</option>
-                </select>
-              </div>
-            </div>
-
-            <!-- Juror role -->
-            <div class="role-card">
-              <div class="role-title-row">
-                <div class="role-name">Juror</div>
-                <div class="role-chip">Disputes & PoH</div>
-              </div>
-
-              <div class="toggle-row">
-                <span class="toggle-label">Available as juror</span>
-                <label class="switch">
-                  <input id="toggleJurorEnabled" type="checkbox" />
-                  <span class="slider"></span>
-                </label>
-              </div>
-
-              <div
-                style="
-                  font-size: 0.78rem;
-                  color: var(--text-sub);
-                  margin-top: 8px;
-                "
-              >
-                Jurors help resolve disputes and verify new humans. You’ll only
-                be called inside your consent windows (future setting).
-              </div>
-            </div>
-
-            <!-- Operator role -->
-            <div class="role-card">
-              <div class="role-title-row">
-                <div class="role-name">Node operator</div>
-                <div class="role-chip">Routing & storage</div>
-              </div>
-
-              <div class="toggle-row">
-                <span class="toggle-label">Run as overlay node</span>
-                <label class="switch">
-                  <input id="toggleOperatorEnabled" type="checkbox" />
-                  <span class="slider"></span>
-                </label>
-              </div>
-
-              <div
-                style="
-                  font-size: 0.78rem;
-                  color: var(--text-sub);
-                  margin-top: 8px;
-                "
-              >
-                Operators boost p2p routing and pin shared content. Future
-                versions will expose bandwidth / storage budgets here.
-              </div>
-            </div>
-          </div>
-
-          <div class="roles-note" id="rolesFooterNote">
-            Tier <span id="rolesTierNumber">—</span>:
-            <span id="rolesTierLegend">Loading…</span>
-          </div>
-        </section>
-
-        <!-- Navigation -->
-        <section class="card">
-          <div class="card-header">
-            <div class="card-title">Navigation</div>
-          </div>
-          <div class="nav-row">
-            <button
-              class="btn btn-primary"
-              onclick="window.location.href='/frontend/index.html'"
-            >
-              🎥 Open TikTok feed
-            </button>
-            <button
-              class="btn"
-              onclick="window.location.href='/frontend/governance.html'"
-            >
-              🗳 Governance
-            </button>
-            <button
-              class="btn"
-              onclick="window.location.href='/frontend/wallet.html'"
-            >
-              💰 Wallet
-            </button>
-          </div>
-        </section>
-      </div>
-    </div>
-  </body>
+    })();
+  </script>
+</body>
 </html>

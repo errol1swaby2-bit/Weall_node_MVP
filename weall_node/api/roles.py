@@ -1,321 +1,284 @@
 """
 weall_node/api/roles.py
 --------------------------------------------------
-Role + validator/juror/operator preferences, keyed by PoH id.
+Network roles & topology API.
 
-- Requires X-WeAll-User header for identity
-- Tiers are enforced from the PoH module:
+Implements the public-facing endpoints for Full Scope §2:
+    - Roles (Observer, Tier1, Tier2, Tier3, Juror, Node Operator,
+      Validator, Emissary, Creator)
+    - Topology (gateway nodes, validator nodes, community/private nodes)
 
-    Tier 0: read-only crawlers / exchanges
-    Tier 1: email verified — like/comment/message only
-    Tier 2: async verified human — can post + join groups
-    Tier 3: live jury verified human — full protocol access
+These endpoints are *read-only*; they describe how the network is
+supposed to behave and reveal each user's effective capabilities.
 
-- Only Tier 3 can change juror / operator / validator settings.
-
-Ledger layout:
-
-executor.ledger["roles"] = {
-    "by_poh": {
-        "<poh_id>": {
-            "poh_id": str,
-            "tier": int,
-            "validator": {
-                "enabled": bool,
-                "run_in_background": bool,
-                "wifi_only": bool,
-                "only_while_charging": bool,
-                "intensity": str,  # "low" | "medium" | "high"
-                "since": int | None,
-            },
-            "juror": {
-                "enabled": bool,
-                "since": int | None,
-            },
-            "operator": {
-                "enabled": bool,
-                "since": int | None,
-            },
-            "created_at": int,
-            "updated_at": int,
-        }
-    }
-}
+Other API modules (governance, disputes, validators, etc.) should
+*consume* the helper `get_effective_profile_for_user()` to enforce
+role gating consistently.
 """
 
-import time
-from typing import Optional
+from __future__ import annotations
 
-from fastapi import APIRouter, HTTPException, Request
+from typing import Dict, List, Optional
+
+from fastapi import APIRouter, Depends, Header, HTTPException, status
 from pydantic import BaseModel, Field
 
 from ..weall_executor import executor
+from ..weall_runtime import roles as runtime_roles
 
 router = APIRouter()
 
 
-# ------------------------------------------------------------
-# Helpers
-# ------------------------------------------------------------
+# ============================================================
+# Pydantic models
+# ============================================================
 
-def _get_poh_id_from_header(request: Request) -> str:
-    poh_id = request.headers.get("X-WeAll-User")
-    if not poh_id:
-        raise HTTPException(status_code=400, detail="Missing X-WeAll-User header")
-    return poh_id
+class RoleMetaTier(BaseModel):
+    tier: int = Field(..., description="Numeric PoH tier (0 = observer, 1..3)")
+    label: str
+    description: str
+    base_capabilities: List[str]
 
 
-def _get_poh_tier(poh_id: str) -> int:
+class RoleMetaResponse(BaseModel):
+    tiers: List[RoleMetaTier]
+    capability_matrix_examples: Dict[str, Dict[str, List[str]]]
+    notes: str
+
+
+class EffectiveRoleProfileResponse(BaseModel):
+    user_id: str
+    poh_tier: int
+    flags: Dict[str, bool]
+    capabilities: List[str]
+
+
+class NodeTopologyEntry(BaseModel):
+    kind: str
+    exposes_public_api: bool
+    participates_in_consensus: bool
+    stores_group_data: bool
+    is_private_scope: bool
+    description: str
+
+
+class NodeTopologyResponse(BaseModel):
+    node_kinds: List[NodeTopologyEntry]
+
+
+# ============================================================
+# Internal helpers
+# ============================================================
+
+def _lookup_poh_record(user_id: str) -> Optional[dict]:
     """
-    Look up the current PoH tier from the ledger.
-    Returns 0 if no record exists.
-    """
-    ledger = executor.ledger
-    poh_root = ledger.setdefault("poh", {})
-    records = poh_root.setdefault("records", {})
-    rec = records.get(poh_id)
-    if not rec:
-        return 0
-    try:
-        return int(rec.get("tier") or 0)
-    except Exception:
-        return 0
+    Look up the PoH record for a given user_id from the executor ledger.
 
+    This assumes the ledger layout:
 
-def _ensure_roles_record(poh_id: str, tier: int):
-    """
-    Ensure a roles record exists for this poh_id, with sensible defaults.
-
-    - validator.enabled:
-        * True by default at Tier 3
-        * False otherwise
-    - validator.run_in_background: False
-    - validator.wifi_only: True
-    - validator.only_while_charging: False
-    - validator.intensity: "medium"
-    - juror.enabled: False (opt-in)
-    - operator.enabled: False (opt-in)
-    """
-    now = int(time.time())
-    ledger = executor.ledger
-    roles_root = ledger.setdefault("roles", {})
-    by_poh = roles_root.setdefault("by_poh", {})
-
-    rec = by_poh.get(poh_id)
-    if rec is None:
-        default_validator_enabled = tier >= 3
-        rec = {
-            "poh_id": poh_id,
-            "tier": tier,
-            "validator": {
-                "enabled": default_validator_enabled,
-                "run_in_background": False,
-                "wifi_only": True,
-                "only_while_charging": False,
-                "intensity": "medium",
-                "since": now if default_validator_enabled else None,
-            },
-            "juror": {
-                "enabled": False,
-                "since": None,
-            },
-            "operator": {
-                "enabled": False,
-                "since": None,
-            },
-            "created_at": now,
-            "updated_at": now,
+        executor.ledger["poh"]["records"][user_id] -> {
+            "tier": int,
+            "status": str,
+            "flags": {...}  # optional role flags
         }
-        by_poh[poh_id] = rec
 
-    # Always sync tier with current PoH tier
-    if rec.get("tier") != tier:
-        rec["tier"] = tier
-
-        # If tier dropped below 3, force-disable privileged roles
-        if tier < 3:
-            v = rec.get("validator", {})
-            v["enabled"] = False
-            v["run_in_background"] = False
-            v["since"] = None
-
-            j = rec.get("juror", {})
-            j["enabled"] = False
-            j["since"] = None
-
-            o = rec.get("operator", {})
-            o["enabled"] = False
-            o["since"] = None
-
-        # If tier upgraded to 3 and validator was never enabled, default it ON
-        elif tier >= 3:
-            v = rec.setdefault("validator", {})
-            if not v.get("enabled") and v.get("since") is None:
-                v["enabled"] = True
-                v["since"] = now
-
-        rec["updated_at"] = now
-
-    return rec
+    If your actual layout differs, adjust here; this function is
+    intentionally centralized so you only need to fix it once.
+    """
+    poh_state = executor.ledger.get("poh", {})
+    records = poh_state.get("records", {})
+    return records.get(user_id)
 
 
-# ------------------------------------------------------------
-# Models
-# ------------------------------------------------------------
-
-class ValidatorSettings(BaseModel):
-    enabled: bool
-    run_in_background: bool
-    wifi_only: bool
-    only_while_charging: bool
-    intensity: str = Field(pattern="^(low|medium|high)$")
-    since: Optional[int]
-
-
-class JurorSettings(BaseModel):
-    enabled: bool
-    since: Optional[int]
-
-
-class OperatorSettings(BaseModel):
-    enabled: bool
-    since: Optional[int]
-
-
-class RolesEnvelope(BaseModel):
-    ok: bool = True
-    poh_id: str
-    tier: int
-    validator: ValidatorSettings
-    juror: JurorSettings
-    operator: OperatorSettings
-
-
-class ValidatorUpdate(BaseModel):
-    enabled: Optional[bool] = None
-    run_in_background: Optional[bool] = None
-    wifi_only: Optional[bool] = None
-    only_while_charging: Optional[bool] = None
-    intensity: Optional[str] = Field(
-        default=None,
-        pattern="^(low|medium|high)$",
+def _extract_flags_from_record(record: dict) -> runtime_roles.HumanRoleFlags:
+    flags = record.get("flags") or {}
+    return runtime_roles.HumanRoleFlags(
+        wants_juror=bool(flags.get("wants_juror", False)),
+        wants_validator=bool(flags.get("wants_validator", False)),
+        wants_operator=bool(flags.get("wants_operator", False)),
+        wants_emissary=bool(flags.get("wants_emissary", False)),
+        wants_creator=bool(flags.get("wants_creator", True)),
     )
 
 
-class JurorUpdate(BaseModel):
-    enabled: Optional[bool] = None
+def get_effective_profile_for_user(user_id: str) -> runtime_roles.EffectiveRoleProfile:
+    """
+    Single source of truth for computing a user's effective role profile.
 
-
-class OperatorUpdate(BaseModel):
-    enabled: Optional[bool] = None
-
-
-class RolesUpdate(BaseModel):
-    validator: Optional[ValidatorUpdate] = None
-    juror: Optional[JurorUpdate] = None
-    operator: Optional[OperatorUpdate] = None
-
-
-# ------------------------------------------------------------
-# Routes
-# ------------------------------------------------------------
-
-@router.get("/me", response_model=RolesEnvelope)
-def get_my_roles(request: Request) -> RolesEnvelope:
-    poh_id = _get_poh_id_from_header(request)
-    tier = _get_poh_tier(poh_id)
-    if tier <= 0:
-        raise HTTPException(status_code=404, detail="No PoH record for this user")
-
-    rec = _ensure_roles_record(poh_id, tier)
-
-    return RolesEnvelope(
-        poh_id=poh_id,
-        tier=tier,
-        validator=ValidatorSettings(**rec["validator"]),
-        juror=JurorSettings(**rec["juror"]),
-        operator=OperatorSettings(**rec["operator"]),
-    )
-
-
-@router.post("/me", response_model=RolesEnvelope)
-def update_my_roles(payload: RolesUpdate, request: Request) -> RolesEnvelope:
-    poh_id = _get_poh_id_from_header(request)
-    tier = _get_poh_tier(poh_id)
-    if tier < 3:
-        # Only Tier 3 can change these knobs at all
-        raise HTTPException(
-            status_code=403,
-            detail="Tier 3 is required to change juror/operator/validator settings",
+    - Reads PoH tier + role flags from the ledger.
+    - Uses runtime_roles.compute_effective_role_profile().
+    """
+    record = _lookup_poh_record(user_id)
+    if not record:
+        # Treat as pure observer if not found.
+        return runtime_roles.compute_effective_role_profile(
+            poh_tier=int(runtime_roles.PoHTier.OBSERVER),
+            flags=runtime_roles.HumanRoleFlags(
+                wants_creator=False,
+                wants_juror=False,
+                wants_validator=False,
+                wants_operator=False,
+                wants_emissary=False,
+            ),
         )
 
-    rec = _ensure_roles_record(poh_id, tier)
-    now = int(time.time())
-    changed = False
+    tier = int(record.get("tier", int(runtime_roles.PoHTier.OBSERVER)))
+    flags = _extract_flags_from_record(record)
+    return runtime_roles.compute_effective_role_profile(tier, flags)
 
-    # Validator updates
-    if payload.validator is not None:
-        v = rec.setdefault("validator", {})
-        if payload.validator.enabled is not None:
-            new_val = bool(payload.validator.enabled)
-            if v.get("enabled") is not new_val:
-                v["enabled"] = new_val
-                changed = True
-                if new_val and v.get("since") is None:
-                    v["since"] = now
-                if not new_val:
-                    v["since"] = None
 
-        if payload.validator.run_in_background is not None:
-            new_val = bool(payload.validator.run_in_background)
-            if v.get("run_in_background") is not new_val:
-                v["run_in_background"] = new_val
-                changed = True
+async def _require_user_header(
+    x_weall_user: Optional[str] = Header(
+        default=None,
+        alias="X-WeAll-User",
+        description="WeAll user identifier (e.g. '@handle' or wallet id).",
+    ),
+) -> str:
+    if not x_weall_user:
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Missing X-WeAll-User header.",
+        )
+    return x_weall_user
 
-        if payload.validator.wifi_only is not None:
-            new_val = bool(payload.validator.wifi_only)
-            if v.get("wifi_only") is not new_val:
-                v["wifi_only"] = new_val
-                changed = True
 
-        if payload.validator.only_while_charging is not None:
-            new_val = bool(payload.validator.only_while_charging)
-            if v.get("only_while_charging") is not new_val:
-                v["only_while_charging"] = new_val
-                changed = True
+# ============================================================
+# Endpoints
+# ============================================================
 
-        if payload.validator.intensity is not None:
-            new_val = payload.validator.intensity
-            if v.get("intensity") != new_val:
-                v["intensity"] = new_val
-                changed = True
+@router.get("/roles/meta", response_model=RoleMetaResponse)
+def get_roles_meta() -> RoleMetaResponse:
+    """
+    Describe the canonical roles & tiers for documentation / UI.
 
-    # Juror updates
-    if payload.juror is not None and payload.juror.enabled is not None:
-        j = rec.setdefault("juror", {})
-        new_val = bool(payload.juror.enabled)
-        if j.get("enabled") is not new_val:
-            j["enabled"] = new_val
-            j["since"] = now if new_val else None
-            changed = True
+    This is effectively the "spec screenshot" endpoint:
+    it returns the tier ladder and example capability matrices.
+    """
+    tier_caps = runtime_roles.capability_matrix_by_tier()
+    examples = runtime_roles.capability_matrix_full_example()
 
-    # Operator updates
-    if payload.operator is not None and payload.operator.enabled is not None:
-        o = rec.setdefault("operator", {})
-        new_val = bool(payload.operator.enabled)
-        if o.get("enabled") is not new_val:
-            o["enabled"] = new_val
-            o["since"] = now if new_val else None
-            changed = True
+    tiers: List[RoleMetaTier] = [
+        RoleMetaTier(
+            tier=0,
+            label="Observer",
+            description="Unverified; can only view public content and start verification flows.",
+            base_capabilities=tier_caps.get("0", []),
+        ),
+        RoleMetaTier(
+            tier=1,
+            label="Tier 1 User",
+            description="Email+auth identity; view-only access (no posting/commenting).",
+            base_capabilities=tier_caps.get("1", []),
+        ),
+        RoleMetaTier(
+            tier=2,
+            label="Tier 2 User",
+            description=(
+                "Async-video verified; can post, comment, like, flag violations, "
+                "join groups, participate in PoH queueing and open disputes."
+            ),
+            base_capabilities=tier_caps.get("2", []),
+        ),
+        RoleMetaTier(
+            tier=3,
+            label="Tier 3 Juror / Verifier / Node-Operator / Creator",
+            description=(
+                "Live-verified via video with 3 jurors; can do everything Tier 2 can, "
+                "plus create groups, propose governance changes, and—if opted in—serve as "
+                "jurors, emissaries, node operators or validators."
+            ),
+            base_capabilities=tier_caps.get("3", []),
+        ),
+    ]
 
-    if changed:
-        rec["updated_at"] = now
-        # executor is responsible for persisting ledger to disk
-
-    return RolesEnvelope(
-        poh_id=poh_id,
-        tier=tier,
-        validator=ValidatorSettings(**rec["validator"]),
-        juror=JurorSettings(**rec["juror"]),
-        operator=OperatorSettings(**rec["operator"]),
+    notes = (
+        "Capabilities shown here are *base* permissions by PoH tier. "
+        "Additional capabilities (juror, validator, node operator, emissary, creator "
+        "rewards) are granted when a Tier 3 human explicitly opts into those role "
+        "flags and meets any reputation / system health constraints."
     )
+
+    return RoleMetaResponse(
+        tiers=tiers,
+        capability_matrix_examples=examples,
+        notes=notes,
+    )
+
+
+@router.get("/roles/effective/me", response_model=EffectiveRoleProfileResponse)
+def get_my_effective_role_profile(
+    user_id: str = Depends(_require_user_header),
+) -> EffectiveRoleProfileResponse:
+    """
+    Return the effective role profile for the current user.
+
+    Frontend can use this to:
+      - show "Signed in as @handle · PoH Tier 3 (juror, validator, emissary...)"
+      - enable/disable UI controls (run validator, join juror pool, etc.)
+      - debug access issues ("why can't I open disputes?")
+    """
+    profile = get_effective_profile_for_user(user_id)
+    flags = profile.flags
+
+    return EffectiveRoleProfileResponse(
+        user_id=user_id,
+        poh_tier=int(profile.poh_tier),
+        flags={
+            "wants_juror": flags.wants_juror,
+            "wants_validator": flags.wants_validator,
+            "wants_operator": flags.wants_operator,
+            "wants_emissary": flags.wants_emissary,
+            "wants_creator": flags.wants_creator,
+        },
+        capabilities=sorted(cap.value for cap in profile.capabilities),
+    )
+
+
+@router.get("/roles/topology", response_model=NodeTopologyResponse)
+def get_topology_meta() -> NodeTopologyResponse:
+    """
+    Describe the intended node topology (§2.2 Topology):
+
+        - P2P overlay for nodes.
+        - Public API gateway nodes.
+        - Optional private/community nodes.
+
+    This doesn't return live network state; it's a *design schema*
+    that config UIs and docs can show.
+    """
+    entries: List[NodeTopologyEntry] = []
+
+    descriptions: Dict[runtime_roles.NodeKind, str] = {
+        runtime_roles.NodeKind.OBSERVER_CLIENT: (
+            "Light clients (browsers, mobile apps) that only talk to gateway nodes. "
+            "Do not participate in consensus or store long-term group data."
+        ),
+        runtime_roles.NodeKind.PUBLIC_GATEWAY: (
+            "Public API gateway nodes that expose the HTTP/JSON API, bridge to the "
+            "P2P overlay, and serve as ingress for observers and Tier 1 users."
+        ),
+        runtime_roles.NodeKind.VALIDATOR_NODE: (
+            "Full nodes that participate in consensus and finality. Must be operated "
+            "by Tier 3 humans with validator and operator flags enabled."
+        ),
+        runtime_roles.NodeKind.COMMUNITY_NODE: (
+            'Private or community-owned nodes that primarily serve a group/DAO or '
+            "region. May or may not expose public APIs; can be configured to "
+            "participate in consensus as the network matures."
+        ),
+    }
+
+    for kind in runtime_roles.NodeKind:
+        profile = runtime_roles.node_topology_profile(kind)
+        entries.append(
+            NodeTopologyEntry(
+                kind=profile.kind.value,
+                exposes_public_api=profile.exposes_public_api,
+                participates_in_consensus=profile.participates_in_consensus,
+                stores_group_data=profile.stores_group_data,
+                is_private_scope=profile.is_private_scope,
+                description=descriptions.get(kind, ""),
+            )
+        )
+
+    return NodeTopologyResponse(node_kinds=entries)

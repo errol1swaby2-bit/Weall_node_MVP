@@ -8,6 +8,11 @@ This merges the “toy finality” flow and the production-leaning quorum flow:
 - Legacy/alias: attest_block(validator_id, proposal_id) == vote_block(...)
 
 Back-compat: keeps prior method names & attribute access used by API modules (PoH, ledger, etc.).
+
+Extended with NodeKind topology:
+- NodeKind controls whether this node is allowed to participate in consensus.
+- Non-VALIDATOR_NODE kinds can still sync and apply remote blocks but cannot
+  propose or vote on blocks.
 """
 
 from __future__ import annotations
@@ -20,6 +25,9 @@ import time
 import uuid
 from dataclasses import dataclass, field
 from typing import Any, Dict, List, Optional, Set
+
+from . import node_config
+from .weall_runtime import roles as runtime_roles
 
 log = logging.getLogger("weall.executor")
 
@@ -41,32 +49,32 @@ def _now() -> int:
 
 
 def _block_hash(header: dict) -> str:
-    """Return a deterministic SHA-256 block id from a block header."""
-    # ensure deterministic JSON payload across nodes
-    payload = json.dumps(header, sort_keys=True, separators=(",", ":")).encode("utf-8")
+    """
+    Return a deterministic SHA-256 block id from a block header.
+
+    We canonicalize the JSON representation to ensure the same header yields
+    the same block id on every node.
+    """
+    payload = json.dumps(
+        header,
+        sort_keys=True,
+        separators=(",", ":"),
+    ).encode("utf-8")
     return hashlib.sha256(payload).hexdigest()
 
 
-# ------------------------------------------------------------
-# Minimal P2P manager (keeps API working)
-# ------------------------------------------------------------
-class P2PManager:
-    def __init__(self) -> None:
-        self._peers: Set[str] = set()
-
-    def add_peer(self, peer_id: str) -> None:
-        if peer_id:
-            self._peers.add(str(peer_id))
-
-    def get_peer_list(self) -> List[str]:
-        return sorted(self._peers)
-
-
-# ------------------------------------------------------------
-# Governance placeholder
-# ------------------------------------------------------------
 @dataclass
 class GovernanceState:
+    """
+    GovernanceState is a simple container for in-memory governance related
+    information.
+
+    The canonical governance state (proposals, votes, params) lives in
+    executor.ledger["governance"] and is persisted to weall_state.json;
+    this dataclass is mostly a convenience placeholder for future in-memory
+    cache structures.
+    """
+
     proposals: List[Dict[str, Any]] = field(default_factory=list)
 
 
@@ -74,83 +82,152 @@ class GovernanceState:
 # Consensus state (PBFT-lite / PoA-lite)
 # ------------------------------------------------------------
 class ConsensusState:
+    """
+    Lightweight PoA/PBFT-ish consensus helper.
+
+    This is NOT a full production consensus engine. It's a simple mechanism
+    for:
+    - tracking validators
+    - opening proposals (sets of txs)
+    - collecting votes
+    - deciding when a proposal has reached quorum
+
+    Block construction / application are managed by WeAllExecutor itself.
+    """
+
     def __init__(self) -> None:
         self.validators: Set[str] = set()
         self.quorum_fraction: float = 0.67
         # proposal_id -> {txs, proposer, votes:set, ts, status}
         self.proposals: Dict[str, dict] = {}
-        # simple rewards ledger
+        # simple rewards ledger (internal; not the same as WeCoin)
         self.rewards: Dict[str, float] = {}
 
-    def has_quorum(self, votes: Set[str]) -> bool:
-        n = max(1, len(self.validators))
-        return len(votes) / n >= self.quorum_fraction
+    # ----------------------- validators / quorum ---------------
+    def set_validators(self, validators: List[str]) -> None:
+        self.validators = set(validators or [])
 
-
-# ------------------------------------------------------------
-# Core executor
-# ------------------------------------------------------------
-class WeAllExecutor:
-    def mine_block(self, payload: Optional[dict] = None) -> Dict[str, Any]:
-        """
-        DEV helper: mine a single block in a single-node environment.
-
-        Keeps older API calls like `executor.mine_block()` working by:
-        - Optionally enqueuing `payload` into the mempool
-        - Ensuring the local node_id is a validator
-        - Proposing a block
-        - Self-voting to reach quorum and finalize
-        """
-        # Optionally push a tx into the mempool
-        if payload:
-            try:
-                self.add_tx(payload)
-            except Exception:
-                # Extremely defensive: fall back to raw mempool access
-                self.ledger.setdefault("mempool", []).append(payload)
-
-        # Ensure this node is treated as a validator for local dev
-        node_id = getattr(self, "node_id", "local")
+    def set_quorum_fraction(self, fraction: float) -> None:
         try:
-            self.cons.validators.add(node_id)
+            self.quorum_fraction = max(0.0, min(1.0, float(fraction)))
         except Exception:
-            return {"ok": False, "error": "consensus_unavailable"}
+            self.quorum_fraction = 0.67
 
-        # Propose a block with pending txs
-        res = self.propose_block(node_id)
-        if not res.get("ok"):
-            return res
+    def is_validator(self, node_id: str) -> bool:
+        return node_id in self.validators
 
-        proposal_id = res.get("proposal_id")
-        if not proposal_id:
-            return {"ok": False, "error": "no_proposal_id"}
+    def has_quorum(self, votes: Set[str]) -> bool:
+        if not self.validators:
+            return False
+        participating = self.validators & votes
+        if not participating:
+            return False
+        frac = len(participating) / float(len(self.validators))
+        return frac >= self.quorum_fraction
 
-        # Self-vote to finalize in a single-node context
-        vres = self.vote_block(node_id, proposal_id)
-        if not vres.get("ok"):
-            return vres
+    # ----------------------- proposals / voting ----------------
+    def open_proposal(self, proposer_id: str, txs: List[dict]) -> str:
+        proposal_id = uuid.uuid4().hex[:16]
+        self.proposals[proposal_id] = {
+            "id": proposal_id,
+            "proposer": proposer_id,
+            "txs": list(txs or []),
+            "votes": set(),
+            "status": "open",
+            "ts": _now(),
+        }
+        return proposal_id
 
-        chain = self.ledger.get("chain") or []
-        block = chain[-1] if chain else None
+    def vote(self, validator_id: str, proposal_id: str) -> dict:
+        if proposal_id not in self.proposals:
+            raise ValueError(f"unknown_proposal:{proposal_id}")
+        p = self.proposals[proposal_id]
+        if p["status"] != "open":
+            raise ValueError(f"proposal_not_open:{proposal_id}")
+        if validator_id not in self.validators:
+            raise ValueError(f"not_validator:{validator_id}")
+        p["votes"].add(validator_id)
         return {
-            "ok": True,
-            "block": block,
             "proposal_id": proposal_id,
-            "votes": vres.get("votes"),
+            "votes": list(sorted(p["votes"])),
+            "has_quorum": self.has_quorum(p["votes"]),
         }
 
+    def finalize_if_quorum(self, proposal_id: str) -> Optional[dict]:
+        """
+        If the proposal has reached quorum, mark it finalized and return the
+        proposal record. Otherwise, return None.
+        """
+        p = self.proposals.get(proposal_id)
+        if not p:
+            return None
+        if p["status"] != "open":
+            return None
+        if not self.has_quorum(p["votes"]):
+            return None
+        p["status"] = "finalized"
+        return p
+
+    # ----------------------- simple rewards ledger ------------
+    def credit_reward(self, validator_id: str, amount: float) -> None:
+        if amount <= 0:
+            return
+        self.rewards[validator_id] = self.rewards.get(validator_id, 0.0) + float(amount)
+
+
+# ------------------------------------------------------------
+# P2P / sync stubs (placeholder for future gossip implementation)
+# ------------------------------------------------------------
+class P2PManager:
+    """
+    Placeholder for eventual P2P/gossip implementation.
+
+    For now this is just a stub used by the executor so that the public API
+    shape is in place for future multi-node networking.
+    """
+
+    def __init__(self) -> None:
+        self.peers: Dict[str, dict] = {}
+
+    def register_peer(self, node_id: str, meta: dict) -> None:
+        self.peers[node_id] = dict(meta or {})
+
+    def get_peers(self) -> Dict[str, dict]:
+        return dict(self.peers)
+
+
+# ------------------------------------------------------------
+# Main Executor
+# ------------------------------------------------------------
+class WeAllExecutor:
+    """
+    Unified executor for:
+
+    - Applying transactions to the logical ledger
+    - Managing a simple PBFT-lite / PoA-lite consensus flow
+    - Exposing helper methods used by API modules (poh, governance, etc.)
+
+    In production terms this is a "reference node" implementation rather than
+    a fully-hardened validator client.
+    """
+
+    # ----------------------- core init / state -----------------
     def __init__(self) -> None:
         self.path = _state_path()
         self.ledger: Dict[str, Any] = self._load_or_init_ledger()
         self.node_id: str = self._ensure_node_id()
+        # Operator identity (can be overridden by config; defaults to node_id)
+        self.operator_id: str = self.node_id
         self.p2p = P2PManager()
         self.governance = GovernanceState()
+        # Reward pool split (mirrors weall_runtime.ledger.DEFAULT_POOL_SPLIT)
+        # 20% each to validators / jurors / creators / operators / treasury.
         self.pool_split = {
-            "validators": 0.25,
-            "jurors": 0.25,
-            "creators": 0.25,
-            "storage": 0.10,
-            "treasury": 0.15,
+            "validators": 0.20,
+            "jurors": 0.20,
+            "creators": 0.20,
+            "operators": 0.20,
+            "treasury": 0.20,
         }
         self.blocks_per_epoch = 100
         self.halving_interval_epochs = max(1, 210000 // self.blocks_per_epoch)
@@ -158,24 +235,31 @@ class WeAllExecutor:
         self.cons = ConsensusState()
         self._bootstrap_consensus_from_config()
 
+        # Node topology / kind (observer_client, public_gateway, validator_node, community_node)
+        self.node_kind: runtime_roles.NodeKind = node_config.NODE_KIND
+
         # Epoch / tokenomics runtime (WeCoin) + genesis / GSM params
         self.current_epoch: int = 0
         # Will be overridden by genesis if present
         self.bootstrap_mode: bool = False
         self.min_validators: int = 0
 
+        # WeCoin runtime
         try:
             from weall_node.weall_runtime.ledger import WeCoinLedger
+
             self.wecoin = WeCoinLedger()
-        except Exception:
-            # Soft-fail: keep node running even if tokenomics runtime is missing
-            self.wecoin = None  # type: ignore[assignment]
+        except Exception as e:
+            log.warning("WeCoinLedger unavailable: %s", e)
+            self.wecoin = None
 
         # Load genesis / GSM settings if available
         try:
             from weall_node.consensus.params import load_genesis_params
+
             self.genesis = load_genesis_params()
-        except Exception:
+        except Exception as e:
+            log.warning("Failed to load genesis params: %s", e)
             self.genesis = {}
 
         g = self.genesis or {}
@@ -201,232 +285,356 @@ class WeAllExecutor:
 
         self.current_block_height = len(self.ledger.get("chain", []))
 
-    # ----------------------- persistence -----------------------
-    def _load_or_init_ledger(self) -> Dict[str, Any]:
-        try:
-            if os.path.exists(self._state_path_local()):
-                with open(self._state_path_local(), "r") as f:
-                    data = json.load(f)
-                    if isinstance(data, dict):
-                        data.setdefault("chain", [])
-                        data.setdefault("mempool", [])
-                        data.setdefault("events", [])
-                        data.setdefault("balances", {})
-                        data.setdefault("users", {})
-                        data.setdefault("messages", {})
-                        return data
-        except Exception as e:
-            log.warning(f"State load failed, fresh start: {e}")
+    def set_pool_split(self, split: Dict[str, float]) -> None:
+        """Update the reward pool split and keep it in sync with the WeCoin runtime.
+
+        Fractions are normalized to sum to 1.0 to avoid configuration errors.
+        If the WeCoin runtime exposes a set_pool_split() method, we delegate to it;
+        otherwise we just update the executor's cached pool_split.
+        """
+        total = float(sum(split.values())) or 1.0
+        normalized = {k: float(v) / total for k, v in split.items()}
+
+        wecoin = getattr(self, "wecoin", None)
+        if wecoin is not None and hasattr(wecoin, "set_pool_split"):
+            try:
+                wecoin.set_pool_split(normalized)  # type: ignore[attr-defined}
+                self.pool_split = dict(getattr(wecoin, "pool_split", normalized))
+                return
+            except Exception:
+                # If runtime update fails for any reason, fall back to local-only update.
+                pass
+
+        self.pool_split = normalized
+
+    # ----------------------- node topology helpers -------------
+    def can_participate_in_consensus(self) -> bool:
+        """
+        True if this node is configured as a validator node.
+
+        Used to guard block production / consensus steps.
+        """
+        return self.node_kind == runtime_roles.NodeKind.VALIDATOR_NODE
+
+    def node_topology_profile(self) -> dict:
+        """
+        Return a JSON-friendly description of this node's configured role.
+
+        This is used by the /node/meta API endpoint to tell the frontend
+        what kind of node it's talking to.
+        """
+        profile = runtime_roles.node_topology_profile(self.node_kind)
         return {
-            "chain": [],
-            "mempool": [],
-            "events": [],
-            "balances": {},
-            "users": {},
-            "messages": {},
+            "kind": profile.kind.value,
+            "exposes_public_api": profile.exposes_public_api,
+            "participates_in_consensus": profile.participates_in_consensus,
+            "stores_group_data": profile.stores_group_data,
+            "is_private_scope": profile.is_private_scope,
+            "node_id": self.node_id,
         }
 
-    def _state_path_local(self) -> str:
-        # indirection for easier testing
-        return self.path
-
-    def save_state(self) -> Dict[str, Any]:
+    # ----------------------- ledger IO -------------------------
+    def _load_or_init_ledger(self) -> Dict[str, Any]:
+        if not os.path.exists(self.path):
+            return {
+                "accounts": {},
+                "chain": [],
+                "events": [],
+            }
         try:
-            with open(self._state_path_local(), "w") as f:
-                json.dump(self.ledger, f, indent=2, sort_keys=False)
+            with open(self.path, "r", encoding="utf-8") as f:
+                return json.load(f)
         except Exception as e:
-            log.error(f"Failed to save state: {e}")
-        return {"ok": True}
+            log.warning("Failed to load state; starting fresh: %s", e)
+            return {
+                "accounts": {},
+                "chain": [],
+                "events": [],
+            }
 
-    def load_state(self) -> Dict[str, Any]:
-        self.ledger = self._load_or_init_ledger()
-        self.current_block_height = len(self.ledger.get("chain", []))
-        return {"ok": True, "height": self.current_block_height}
+    def save_state(self) -> None:
+        os.makedirs(os.path.dirname(self.path), exist_ok=True)
+        with open(self.path, "w", encoding="utf-8") as f:
+            json.dump(self.ledger, f, indent=2, sort_keys=False)
 
-    # ----------------------- identity --------------------------
+    # ----------------------- node_id helpers -------------------
     def _ensure_node_id(self) -> str:
         nid = self.ledger.get("node_id")
         if not nid:
-            nid = "node:" + uuid.uuid4().hex[:12]
+            nid = uuid.uuid4().hex[:16]
             self.ledger["node_id"] = nid
             self.save_state()
         return nid
 
-    # ----------------------- config / consensus bootstrap -------
-    def _bootstrap_consensus_from_config(self) -> None:
-        """
-        Load validators & quorum from weall_config.yaml when available.
-        Fallback: single-validator (this node) with quorum=1.0 (dev-friendly).
-        """
-        try:
-            from weall_node.config import load_config
-        except Exception:
-            load_config = None
-
-        if not load_config:
-            self.cons.validators.add(self.node_id)
-            self.cons.quorum_fraction = 1.0
-            return
-
-        try:
-            cfg = load_config(repo_root=_repo_root()) or {}
-            c = cfg.get("consensus", {})
-            qf = c.get("quorum_fraction", 1.0)
-            vals = c.get("validators") or []
-            self.cons.quorum_fraction = float(qf)
-            for v in vals:
-                if isinstance(v, str) and v:
-                    self.cons.validators.add(v)
-            if not self.cons.validators:
-                # default to self only if none set
-                self.cons.validators.add(self.node_id)
-            log.info(
-                f"[consensus] validators={len(self.cons.validators)} quorum={self.cons.quorum_fraction}"
-            )
-        except Exception as e:
-            log.warning(
-                f"[consensus] config load failed ({e}); falling back to single-validator dev mode"
-            )
-            self.cons.validators.add(self.node_id)
-            self.cons.quorum_fraction = 1.0
-
-    # ----------------------- tx intake -------------------------
+    # ----------------------- mempool helpers -------------------
     def add_tx(self, payload: dict) -> Dict[str, Any]:
+        """
+        Add a transaction payload to the local mempool.
+
+        This does not execute the transaction; it just queues it up to be
+        included in the next proposed block.
+        """
         self.ledger.setdefault("mempool", []).append(payload)
         return {"ok": True, "mempool_len": len(self.ledger["mempool"])}
 
-    # ----------------------- consensus: propose/vote/finalize ---
-    def propose_block(self, proposer_id: str) -> Dict[str, Any]:
+    def drain_mempool(self) -> List[dict]:
         mem = self.ledger.setdefault("mempool", [])
-        if not mem:
-            return {"ok": False, "error": "mempool_empty"}
-        txs = mem[:]
+        txs = list(mem)
         mem.clear()
-        pid = str(uuid.uuid4())
-        votes: Set[str] = set()
-        if proposer_id in self.cons.validators:
-            votes.add(proposer_id)
-        self.cons.proposals[pid] = {
-            "txs": txs,
-            "proposer": proposer_id,
-            "votes": votes,
-            "ts": _now(),
-            "status": "proposed",
-        }
-        log.info(
-            f"[consensus] proposed pid={pid} txs={len(txs)} proposer={proposer_id} votes={len(votes)}"
-        )
-        if self.cons.has_quorum(votes):
-            self._finalize_block(pid)
-        return {"ok": True, "proposal_id": pid, "tx_count": len(txs)}
+        return txs
 
-    def vote_block(self, validator_id: str, proposal_id: str) -> Dict[str, Any]:
-        if validator_id not in self.cons.validators:
-            return {"ok": False, "error": "not_a_validator"}
-        prop = self.cons.proposals.get(proposal_id)
-        if not prop or prop.get("status") != "proposed":
-            return {"ok": False, "error": "bad_proposal"}
-        prop["votes"].add(validator_id)
-        log.info(
-            f"[consensus] vote pid={proposal_id} voter={validator_id} votes={len(prop['votes'])}"
-        )
-        if self.cons.has_quorum(prop["votes"]):
-            self._finalize_block(proposal_id)
-        return {"ok": True, "votes": len(prop["votes"])}
-
-    # Back-compat alias
-    def attest_block(self, validator_id: str, proposal_id: str) -> Dict[str, Any]:
-        return self.vote_block(validator_id, proposal_id)
-
-    def list_proposals(self) -> Dict[str, Any]:
-        out: Dict[str, Any] = {}
-        for pid, p in self.cons.proposals.items():
-            out[pid] = {
-                "status": p.get("status"),
-                "tx_count": len(p.get("txs", [])),
-                "proposer": p.get("proposer"),
-                "votes": sorted(list(p.get("votes", []))),
-                "ts": p.get("ts"),
-            }
-        return out
-
-    def _finalize_block(self, proposal_id: str) -> None:
-        prop = self.cons.proposals.get(proposal_id)
-        if not prop or prop.get("status") != "proposed":
-            return
+    # ----------------------- block helpers ---------------------
+    def _build_block(self, txs: List[dict]) -> dict:
         chain = self.ledger.setdefault("chain", [])
-        prev_block_id = (
-            chain[-1].get("block_id")
-            if chain and isinstance(chain[-1], dict)
-            else None
-        )
         height = len(chain)
-        votes = sorted(list(prop["votes"]))
+        prev = chain[-1]["id"] if chain else None
         header = {
             "height": height,
-            "time": _now(),
-            "proposer": prop["proposer"],
-            "votes": votes,
-            "prev_block_id": prev_block_id,
+            "prev_id": prev,
+            "ts": _now(),
+            "txs_root": hashlib.sha256(
+                json.dumps(txs, sort_keys=True, separators=(",", ":")).encode("utf-8")
+            ).hexdigest(),
         }
         block_id = _block_hash(header)
         block = {
-            "block_id": block_id,
-            **header,
-            "txs": prop["txs"],
+            "id": block_id,
+            "height": height,
+            "header": header,
+            "txs": txs,
         }
-        self._apply_block(block)
+        return block
+
+    def _apply_block(self, block: dict) -> None:
+        """
+        Apply a block's transactions to the ledger.
+
+        This method should apply each tx in order and update:
+        - balances
+        - governance state
+        - poh state
+        - reputation
+        - etc.
+
+        For now, this remains a placeholder and only appends the block
+        to the chain. The higher-level modules (poh, governance, disputes)
+        operate directly on executor.ledger and are responsible for the
+        actual business logic mutations.
+        """
+        chain = self.ledger.setdefault("chain", [])
+        block_id = block.get("id")
+        height = block.get("height", len(chain))
+
+        # Very simple "extend only" rule
+        if chain:
+            tip = chain[-1]
+            if height != tip["height"] + 1:
+                log.warning(
+                    "rejecting block that does not extend tip: tip=%s, new_height=%s",
+                    tip["height"],
+                    height,
+                )
+                return
+            if block["header"]["prev_id"] != tip["id"]:
+                log.warning(
+                    "rejecting block with mismatched prev_id: tip=%s, prev_id=%s",
+                    tip["id"],
+                    block["header"]["prev_id"],
+                )
+                return
+            # verify hash
+            expected = _block_hash(block["header"])
+            if expected != block_id:
+                log.warning(
+                    "rejecting block with invalid id: expected=%s, got=%s",
+                    expected,
+                    block_id,
+                )
+                return
+        else:
+            # First block: just accept if header hash matches id
+            expected = _block_hash(block["header"])
+            if expected != block_id:
+                log.warning(
+                    "rejecting genesis block with invalid id: expected=%s, got=%s",
+                    expected,
+                    block_id,
+                )
+                return
+
+        # Append block
         chain.append(block)
-        prop["status"] = "committed"
-        self._reward(block)
-        self.save_state()
         self.current_block_height = len(chain)
 
-        # Epoch advancement + WeCoin rewards (if configured)
-        try:
-            blocks_per_epoch = int(getattr(self, "blocks_per_epoch", 0) or 0)
-        except Exception:
-            blocks_per_epoch = 0
-        if blocks_per_epoch > 0:
-            # heights are zero-based; use height+1 when checking epoch boundary
-            if (block["height"] + 1) % blocks_per_epoch == 0:
-                # Initialize for older state files if missing
-                if not hasattr(self, "current_epoch"):
-                    self.current_epoch = 0  # type: ignore[attr-defined]
-                self.current_epoch += 1  # type: ignore[attr-defined]
+    # ----------------------- reward ticket helpers -------------
+    def _issue_block_tickets(self, block: dict, proposal: Optional[dict] = None) -> None:
+        """
+        Issue WeCoin tickets for this finalized block:
 
-                winners = {}
-                epoch_reward = None
-                wecoin = getattr(self, "wecoin", None)
-                if wecoin is not None and hasattr(wecoin, "distribute_epoch_rewards"):
-                    try:
-                        bootstrap_mode = bool(getattr(self, "bootstrap_mode", False))
-                        winners = wecoin.distribute_epoch_rewards(  # type: ignore[call-arg]
-                            int(self.current_epoch),
-                            bootstrap_mode=bootstrap_mode,
-                        )
-                        if hasattr(wecoin, "current_epoch_reward"):
-                            epoch_reward = wecoin.current_epoch_reward()
-                    except Exception as e:
-                        log.warning("Epoch reward distribution failed: %s", e)
+        - validators pool: proposal proposer (or block/header fallback, or node_id)
+        - operators pool: this node's operator_id (defaults to node_id)
 
-                events = self.ledger.setdefault("events", [])
-                events.append(
-                    {
-                        "type": "epoch",
-                        "epoch": int(getattr(self, "current_epoch", 0)),
-                        "block_height": int(block["height"]),
-                        "winners": winners,
-                        "epoch_reward": epoch_reward,
-                        "ts": _now(),
-                    }
+        This does NOT mint coins; it only adjusts tickets. Actual WCN rewards
+        are handled by the WeCoinLedger in weall_runtime/ledger.py.
+        """
+        wecoin = getattr(self, "wecoin", None)
+        if wecoin is None or not hasattr(wecoin, "add_ticket"):
+            return
+
+        header = block.get("header") or {}
+
+        proposer = None
+        if proposal:
+            proposer = proposal.get("proposer")
+
+        proposer = (
+            proposer
+            or block.get("proposer")
+            or header.get("proposer")
+            or header.get("proposer_id")
+            or self.node_id
+        )
+
+        if proposer:
+            try:
+                wecoin.add_ticket("validators", proposer, weight=1.0)
+            except Exception:
+                log.warning(
+                    "Failed to add validator ticket for %s", proposer, exc_info=True
                 )
+
+        operator_id = getattr(self, "operator_id", None) or self.node_id
+        if operator_id:
+            try:
+                wecoin.add_ticket("operators", operator_id, weight=1.0)
+            except Exception:
+                log.warning(
+                    "Failed to add operator ticket for %s", operator_id, exc_info=True
+                )
+
+    def add_creator_ticket(self, creator_id: str, weight: float = 1.0) -> None:
+        """
+        Public helper for content modules to record creator rewards.
+
+        Does not mint coins; just records a ticket in the 'creators' pool.
+        """
+        if not creator_id:
+            return
+        if weight <= 0:
+            return
+        wecoin = getattr(self, "wecoin", None)
+        if wecoin is None or not hasattr(wecoin, "add_ticket"):
+            return
+        try:
+            wecoin.add_ticket("creators", creator_id, weight=float(weight))
+        except Exception:
+            log.warning(
+                "Failed to add creator ticket for %s", creator_id, exc_info=True
+            )
+
+    # ----------------------- consensus bootstrap ---------------
+    def _bootstrap_consensus_from_config(self) -> None:
+        """
+        Initialize the ConsensusState (validators, quorum) from node_config.
+
+        This reads any static validator list / quorum overrides from
+        weall_node/node_config.py.
+        """
+        validators = getattr(node_config, "VALIDATORS", []) or []
+        quorum = getattr(node_config, "QUORUM_FRACTION", 0.67)
+        self.cons.set_validators(validators)
+        self.cons.set_quorum_fraction(quorum)
+
+    # ----------------------- block production API --------------
+    def propose_block(self, proposer_id: str) -> Dict[str, Any]:
+        """
+        Open a new consensus proposal using current mempool txs.
+
+        This is the first step of the quorum-based consensus flow.
+        """
+        if not self.can_participate_in_consensus():
+            raise ValueError("node_not_validator")
+
+        if not self.cons.is_validator(proposer_id):
+            raise ValueError("not_validator")
+
+        txs = self.drain_mempool()
+        block = self._build_block(txs)
+        proposal_id = self.cons.open_proposal(proposer_id, txs)
+        # Attach block header so that finalization can commit it.
+        block["proposal_id"] = proposal_id
+        self.ledger.setdefault("pending_blocks", {})[proposal_id] = block
+        return {
+            "ok": True,
+            "proposal_id": proposal_id,
+            "block_id": block["id"],
+            "height": block["height"],
+            "txs_len": len(txs),
+        }
+
+    def vote_block(self, validator_id: str, proposal_id: str) -> Dict[str, Any]:
+        """
+        Cast a vote on a proposal and finalize the block if quorum is reached.
+        """
+        if not self.can_participate_in_consensus():
+            raise ValueError("node_not_validator")
+
+        vres = self.cons.vote(validator_id, proposal_id)
+        if vres["has_quorum"]:
+            finalized = self.cons.finalize_if_quorum(proposal_id)
+            if finalized:
+                return self._commit_finalized_block(proposal_id, finalized)
+        return {
+            "ok": True,
+            "proposal_id": proposal_id,
+            "has_quorum": vres["has_quorum"],
+            "votes": vres.get("votes"),
+        }
+
+    def attest_block(self, validator_id: str, proposal_id: str) -> Dict[str, Any]:
+        """
+        Legacy alias for vote_block, kept for older API modules.
+        """
+        return self.vote_block(validator_id, proposal_id)
+
+    def _commit_finalized_block(self, proposal_id: str, proposal: dict) -> Dict[str, Any]:
+        pending_blocks = self.ledger.setdefault("pending_blocks", {})
+        block = pending_blocks.pop(proposal_id, None)
+        if not block:
+            raise ValueError(f"missing_pending_block:{proposal_id}")
+
+        chain = self.ledger.get("chain") or []
+        height = len(chain)
+        block_id = block.get("id")
+        block["height"] = height
+        block["header"]["height"] = height
+        block["header"]["prev_id"] = chain[-1]["id"] if chain else None
+
+        # Check header hash matches id
+        expected = _block_hash(block["header"])
+        if expected != block_id:
+            log.warning(
+                "refusing to commit block with mismatched id: expected=%s, got=%s",
+                expected,
+                block_id,
+            )
+            raise ValueError("invalid_block_hash")
+
+        # Apply the block to the ledger
+        self._apply_block(block)
+        self.save_state()
 
         # Check whether GSM (bootstrap mode) should expire
         try:
             self._check_gsm_expiry(block)
         except Exception as e:
             log.warning("Failed GSM expiry check: %s", e)
+
+        # Issue validator/operator tickets based on this finalized block
+        try:
+            self._issue_block_tickets(block, proposal)
+        except Exception as e:
+            log.warning("Block ticket wiring failed: %s", e)
 
         # Apply WeCoin block rewards (per-block lottery across all pools)
         core = getattr(self, "exec", self)
@@ -450,9 +658,18 @@ class WeAllExecutor:
             f"[consensus] committed height={block['height']} txs={len(block['txs'])} id={block_id}"
         )
 
+        return {
+            "ok": True,
+            "block": block,
+            "proposal_id": proposal_id,
+            "votes": proposal.get("votes"),
+        }
+
     def apply_remote_block(self, block: dict) -> Dict[str, Any]:
         """
-        Integrate a block received from a peer.
+        Apply a block received from another node.
+
+        This bypasses local consensus and is intended for syncing followers.
 
         Genesis assumptions:
         - We are in a single-epoch, single-fork environment.
@@ -460,347 +677,211 @@ class WeAllExecutor:
         - We verify the block_id against the deterministic header hash.
         - We reject or ignore anything that doesn't cleanly extend the local chain.
 
+        NOTE: This is allowed for any node kind (gateway/validator/community),
+        since non-validator nodes still need to sync and follow the chain.
+
         Returns a dict of the shape:
             {
               "ok": bool,
               "status": "appended" | "ignored",
               "error": <str> | None,
-              "height": <int> | None
             }
         """
-        try:
-            if not isinstance(block, dict):
-                return {
-                    "ok": False,
-                    "status": "ignored",
-                    "error": "invalid_block_type",
-                    "height": None,
-                }
+        chain = self.ledger.setdefault("chain", [])
+        incoming_id = block.get("id")
+        incoming_header = block.get("header") or {}
 
-            chain = self.ledger.setdefault("chain", [])
-            local_height = len(chain)
-
-            # Basic required fields
-            height = block.get("height")
-            prev_block_id = block.get("prev_block_id")
-            block_id = block.get("block_id")
-
-            if height is None or block_id is None:
-                return {
-                    "ok": False,
-                    "status": "ignored",
-                    "error": "missing_fields",
-                    "height": local_height,
-                }
-
-            # Recompute header hash to validate block_id (header = non-tx fields)
-            header = {k: v for k, v in block.items() if k not in ("block_id", "txs")}
-            computed_id = _block_hash(header)
-            if str(block_id) != computed_id:
-                return {
-                    "ok": False,
-                    "status": "ignored",
-                    "error": "bad_block_hash",
-                    "height": local_height,
-                }
-
-            # For Genesis, only accept the next sequential block:
-            #   remote.height == local_height
-            if height != local_height:
-                # If the remote chain is strictly behind, or skipping heights,
-                # we ignore it for now (no fork handling in Genesis).
-                return {
-                    "ok": False,
-                    "status": "ignored",
-                    "error": "height_mismatch",
-                    "height": local_height,
-                }
-
-            # Validate prev_block_id if we already have a tip
-            if local_height > 0:
-                tip = chain[-1]
-                tip_id = tip.get("block_id")
-                if tip_id != prev_block_id:
-                    return {
-                        "ok": False,
-                        "status": "ignored",
-                        "error": "prev_block_mismatch",
-                        "height": local_height,
-                    }
-
-            # At this point we treat the block as valid and append it.
-            self._apply_block(block)
-            chain.append(block)
-            self.current_block_height = len(chain)
-            try:
-                self.save_state()
-            except Exception:
-                # Not fatal for Genesis; chain has already been updated in-memory.
-                pass
-
-            return {
-                "ok": True,
-                "status": "appended",
-                "error": None,
-                "height": self.current_block_height,
-            }
-        except Exception as e:
-            # Extremely defensive catch-all so that remote blocks can never
-            # crash the node.
-            try:
-                current_height = len(self.ledger.get("chain", []))
-            except Exception:
-                current_height = None
+        # Verify hash
+        expected = _block_hash(incoming_header)
+        if expected != incoming_id:
             return {
                 "ok": False,
                 "status": "ignored",
-                "error": f"exception:{e!s}",
-                "height": current_height,
+                "error": "invalid_block_hash",
             }
 
-    def _apply_block(self, block: dict) -> None:
-        for tx in block.get("txs", []):
+        # Decide whether this extends the local tip
+        if not chain:
+            # First local block: accept if hash matches
+            self._apply_block(block)
+            self.save_state()
+            return {"ok": True, "status": "appended", "error": None}
+
+        tip = chain[-1]
+        tip_height = tip["height"]
+        new_height = block.get("height", tip_height + 1)
+        prev_id = incoming_header.get("prev_id")
+
+        if new_height != tip_height + 1:
+            return {
+                "ok": False,
+                "status": "ignored",
+                "error": "height_not_tip_plus_one",
+            }
+        if prev_id != tip["id"]:
+            return {
+                "ok": False,
+                "status": "ignored",
+                "error": "prev_id_mismatch",
+            }
+
+        self._apply_block(block)
+        self.save_state()
+        return {"ok": True, "status": "appended", "error": None}
+
+    # ----------------------- dev mining helper -----------------
+    def mine_block(self, payload: Optional[dict] = None) -> Dict[str, Any]:
+        """
+        DEV helper: mine a single block in a single-node environment.
+
+        Keeps older API calls like `executor.mine_block()` working by:
+        - Optionally enqueuing `payload` into the mempool
+        - Ensuring the local node_id is a validator
+        - Proposing a block
+        - Self-voting to reach quorum and finalize
+
+        NOTE: If this node is not configured as a VALIDATOR_NODE, the
+        underlying propose_block/vote_block calls will fail with
+        `node_not_validator`.
+        """
+        # Optionally push a tx into the mempool
+        if payload:
             try:
-                self._apply_tx(tx)
-            except Exception as e:
-                log.exception(f"[apply] tx failed: {e}")
+                self.add_tx(payload)
+            except Exception:
+                log.exception("Failed to add_tx(payload) in mine_block, continuing")
 
-    def _apply_tx(self, tx: dict) -> None:
-        """
-        Minimal dispatcher that keeps API routes functional.
-        If you have a richer runtime (process_tx), call it here.
-        """
-        # Hook to richer runtime if present
-        if hasattr(self, "process_tx") and callable(getattr(self, "process_tx")):
-            self.process_tx(tx)
-            return
+        if not self.can_participate_in_consensus():
+            raise ValueError("node_not_validator")
 
-        # PoH events (used by poh.py)
-        if "poh" in tx:
-            poh = tx["poh"]
-            tier = int(poh.get("tier", 0))
-            tname = f"POH_TIER{tier}_VERIFY" if tier else "POH_EVENT"
-            evt = {
-                "type": tname,
-                "user": poh.get("user"),
-                "approved": True,
-                "ts": _now(),
-            }
-            self.ledger.setdefault("events", []).append(evt)
-            return
+        # Ensure local node is recognized as a validator
+        if not self.cons.is_validator(self.node_id):
+            self.cons.validators.add(self.node_id)
 
-        # Transfers
-        if "transfer" in tx:
-            t = tx["transfer"]
-            self._transfer_internal(t["sender"], t["recipient"], float(t["amount"]))
-            return
+        res = self.propose_block(self.node_id)
+        proposal_id = res.get("proposal_id")
+        if not proposal_id:
+            raise ValueError("proposal_id_missing")
+        return self.vote_block(self.node_id, proposal_id)
 
-        # Default generic event
-        self.ledger.setdefault("events", []).append(
-            {"type": "TX", "tx": tx, "ts": _now()}
-        )
-
-    # ------------------------------------------------------------
-    # WEC balance + transfer helpers
-    # ------------------------------------------------------------
-    def _ensure_balance_map(self) -> dict:
+    # ----------------------- balances helpers ------------------
+    def _ensure_balances_dict(self) -> Dict[str, float]:
         """
         Ensure self.ledger has a 'balances' dict and return it.
 
-        This is our canonical per-user WEC balance store at the executor
-        level, with optional compatibility for older 'accounts' maps.
+        Falls back to legacy ledger['accounts'] if 'balances' doesn't
+        exist yet, and migrates the data.
         """
         led = getattr(self, "ledger", None)
         if led is None:
-            led = {}
-            self.ledger = led
+            self.ledger = {"balances": {}}
+            return self.ledger["balances"]
 
         balances = led.get("balances")
-        if not isinstance(balances, dict):
-            balances = {}
-            led["balances"] = balances
-
+        if balances is None:
+            # migrate from accounts if present
+            accounts = self.ledger.get("accounts") or {}
+            balances = {aid: acct.get("balance", 0.0) for aid, acct in accounts.items()}
+            self.ledger["balances"] = balances
         return balances
 
-    def get_balance(self, user_id: str) -> float:
-        """
-        Return the current WEC balance for a user.
+    def get_balance(self, account_id: str) -> float:
+        balances = self._ensure_balances_dict()
+        return float(balances.get(account_id, 0.0))
 
-        Falls back to legacy ledger['accounts'] if 'balances' doesn't
-        have an entry yet.
-        """
-        user_id = (user_id or "").strip()
-        if not user_id:
-            return 0.0
-
-        balances = self._ensure_balance_map()
-        bal = balances.get(user_id, None)
-
-        # Back-compat with older 'accounts' dict, if present
-        if bal is None:
-            try:
-                accounts = self.ledger.get("accounts") or {}
-                bal = accounts.get(user_id, 0.0)
-            except Exception:
-                bal = 0.0
-
-        try:
-            return float(bal)
-        except Exception:
-            return 0.0
-
-    def _set_balance(self, user_id: str, amount: float) -> None:
-        """
-        Internal helper: set a user's WEC balance.
-
-        Writes into ledger['balances'] only; if you later add a dedicated
-        WeCoin runtime, you can mirror into that here as well.
-        """
-        user_id = (user_id or "").strip()
-        if not user_id:
+    def credit(self, account_id: str, amount: float) -> None:
+        if amount <= 0:
             return
+        balances = self._ensure_balances_dict()
+        balances[account_id] = float(balances.get(account_id, 0.0) + float(amount))
 
-        balances = self._ensure_balance_map()
-        try:
-            balances[user_id] = float(amount)
-        except Exception:
-            balances[user_id] = 0.0
-
-    def credit(self, user_id: str, amount: float) -> float:
-        """
-        Increase a user's balance by `amount`. Returns the new balance.
-
-        This is a trusted dev-only "mint" at the moment.
-        """
-        user_id = (user_id or "").strip()
-        if not user_id:
-            return 0.0
-
-        try:
-            amount = float(amount)
-        except Exception:
-            return self.get_balance(user_id)
-
+    def debit(self, account_id: str, amount: float) -> None:
         if amount <= 0:
-            return self.get_balance(user_id)
-
-        new_balance = self.get_balance(user_id) + amount
-        self._set_balance(user_id, new_balance)
-
-        try:
-            self.save_state()
-        except Exception:
-            pass
-
-        return new_balance
-
-    def debit(self, user_id: str, amount: float) -> float:
-        """
-        Decrease a user's balance by `amount`.
-
-        Raises ValueError on insufficient funds. Returns new balance.
-        """
-        user_id = (user_id or "").strip()
-        if not user_id:
-            return 0.0
-
-        try:
-            amount = float(amount)
-        except Exception:
-            return self.get_balance(user_id)
-
-        if amount <= 0:
-            return self.get_balance(user_id)
-
-        bal = self.get_balance(user_id)
-        if bal < amount:
+            return
+        balances = self._ensure_balances_dict()
+        current = float(balances.get(account_id, 0.0))
+        new_val = current - float(amount)
+        if new_val < 0:
             raise ValueError("insufficient_funds")
+        balances[account_id] = new_val
 
-        new_balance = bal - amount
-        self._set_balance(user_id, new_balance)
+    # ----------------------- convenience queries ---------------
+    def latest_block(self) -> Optional[dict]:
+        chain = self.ledger.get("chain") or []
+        return chain[-1] if chain else None
 
-        try:
-            self.save_state()
-        except Exception:
-            pass
+    def latest_block_header(self) -> Optional[dict]:
+        block = self.latest_block()
+        return block["header"] if block else None
 
-        return new_balance
-
-    def transfer_wec(self, from_id: str, to_id: str, amount: float) -> dict:
-        """
-        Simple single-node WEC transfer.
-
-        This is a trusted executor call for now (no signatures). Later we
-        can upgrade it to build a tx and push it into the mempool.
-        """
-        from_id = (from_id or "").strip()
-        to_id = (to_id or "").strip()
-
-        # Basic parameter validation
-        if not from_id or not to_id:
-            return {"ok": False, "error": "invalid_transfer_params"}
-        if from_id == to_id:
-            return {"ok": False, "error": "cannot_send_to_self"}
-
-        try:
-            amount = float(amount)
-        except Exception:
-            return {"ok": False, "error": "invalid_amount"}
-
-        if amount <= 0:
-            return {"ok": False, "error": "amount_must_be_positive"}
-
-        # Debit then credit
-        try:
-            self.debit(from_id, amount)
-        except ValueError:
-            return {"ok": False, "error": "insufficient_funds"}
-        except Exception as e:
-            return {"ok": False, "error": f"debit_failed:{e!s}"}
-
-        try:
-            self.credit(to_id, amount)
-        except Exception as e:
-            # Best-effort rollback: put funds back on sender
-            try:
-                self.credit(from_id, amount)
-            except Exception:
-                pass
-            return {"ok": False, "error": f"credit_failed:{e!s}"}
-
+    def consensus_meta(self) -> dict:
+        chain = self.ledger.get("chain") or []
+        block = chain[-1] if chain else None
         return {
             "ok": True,
-            "from": from_id,
-            "to": to_id,
-            "amount": float(amount),
-            "from_balance": self.get_balance(from_id),
-            "to_balance": self.get_balance(to_id),
+            "block": block,
+            "validators": sorted(self.cons.validators),
+            "quorum_fraction": self.cons.quorum_fraction,
         }
 
-    def _reward(self, block: dict) -> None:
-        prop = block.get("proposer")
-        if prop:
-            self.cons.rewards[prop] = self.cons.rewards.get(prop, 0.0) + 1.0
-        for v in block.get("votes", []):
-            self.cons.rewards[v] = self.cons.rewards.get(v, 0.0) + 0.25
+    # ----------------------- GSM / bootstrap helpers -----------
+    def _check_gsm_expiry(self, block: dict) -> None:
+        """
+        Check whether the Genesis Safety Mode (GSM) / bootstrap_mode should
+        expire as the network matures.
 
-        # Mirror consensus rewards into WeCoin validator tickets
-        wecoin = getattr(self, "wecoin", None)
-        if wecoin is not None and hasattr(wecoin, "add_ticket"):
-            try:
-                if prop:
-                    wecoin.add_ticket("validators", prop, weight=1.0)
-                for v in block.get("votes", []):
-                    wecoin.add_ticket("validators", v, weight=0.25)
-            except Exception as e:
-                log.warning("Failed to record validator tickets for epoch rewards: %s", e)
+        This consults genesis params in self.genesis and flips
+        self.bootstrap_mode to False when the conditions are met.
 
-    # ----------------- dev helper / legacy mining --------------
+        The exact policy can be tuned via genesis_params.json.
+        """
+        g = getattr(self, "genesis", {}) or {}
+        if not g.get("gsm_active"):
+            return
+
+        min_height = int(g.get("gsm_min_height") or 0)
+        min_validators = int(g.get("gsm_min_validators") or 0)
+        height = int(block.get("height", 0))
+
+        if height < min_height:
+            return
+
+        active_validators = len(self.cons.validators)
+        if active_validators < min_validators:
+            return
+
+        # If we reach here, GSM should be disabled
+        self.bootstrap_mode = False
+        self.genesis["gsm_active"] = False
+        self.ledger.setdefault("events", []).append(
+            {
+                "type": "gsm_expired",
+                "height": height,
+                "validators": active_validators,
+                "ts": _now(),
+            }
+        )
+        self.save_state()
+        log.info(
+            "Genesis Safety Mode has expired at height=%s with validators=%s",
+            height,
+            active_validators,
+        )
 
 
+# ------------------------------------------------------------
+# Global facade to keep backward-compat imports happy
+# ------------------------------------------------------------
 class _ExecFacade:
     """
-    Lightweight facade around a WeAllExecutor instance.
+    Thin facade around WeAllExecutor for older code.
+
+    Older modules used to import `executor` directly and call
+    executor.add_tx(...), executor.mine_block(...), etc.
+
+    Newer code can explicitly construct / inject a WeAllExecutor, but for the
+    integrated node we keep a single global instance and expose it via this
+    facade to avoid circular imports.
 
     - Exposes the core executor as .exec
     - Delegates attribute access to the underlying executor so existing

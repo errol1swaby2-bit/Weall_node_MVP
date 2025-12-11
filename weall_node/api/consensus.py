@@ -14,7 +14,11 @@ API:
 
     POST /consensus/step-dev
         -> no-op "step" useful for wiring tests; returns
-           the same meta payload with an extra note.
+           the same payload as /consensus/meta
+
+    POST /consensus/dev/mine
+        -> dev helper to call executor.mine_block() for
+           single-node / local testing.
 """
 
 from typing import Any, Dict
@@ -30,6 +34,7 @@ router = APIRouter(prefix="/consensus", tags=["consensus"])
 # ============================================================
 # Helpers
 # ============================================================
+
 
 def _derive_chain_meta() -> Dict[str, Any]:
     """
@@ -57,7 +62,7 @@ def _derive_chain_meta() -> Dict[str, Any]:
         epoch = 0
         bootstrap_mode = False
 
-    # Case 2: chain is a dict with metadata
+    # Case 2: structured dict
     elif isinstance(raw, dict):
         blocks = raw.get("blocks")
         if isinstance(blocks, list):
@@ -80,10 +85,16 @@ def _derive_chain_meta() -> Dict[str, Any]:
         epoch = 0
         bootstrap_mode = False
 
+    # Prefer executor-derived flags when available
+    bootstrap_flag = bool(getattr(executor, "bootstrap_mode", bootstrap_mode))
+    epoch_val = getattr(executor, "current_epoch", None)
+    if epoch_val is None:
+        epoch_val = epoch
+
     return {
         "height": int(height),
-        "epoch": int(epoch),
-        "bootstrap_mode": bootstrap_mode,
+        "epoch": int(epoch_val),
+        "bootstrap_mode": bootstrap_flag,
     }
 
 
@@ -91,19 +102,21 @@ def _derive_chain_meta() -> Dict[str, Any]:
 # Models
 # ============================================================
 
+
 class ConsensusMeta(BaseModel):
     ok: bool = True
     height: int = Field(..., description="Current chain height (blocks)")
-    epoch: int = Field(..., description="Current epoch index")
+    epoch: int = Field(..., description="Epoch / era counter (if used)")
     bootstrap_mode: bool = Field(
         ...,
-        description="True if chain is still in bootstrap / genesis mode",
+        description="True if network is still in bootstrap / genesis mode",
     )
 
 
 # ============================================================
 # Routes
 # ============================================================
+
 
 @router.get("/meta", response_model=ConsensusMeta)
 def consensus_meta() -> Dict[str, Any]:
@@ -128,3 +141,23 @@ def consensus_step_dev() -> Dict[str, Any]:
     the consensus surface is wired correctly.
     """
     return consensus_meta()
+
+
+@router.post("/dev/mine")
+def consensus_dev_mine() -> Dict[str, Any]:
+    """
+    Dev helper: mine a single block in this node's local executor.
+
+    This is intended for single-node / Termux testing only.
+    It simply delegates to `executor.mine_block()` and returns
+    whatever that call returns. In particular:
+
+    - If this node is configured as a validator and consensus is
+      available, you'll get `{ "ok": true, "block": {...}, ... }`.
+    - If this node is *not* allowed to participate in consensus,
+      you'll typically get `{ "ok": false, "error": "node_not_validator", ... }`.
+
+    In either case, the response is a plain dict; there is no
+    additional validation layer on top.
+    """
+    return executor.mine_block()
