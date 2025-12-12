@@ -3,53 +3,70 @@ weall_node/api/treasury.py
 ---------------------------------
 Treasury endpoints for WeAll Node.
 
-This module exposes a read-only view of the protocol-level monetary policy
-and the network treasury account, backed by the WeCoin runtime:
+Includes:
+- GET  /treasury/meta
+- GET  /treasury/pools
 
-    - GET /treasury/meta
-        → monetary policy, halving schedule, pool split
+Spec-v2 oriented:
+- Group-controlled spend proposals (multisig by emissaries):
+    POST /treasury/group_spend/propose
+    POST /treasury/group_spend/sign
+    POST /treasury/group_spend/execute
+    GET  /treasury/group_spend/list
 
-    - GET /treasury/pools
-        → current treasury balance & pool split snapshot
-
-Unlike the original MVP, this version no longer relies on stubbed balances
-inside executor.ledger["treasury"]. Instead it reflects the live WeCoin
-runtime (if available) and falls back to sensible defaults when it is not.
-
-Slashing is *not* handled here; the only punitive action in WeAll is
-account-level bans managed elsewhere in the protocol.
+Notes:
+- Spending moves funds out of @weall_treasury to a target account.
+- This is NOT minting; total_issued must NOT change.
+- WeCoinLedger currently lacks a public transfer() method, so we adjust balances
+  directly on the runtime balances map with safety checks.
+- Multisig enforcement uses group["multisig"] if set; otherwise:
+    - if emissaries exist: signers = emissaries, threshold = min(3, len(signers))
+    - else: (bootstrap/dev) signer = created_by, threshold = 1
 """
 
-from typing import Dict, Optional
+from __future__ import annotations
 
-from fastapi import APIRouter
+import secrets
+import time
+from typing import Any, Dict, List, Optional
+
+from fastapi import APIRouter, HTTPException, Request
 from pydantic import BaseModel, Field
 
 from ..weall_executor import executor
 
 router = APIRouter(prefix="/treasury", tags=["treasury"])
 
+TREASURY_ACCOUNT = "@weall_treasury"
+
 
 # ---------------------------------------------------------------------------
 # Internal helpers
 # ---------------------------------------------------------------------------
 
-def _wecoin():
-    """
-    Convenience accessor for the WeCoin runtime.
+def _now_ts() -> float:
+    return float(time.time())
 
-    Returns None if the runtime is not available (e.g., in certain unit tests
-    or dev shells).
-    """
+
+def _core():
+    # tolerate both executor facade and direct core
+    return getattr(executor, "exec", executor)
+
+
+def _ledger() -> Dict[str, Any]:
+    core = _core()
+    led = getattr(core, "ledger", None)
+    if led is None:
+        raise HTTPException(status_code=500, detail="ledger_not_initialized")
+    return led
+
+
+def _wecoin():
+    # WeCoin runtime lives on the executor in this repo
     return getattr(executor, "wecoin", None)
 
 
 def _pool_split_bps(split: Dict[str, float]) -> Dict[str, int]:
-    """
-    Convert a {pool: fraction} mapping into basis-points (1/100 of a percent).
-
-    Assumes split fractions sum to ~1.0, but we do not rely on this strictly.
-    """
     out: Dict[str, int] = {}
     for name, frac in (split or {}).items():
         try:
@@ -61,30 +78,132 @@ def _pool_split_bps(split: Dict[str, float]) -> Dict[str, int]:
 
 
 def _current_block_reward(wec) -> float:
-    """
-    Compute the current block reward using the runtime's own monetary policy.
-
-    If the runtime exposes a private helper, we try to call it on the latest
-    height; otherwise we approximate by calling it at the current chain height.
-    """
     if wec is None:
         return 0.0
-
-    # Try to derive height from the chain
-    chain = executor.ledger.get("chain") or []
+    chain = _ledger().get("chain") or []
     height = len(chain)
     try:
-        # New WeCoinLedger exposes a _current_block_reward helper
         if hasattr(wec, "_current_block_reward"):
             return float(wec._current_block_reward(height))  # type: ignore[attr-defined]
     except Exception:
         pass
-
-    # Fallback: if no helper is available, approximate using initial reward
     try:
         return float(getattr(wec, "initial_block_reward", 0.0))
     except Exception:
         return 0.0
+
+
+def _groups_root() -> Dict[str, Any]:
+    led = _ledger()
+    return led.setdefault("groups", {"groups": {}})
+
+
+def _groups() -> Dict[str, Dict[str, Any]]:
+    root = _groups_root()
+    g = root.setdefault("groups", {})
+    if not isinstance(g, dict):
+        root["groups"] = {}
+        g = root["groups"]
+    return g
+
+
+def _get_group(group_id: str) -> Dict[str, Any]:
+    g = _groups().get(group_id)
+    if not g:
+        raise HTTPException(status_code=404, detail="group_not_found")
+    if not isinstance(g, dict):
+        raise HTTPException(status_code=500, detail="group_corrupt")
+    return g
+
+
+def _get_user_id(request: Request) -> str:
+    uid = (request.headers.get("X-WeAll-User") or "").strip()
+    if not uid:
+        raise HTTPException(status_code=401, detail="missing_x_weall_user")
+    return uid
+
+
+def _resolve_multisig_policy(group: Dict[str, Any]) -> Dict[str, Any]:
+    """
+    Returns: {"signers": [...], "threshold": int}
+
+    Priority:
+    1) group.multisig.signers + threshold when configured
+    2) if emissaries exist: signers=emissaries, threshold=min(3, len(signers))
+    3) else: signer=[created_by], threshold=1  (bootstrap/dev safe fallback)
+    """
+    ms = group.get("multisig") or {}
+    signers = list(ms.get("signers") or [])
+    threshold = int(ms.get("threshold") or 0)
+
+    if signers and threshold > 0:
+        return {"signers": signers, "threshold": threshold}
+
+    emissaries = list(group.get("emissaries") or [])
+    if emissaries:
+        return {"signers": emissaries, "threshold": max(1, min(3, len(emissaries)))}
+
+    created_by = (group.get("created_by") or "").strip()
+    if created_by:
+        return {"signers": [created_by], "threshold": 1}
+
+    return {"signers": [], "threshold": 0}
+
+
+def _require_signer(user_id: str, policy: Dict[str, Any]) -> None:
+    signers = set(policy.get("signers") or [])
+    if user_id not in signers:
+        raise HTTPException(status_code=403, detail="not_authorized_signer")
+
+
+def _transfer_from_treasury(to_account: str, amount: float) -> None:
+    """
+    Move balance from TREASURY_ACCOUNT to to_account.
+
+    Does NOT change total_issued (this is spending, not minting).
+    """
+    wec = _wecoin()
+    if wec is None:
+        raise HTTPException(status_code=500, detail="wecoin_runtime_missing")
+
+    try:
+        amt = float(amount)
+    except Exception:
+        raise HTTPException(status_code=400, detail="bad_amount")
+
+    if amt <= 0:
+        raise HTTPException(status_code=400, detail="amount_must_be_positive")
+
+    if not to_account or not str(to_account).strip():
+        raise HTTPException(status_code=400, detail="missing_to_account")
+
+    to_account = str(to_account).strip()
+
+    # Ensure balances map exists
+    balances = getattr(wec, "balances", None)
+    if not isinstance(balances, dict):
+        raise HTTPException(status_code=500, detail="wecoin_balances_missing")
+
+    treasury_bal = float(balances.get(TREASURY_ACCOUNT, 0.0))
+    if treasury_bal + 1e-12 < amt:
+        raise HTTPException(status_code=400, detail="insufficient_treasury_funds")
+
+    balances[TREASURY_ACCOUNT] = treasury_bal - amt
+    balances[to_account] = float(balances.get(to_account, 0.0)) + amt
+
+
+def _treasury_root() -> Dict[str, Any]:
+    led = _ledger()
+    return led.setdefault("treasury", {})
+
+
+def _group_spends() -> Dict[str, Any]:
+    root = _treasury_root()
+    spends = root.setdefault("group_spends", {})
+    if not isinstance(spends, dict):
+        root["group_spends"] = {}
+        spends = root["group_spends"]
+    return spends
 
 
 # ---------------------------------------------------------------------------
@@ -94,80 +213,50 @@ def _current_block_reward(wec) -> float:
 class TreasuryMetaResponse(BaseModel):
     ok: bool = True
     token_symbol: str = Field("WEC", description="Human-readable token ticker.")
-    max_supply: float = Field(..., description="Maximum WEC supply (hard cap).")
-    total_issued: float = Field(
-        ...,
-        description="Total WEC that have been minted and credited so far.",
-    )
-    initial_block_reward: float = Field(
-        ...,
-        description="Reward per block at height 0, before any halvings.",
-    )
-    current_block_reward: float = Field(
-        ...,
-        description="Estimated reward per block at the current chain height.",
-    )
-    block_interval_seconds: int = Field(
-        ...,
-        description="Target block interval in seconds (e.g., 600 = 10 minutes).",
-    )
-    halving_interval_seconds: int = Field(
-        ...,
-        description="Time between reward halvings, in seconds.",
-    )
-    blocks_per_epoch: int = Field(
-        ...,
-        description="Configured blocks-per-epoch used by the node.",
-    )
-    bootstrap_mode: bool = Field(
-        ...,
-        description="True when Genesis Safety Mode / bootstrap mode is active.",
-    )
-    pool_split_bps: Dict[str, int] = Field(
-        ...,
-        description="Per-pool share of each block reward, in basis points.",
-    )
+    max_supply: float
+    total_issued: float
+    initial_block_reward: float
+    current_block_reward: float
+    block_interval_seconds: int
+    halving_interval_seconds: int
+    blocks_per_epoch: int
+    bootstrap_mode: bool
+    pool_split_bps: Dict[str, int]
 
 
 class TreasuryPoolsResponse(BaseModel):
     ok: bool = True
-    treasury_account: str = Field(
-        "@weall_treasury",
-        description="Designated treasury account id.",
-    )
-    treasury_balance: float = Field(
-        ...,
-        description="Current WEC balance of the treasury account.",
-    )
-    total_issued: float = Field(
-        ...,
-        description="Total WEC that have been minted and credited so far.",
-    )
-    pool_split_bps: Dict[str, int] = Field(
-        ...,
-        description="Per-pool share of each block reward, in basis points.",
-    )
-    last_update: Optional[int] = Field(
-        None,
-        description="Reserved for future on-ledger snapshot timestamps.",
-    )
+    treasury_account: str = Field(TREASURY_ACCOUNT)
+    treasury_balance: float
+    total_issued: float
+    pool_split_bps: Dict[str, int]
+    last_update: Optional[int] = None
+
+
+class GroupSpendProposeBody(BaseModel):
+    group_id: str = Field(..., min_length=4)
+    to_account: str = Field(..., min_length=2)
+    amount: float = Field(..., gt=0)
+    memo: str = Field("", max_length=280)
+
+
+class GroupSpendSignBody(BaseModel):
+    spend_id: str = Field(..., min_length=6)
+    note: str = Field("", max_length=280)
+
+
+class GroupSpendExecuteBody(BaseModel):
+    spend_id: str = Field(..., min_length=6)
 
 
 # ---------------------------------------------------------------------------
-# Routes
+# Routes: Meta / Pools
 # ---------------------------------------------------------------------------
 
 @router.get("/meta", response_model=TreasuryMetaResponse)
 def get_treasury_meta() -> TreasuryMetaResponse:
-    """
-    Return a snapshot of the network's monetary policy and pool split.
-
-    This data is derived from the live WeCoin runtime when possible, and
-    falls back to defaults baked into the executor and runtime in dev mode.
-    """
     wec = _wecoin()
 
-    # Derive policy from runtime if available
     if wec is not None:
         max_supply = float(getattr(wec, "max_supply", 0.0))
         total_issued = float(getattr(wec, "total_issued", 0.0))
@@ -176,12 +265,10 @@ def get_treasury_meta() -> TreasuryMetaResponse:
         halving_interval_seconds = int(getattr(wec, "halving_interval_seconds", 0))
         pool_split = getattr(wec, "pool_split", {}) or {}
     else:
-        # Minimal safe defaults if runtime is missing
         max_supply = 21_000_000.0
         total_issued = 0.0
         initial_block_reward = 100.0
         block_interval_seconds = 600
-        # 2-year halving, matching weall_runtime.ledger default
         halving_interval_seconds = 2 * 365 * 24 * 60 * 60
         pool_split = {
             "validators": 0.20,
@@ -192,7 +279,6 @@ def get_treasury_meta() -> TreasuryMetaResponse:
         }
 
     current_block_reward = _current_block_reward(wec)
-
     blocks_per_epoch = int(getattr(executor, "blocks_per_epoch", 100))
     bootstrap_mode = bool(getattr(executor, "bootstrap_mode", False))
     pool_split_bps = _pool_split_bps(pool_split)
@@ -212,23 +298,10 @@ def get_treasury_meta() -> TreasuryMetaResponse:
 
 @router.get("/pools", response_model=TreasuryPoolsResponse)
 def get_treasury_pools() -> TreasuryPoolsResponse:
-    """
-    Return the current treasury balance plus the pool split snapshot.
-
-    At Genesis, only the treasury account has a dedicated on-ledger address
-    (@weall_treasury). Other pools (validators, jurors, creators, operators)
-    distribute rewards directly to individual account balances rather than
-    accumulating into a shared pool account, so their "balances" are not
-    exposed here.
-
-    For analytics, higher-level tooling can aggregate balances by role;
-    this endpoint focuses on protocol-level monetary policy plus the
-    canonical commons pool balance.
-    """
     wec = _wecoin()
 
     if wec is not None:
-        treasury_balance = float(wec.get_balance("@weall_treasury"))
+        treasury_balance = float(wec.get_balance(TREASURY_ACCOUNT))
         total_issued = float(getattr(wec, "total_issued", 0.0))
         pool_split = getattr(wec, "pool_split", {}) or {}
     else:
@@ -242,12 +315,111 @@ def get_treasury_pools() -> TreasuryPoolsResponse:
             "treasury": 0.20,
         }
 
-    pool_split_bps = _pool_split_bps(pool_split)
-
-    # We keep last_update reserved for future on-ledger summaries; for now, None.
     return TreasuryPoolsResponse(
         treasury_balance=treasury_balance,
         total_issued=total_issued,
-        pool_split_bps=pool_split_bps,
+        pool_split_bps=_pool_split_bps(pool_split),
         last_update=None,
     )
+
+
+# ---------------------------------------------------------------------------
+# Routes: Group spend (multisig)
+# ---------------------------------------------------------------------------
+
+@router.post("/group_spend/propose")
+def group_spend_propose(body: GroupSpendProposeBody, request: Request):
+    user_id = _get_user_id(request)
+    group = _get_group(body.group_id)
+
+    policy = _resolve_multisig_policy(group)
+    _require_signer(user_id, policy)
+
+    spend_id = secrets.token_hex(8)
+    spends = _group_spends()
+
+    rec = {
+        "id": spend_id,
+        "group_id": body.group_id,
+        "to_account": str(body.to_account).strip(),
+        "amount": float(body.amount),
+        "memo": body.memo or "",
+        "proposed_by": user_id,
+        "proposed_at": _now_ts(),
+        "status": "proposed",
+        "policy": {
+            "signers": list(policy.get("signers") or []),
+            "threshold": int(policy.get("threshold") or 0),
+        },
+        "signatures": {},  # signer -> {at, note}
+        "executed_at": None,
+        "executed_by": None,
+    }
+    spends[spend_id] = rec
+
+    return {"ok": True, "spend": rec}
+
+
+@router.get("/group_spend/list")
+def group_spend_list(group_id: Optional[str] = None):
+    spends = _group_spends()
+    items = list(spends.values())
+    if group_id:
+        items = [s for s in items if s.get("group_id") == group_id]
+    # newest first
+    items.sort(key=lambda x: float(x.get("proposed_at") or 0), reverse=True)
+    return {"ok": True, "spends": items}
+
+
+@router.post("/group_spend/sign")
+def group_spend_sign(body: GroupSpendSignBody, request: Request):
+    user_id = _get_user_id(request)
+    spends = _group_spends()
+    rec = spends.get(body.spend_id)
+    if not rec:
+        raise HTTPException(status_code=404, detail="spend_not_found")
+    if rec.get("status") != "proposed":
+        raise HTTPException(status_code=400, detail="spend_not_proposable")
+
+    group = _get_group(str(rec.get("group_id")))
+    policy = rec.get("policy") or _resolve_multisig_policy(group)
+
+    _require_signer(user_id, policy)
+
+    sigs = rec.setdefault("signatures", {})
+    sigs[user_id] = {"at": _now_ts(), "note": body.note or ""}
+
+    return {"ok": True, "spend": rec, "signatures": sigs, "count": len(sigs)}
+
+
+@router.post("/group_spend/execute")
+def group_spend_execute(body: GroupSpendExecuteBody, request: Request):
+    user_id = _get_user_id(request)
+    spends = _group_spends()
+    rec = spends.get(body.spend_id)
+    if not rec:
+        raise HTTPException(status_code=404, detail="spend_not_found")
+    if rec.get("status") != "proposed":
+        raise HTTPException(status_code=400, detail="spend_not_executable")
+
+    group = _get_group(str(rec.get("group_id")))
+    policy = rec.get("policy") or _resolve_multisig_policy(group)
+    _require_signer(user_id, policy)
+
+    sigs = rec.get("signatures") or {}
+    threshold = int((policy.get("threshold") or 0))
+    if threshold <= 0:
+        raise HTTPException(status_code=400, detail="multisig_threshold_invalid")
+
+    if len(sigs) < threshold:
+        raise HTTPException(
+            status_code=400,
+            detail=f"insufficient_signatures:{len(sigs)}/{threshold}",
+        )
+
+    _transfer_from_treasury(str(rec.get("to_account")), float(rec.get("amount") or 0.0))
+
+    rec["status"] = "executed"
+    rec["executed_at"] = _now_ts()
+    rec["executed_by"] = user_id
+    return {"ok": True, "spend": rec}

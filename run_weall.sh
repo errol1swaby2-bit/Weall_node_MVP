@@ -25,8 +25,7 @@ fi
 if command -v ipfs >/dev/null 2>&1; then
   if ! pgrep -x ipfs >/dev/null 2>&1; then
     echo "[ipfs] starting daemon..."
-    ipfs daemon > "$BASE_DIR/ipfs.log" 2>&1 &
-    # Give the daemon a moment to come up
+    ipfs daemon --enable-pubsub-experiment > "$BASE_DIR/ipfs.log" 2>&1 &
     sleep 5
   else
     echo "[ipfs] ipfs daemon already running"

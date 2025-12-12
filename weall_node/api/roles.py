@@ -14,6 +14,14 @@ supposed to behave and reveal each user's effective capabilities.
 Other API modules (governance, disputes, validators, etc.) should
 *consume* the helper `get_effective_profile_for_user()` to enforce
 role gating consistently.
+
+This module also exposes:
+
+    - user_has_capability(user_id, capability)
+    - require_capability(capability)  # FastAPI dependency factory
+
+so other API modules can enforce capabilities without duplicating
+PoH / flags / role logic.
 """
 
 from __future__ import annotations
@@ -21,6 +29,8 @@ from __future__ import annotations
 from typing import Dict, List, Optional
 
 from fastapi import APIRouter, Depends, Header, HTTPException, status
+
+from ..security.current_user import current_user_id_from_cookie_optional
 from pydantic import BaseModel, Field
 
 from ..weall_executor import executor
@@ -127,6 +137,76 @@ def get_effective_profile_for_user(user_id: str) -> runtime_roles.EffectiveRoleP
     return runtime_roles.compute_effective_role_profile(tier, flags)
 
 
+# ------------------------------------------------------------
+# Canonical capability helpers
+# ------------------------------------------------------------
+
+def user_has_capability(
+    user_id: str,
+    capability: runtime_roles.Capability,
+) -> bool:
+    """
+    Convenience helper: does this user have the given capability?
+
+    This is the canonical way for other modules (including runtime,
+    executor, and API layers) to check permissions *without* duplicating
+    role / PoH / flags logic.
+    """
+    profile = get_effective_profile_for_user(user_id)
+    return capability in profile.capabilities
+
+
+def require_capability(capability: runtime_roles.Capability):
+    """
+    FastAPI dependency factory that enforces a capability based on
+    the X-WeAll-User header.
+
+    Usage in an API module:
+
+        from ..api import roles as roles_api
+        from ..weall_runtime import roles as runtime_roles
+
+        @router.post("/governance/proposals")
+        def create_proposal(
+            payload: ProposalCreate,
+            user_id: str = Depends(
+                roles_api.require_capability(
+                    runtime_roles.Capability.CREATE_GOVERNANCE_PROPOSAL
+                )
+            ),
+        ):
+            ...
+
+    On success, the dependency returns the X-WeAll-User value.
+    On failure, it raises 401 (missing header) or 403 (missing capability).
+    """
+
+    async def dependency(
+        session_user_id: Optional[str] = Depends(current_user_id_from_cookie_optional),
+        x_weall_user: Optional[str] = Header(
+            default=None,
+            alias="X-WeAll-User",
+            description="Legacy identity header (dev-only). Prefer cookie session.",
+        ),
+    ) -> str:
+        user_id = session_user_id or x_weall_user
+        if not user_id:
+            raise HTTPException(
+                status_code=status.HTTP_401_UNAUTHORIZED,
+                detail="Not authenticated.",
+            )
+
+        profile = get_effective_profile_for_user(user_id)
+        if capability not in profile.capabilities:
+            raise HTTPException(
+                status_code=status.HTTP_403_FORBIDDEN,
+                detail=f"Missing required capability: {capability.value}",
+            )
+        return user_id
+
+    return dependency
+
+
 async def _require_user_header(
     x_weall_user: Optional[str] = Header(
         default=None,
@@ -207,8 +287,12 @@ def get_roles_meta() -> RoleMetaResponse:
 
 @router.get("/roles/effective/me", response_model=EffectiveRoleProfileResponse)
 def get_my_effective_role_profile(
-    user_id: str = Depends(_require_user_header),
+    session_user_id: Optional[str] = Depends(current_user_id_from_cookie_optional),
+    x_weall_user: Optional[str] = Header(default=None, alias="X-WeAll-User"),
 ) -> EffectiveRoleProfileResponse:
+    user_id = session_user_id or x_weall_user
+    if not user_id:
+        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Not authenticated.")
     """
     Return the effective role profile for the current user.
 

@@ -1,241 +1,416 @@
 <!DOCTYPE html>
 <html lang="en">
 <head>
-  <meta charset="UTF-8">
-  <title>WeAll — Rewards & Epochs</title>
-  <meta name="viewport" content="width=device-width, initial-scale=1">
-  <link rel="stylesheet" href="/frontend/style.css?v=1762461479">
+  <meta charset="UTF-8" />
+  <title>WeAll — Rewards</title>
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <meta http-equiv="Cache-Control" content="no-store" />
+  <link rel="stylesheet" href="/frontend/style.css" />
   <style>
-    body {
-      background:#000;
-      color:#fff;
-      font-family:Arial, sans-serif;
-      margin:0;
-      padding:0;
+    .rw-shell { max-width: 980px; margin: 0 auto; padding: 18px 14px 40px; }
+    .rw-head { display:flex; align-items:flex-end; justify-content:space-between; gap: 12px; margin: 10px 0 14px; }
+    .rw-title { margin: 0; font-size: 18px; letter-spacing: .2px; }
+    .rw-sub { margin: 4px 0 0; color: var(--muted); font-size: 13px; }
+
+    .rw-actions { display:flex; gap: 8px; flex-wrap: wrap; justify-content:flex-end; }
+    .rw-btn {
+      border: 1px solid var(--border);
+      background: rgba(17,21,27,.7);
+      color: var(--fg);
+      border-radius: 10px;
+      padding: 8px 10px;
+      cursor: pointer;
+      font-weight: 600;
+      font-size: 13px;
     }
-    header {
-      background:#111;
-      padding:12px 16px;
-      display:flex;
-      align-items:center;
-      justify-content:space-between;
+    .rw-btn:hover { border-color: rgba(110,231,183,.6); }
+
+    .rw-pill {
+      display:inline-flex; align-items:center; gap: 8px;
+      border: 1px solid var(--border);
+      background: rgba(17,21,27,.55);
+      border-radius: 999px;
+      padding: 6px 10px;
+      font-size: 12px;
+      color: var(--muted);
+      max-width: 100%;
+      overflow: hidden;
+      text-overflow: ellipsis;
+      white-space: nowrap;
     }
-    header h2 { margin:0; font-size:1.2em; }
-    header a {
-      color:#2ecc71;
-      text-decoration:none;
-      font-weight:bold;
-      font-size:0.9em;
+    .rw-dot { width: 10px; height: 10px; border-radius: 999px; background: var(--danger); flex: 0 0 auto; }
+    .rw-dot.ok { background: var(--accent); }
+    .rw-dot.warn { background: #fbbf24; }
+    .rw-dot.fail { background: var(--danger); }
+
+    .rw-grid { display:grid; grid-template-columns: 1fr; gap: 12px; }
+    @media (min-width: 880px) { .rw-grid { grid-template-columns: 1fr 1fr; } }
+
+    .rw-card { background: var(--card); border: 1px solid var(--border); border-radius: 14px; padding: 12px; }
+    .rw-card h3 { margin: 0 0 6px; font-size: 14px; color: var(--fg); }
+    .rw-row { display:flex; align-items:center; justify-content:space-between; gap: 10px; padding: 6px 0; border-bottom: 1px solid rgba(34,40,54,.7); }
+    .rw-row:last-child { border-bottom: 0; }
+    .rw-k { color: var(--muted); font-size: 12px; }
+    .rw-v { color: var(--fg); font-size: 12px; text-align:right; }
+
+    .rw-list {
+      max-height: 260px;
+      overflow: auto;
+      background: rgba(0,0,0,.25);
+      border: 1px solid rgba(34,40,54,.7);
+      border-radius: 12px;
+      padding: 10px;
+      font-size: 12px;
+      color: var(--fg);
     }
-    .container {
-      max-width:900px;
-      margin:auto;
-      padding:20px;
+    .rw-list .muted { color: var(--muted); }
+
+    .rw-msg { margin-top: 10px; font-size: 12px; color: var(--muted); }
+    .rw-msg.ok { color: var(--accent); }
+    .rw-msg.err { color: var(--danger); }
+
+    .rw-inline {
+      display:flex; gap: 10px; align-items:center; flex-wrap: wrap;
+      margin-top: 8px;
     }
-    .card {
-      background:#111;
-      border-radius:12px;
-      padding:16px;
-      margin-bottom:18px;
-      box-shadow:0 0 5px #222;
+    .rw-input {
+      border: 1px solid var(--border);
+      background: rgba(0,0,0,.25);
+      color: var(--fg);
+      border-radius: 10px;
+      padding: 8px 10px;
+      font-size: 13px;
+      min-width: 220px;
+      outline: none;
     }
-    h3 { color:#2ecc71; margin-top:0; }
-    .stat { display:flex; justify-content:space-between; margin-bottom:8px; }
-    .table {
-      width:100%;
-      border-collapse:collapse;
-      font-size:0.9em;
+    .rw-input:focus { border-color: rgba(110,231,183,.6); }
+
+    footer.weall-footer {
+      margin-top: 18px;
+      border-top: 1px solid rgba(34,40,54,.8);
+      padding: 14px 2px 0;
+      font-size: 12px;
+      color: var(--muted);
+      text-align: center;
     }
-    th, td {
-      border-bottom:1px solid #222;
-      padding:8px 6px;
-      text-align:left;
-    }
-    th { color:#2ecc71; }
-    tr:hover { background:#1a1a1a; }
-    button {
-      background:#2ecc71;
-      border:none;
-      color:#000;
-      border-radius:8px;
-      padding:8px 12px;
-      font-weight:bold;
-      cursor:pointer;
-      margin-top:8px;
-    }
-    button:hover { background:#27ae60; }
-    .msg { color:#aaa; font-size:0.85em; margin-top:8px; }
+    footer.weall-footer a { color: var(--muted); text-decoration: none; }
+    footer.weall-footer a:hover { text-decoration: underline; color: var(--fg); }
   </style>
-  <script src="env.js"></script>
-  <script src="api_shim.js"></script>
 </head>
+
 <body>
-<div id="toast" role="status" aria-live="polite"></div>
-<script>
-(async () => {
-  const acct = localStorage.getItem('weall.account');
-  if (!acct) return location.href = '/frontend/login.html';
-  const r = await fetch(`/poh/status?user_id=${encodeURIComponent(acct)}`);
-  const s = await r.json();
-  const tier = (s.tier ?? s.poh_level ?? 0);
-  if (tier < 3) location.href = '/frontend/verify.html?reason=tier3_required';
-})();
-</script>
+  <div id="weall_nav"></div>
 
-  <header>
-    <h2>Rewards & Epochs</h2>
-    <a href="index.html">← Back to Feed</a>
-  </header>
+  <div class="rw-shell">
+    <div class="rw-head">
+      <div>
+        <h1 class="rw-title">Rewards</h1>
+        <p class="rw-sub">Protocol reward configuration + your pending reward entries.</p>
+        <div class="rw-pill" id="rwIdentityPill" title="Session">
+          <span class="rw-dot warn" id="rwIdentityDot"></span>
+          <span id="rwIdentityText">Checking session…</span>
+        </div>
+      </div>
 
-  <div class="container">
-    <!-- Current Epoch -->
-    <div class="card">
-      <h3>Current Epoch</h3>
-      <div class="stat"><strong>Epoch Height:</strong> <span id="epochHeight">Loading...</span></div>
-      <div class="stat"><strong>Block Reward:</strong> <span id="blockReward">Loading...</span></div>
-      <div class="stat"><strong>Halving Cycle:</strong> <span id="halving">Loading...</span></div>
-      <button onclick="refreshEpoch()">Refresh</button>
-      <div class="msg" id="epochMsg"></div>
+      <div class="rw-actions">
+        <button class="rw-btn" id="btnRefreshAll">Refresh</button>
+        <a class="rw-btn" href="/frontend/index.html" style="text-decoration:none;display:inline-block;">← Back to feed</a>
+      </div>
     </div>
 
-    <!-- Pool Distributions -->
-    <div class="card">
-      <h3>Reward Distribution Pools</h3>
-      <table class="table" id="poolTable">
-        <thead>
-          <tr>
-            <th>Pool</th>
-            <th>Percentage</th>
-            <th>Current Payout (WEC)</th>
-          </tr>
-        </thead>
-        <tbody></tbody>
-      </table>
-      <button onclick="refreshPools()">Refresh</button>
-      <div class="msg" id="poolMsg"></div>
+    <div class="rw-grid">
+      <!-- Chain snapshot -->
+      <section class="rw-card">
+        <h3>Chain snapshot</h3>
+        <div class="rw-row"><div class="rw-k">Height</div><div class="rw-v" id="chainHeight">Loading…</div></div>
+        <div class="rw-row"><div class="rw-k">Epoch</div><div class="rw-v" id="chainEpoch">Loading…</div></div>
+        <div class="rw-row"><div class="rw-k">Bootstrap mode</div><div class="rw-v" id="bootstrapMode">Loading…</div></div>
+        <div class="rw-row"><div class="rw-k">Epoch reward</div><div class="rw-v" id="epochReward">Loading…</div></div>
+        <div class="rw-row"><div class="rw-k">Next halving ETA</div><div class="rw-v" id="halvingEta">Loading…</div></div>
+        <div class="rw-msg" id="chainMsg"></div>
+      </section>
+
+      <!-- Rewards config -->
+      <section class="rw-card">
+        <h3>Rewards config</h3>
+        <div class="rw-row"><div class="rw-k">Token</div><div class="rw-v" id="tokenSymbol">Loading…</div></div>
+        <div class="rw-row"><div class="rw-k">Block interval</div><div class="rw-v" id="blockInterval">Loading…</div></div>
+        <div class="rw-row"><div class="rw-k">Blocks per epoch</div><div class="rw-v" id="blocksPerEpoch">Loading…</div></div>
+        <div class="rw-row"><div class="rw-k">Epoch length</div><div class="rw-v" id="epochLength">Loading…</div></div>
+        <div class="rw-row"><div class="rw-k">Notes</div><div class="rw-v" id="rewardsNotes">—</div></div>
+        <div class="rw-msg" id="metaMsg"></div>
+      </section>
+
+      <!-- Pool split -->
+      <section class="rw-card">
+        <h3>Pool split</h3>
+        <div class="rw-list" id="poolSplitList">Loading…</div>
+        <div class="rw-msg" id="poolMsg"></div>
+      </section>
+
+      <!-- Pending -->
+      <section class="rw-card">
+        <h3>Pending rewards</h3>
+
+        <div class="rw-inline">
+          <input class="rw-input" id="userOverride" placeholder="User ID (optional override)" />
+          <button class="rw-btn" id="btnLoadPending">Load pending</button>
+        </div>
+
+        <div class="rw-row" style="margin-top:8px;">
+          <div class="rw-k">Target user</div>
+          <div class="rw-v" id="pendingUser">—</div>
+        </div>
+
+        <div class="rw-row">
+          <div class="rw-k">Total pending</div>
+          <div class="rw-v" id="pendingTotal">—</div>
+        </div>
+
+        <div class="rw-row">
+          <div class="rw-k">Last update</div>
+          <div class="rw-v" id="pendingLastUpdate">—</div>
+        </div>
+
+        <div class="rw-list" id="pendingList">Loading…</div>
+        <div class="rw-msg" id="pendingMsg"></div>
+
+        <div class="rw-msg" style="margin-top:10px;">
+          Note: This UI shows <span style="color:var(--fg)">recorded pending entries</span> from
+          <span style="color:var(--fg)">/rewards/pending/&lt;user&gt;</span>. Claiming is not implemented in this snapshot.
+        </div>
+      </section>
     </div>
 
-    <!-- Reward History -->
-    <div class="card">
-      <h3>Recent Reward Epochs</h3>
-      <table class="table" id="historyTable">
-        <thead>
-          <tr>
-            <th>Epoch</th>
-            <th>Validators</th>
-            <th>Jurors</th>
-            <th>Operators</th>
-            <th>Creators</th>
-            <th>Treasury</th>
-            <th>Timestamp</th>
-          </tr>
-        </thead>
-        <tbody></tbody>
-      </table>
-      <button onclick="refreshHistory()">Refresh</button>
-      <div class="msg" id="histMsg"></div>
-    </div>
+    <footer class="weall-footer">
+      <span>© <span id="footer-year">2024</span> WeAll</span>
+      &nbsp;•&nbsp;<a href="/frontend/privacy.html">Privacy</a>
+      &nbsp;•&nbsp;<a href="/frontend/terms.html">Terms</a>
+    </footer>
   </div>
 
+  <script src="/frontend/session.js"></script>
+  <script src="/frontend/nav.js"></script>
+  <script src="/frontend/footer.js"></script>
+
   <script>
-    async function refreshEpoch() {
-      const h = document.getElementById('epochHeight');
-      const r = document.getElementById('blockReward');
-      const hal = document.getElementById('halving');
-      const msg = document.getElementById('epochMsg');
-      msg.textContent = '';
-      h.textContent = r.textContent = hal.textContent = '...';
-      try {
-        const res = await fetch('/chain/height');
-        const data = await res.json();
-        if (!res.ok) throw new Error(data.detail || 'Error fetching epoch');
-        h.textContent = data.height;
-      } catch (err) {
-        msg.textContent = err.message;
+    const $ = (id) => document.getElementById(id);
+
+    function setMsg(id, text, kind) {
+      const el = $(id);
+      if (!el) return;
+      el.className = "rw-msg" + (kind ? " " + kind : "");
+      el.textContent = text || "";
+    }
+
+    function setIdentity(text, dotKind) {
+      const dot = $("rwIdentityDot");
+      const el = $("rwIdentityText");
+      if (el) el.textContent = text || "";
+      if (dot) dot.className = "rw-dot " + (dotKind || "warn");
+    }
+
+    function secondsToHuman(sec) {
+      const s = Math.max(0, Math.floor(sec || 0));
+      if (s < 60) return s + "s";
+      const m = Math.floor(s / 60);
+      if (m < 60) return m + "m";
+      const h = Math.floor(m / 60);
+      if (h < 48) return h + "h";
+      const d = Math.floor(h / 24);
+      return d + "d";
+    }
+
+    async function apiJson(path, opts = {}) {
+      const sess = await weallGetSession();
+      const headers = {
+        ...(opts.headers || {}),
+        ...(sess && sess.user_id ? { "X-WeAll-User": sess.user_id } : {}),
+      };
+      return weallJsonFetch(path, { ...opts, headers });
+    }
+
+    async function loadSessionOrRedirect() {
+      const sess = await weallGetSession();
+      if (!sess || !sess.user_id) {
+        setIdentity("Not signed in.", "fail");
+        window.location.href = "/frontend/login.html";
+        return null;
       }
+
+      // Try to show PoH tier (best-effort)
+      let tier = 0;
       try {
-        const res2 = await fetch('/rewards/current');
-        const data2 = await res2.json();
-        if (!res2.ok) throw new Error(data2.detail || 'Error fetching reward data');
-        r.textContent = data2.block_reward + ' WEC';
-        hal.textContent = 'Cycle ' + data2.halving_cycle;
-      } catch (err) {
-        msg.textContent = err.message;
+        const me = await apiJson("/poh/me", { method: "GET" });
+        tier = Number(me && me.tier) || 0;
+      } catch { tier = 0; }
+
+      setIdentity(`Signed in as ${sess.user_id} · PoH Tier ${tier}`, "ok");
+      return sess;
+    }
+
+    async function refreshChain() {
+      $("chainHeight").textContent = "Loading…";
+      $("chainEpoch").textContent = "Loading…";
+      $("bootstrapMode").textContent = "Loading…";
+      $("epochReward").textContent = "Loading…";
+      $("halvingEta").textContent = "Loading…";
+      setMsg("chainMsg", "", "");
+
+      try {
+        const h = await apiJson("/chain/height", { method: "GET" });
+        $("chainHeight").textContent = String(h.height ?? "0");
+      } catch (e) {
+        $("chainHeight").textContent = "—";
+        setMsg("chainMsg", "Chain height unavailable: " + (e.message || ""), "err");
+      }
+
+      try {
+        const t = await apiJson("/chain/tokenomics", { method: "GET" });
+        $("chainEpoch").textContent = String(t.epoch ?? "0");
+        $("bootstrapMode").textContent = t.bootstrap_mode ? "true" : "false";
+        $("epochReward").textContent = String(t.total_epoch_reward ?? "—");
+        $("halvingEta").textContent = secondsToHuman(t.next_halving_in_seconds);
+      } catch (e) {
+        $("chainEpoch").textContent = "—";
+        $("bootstrapMode").textContent = "—";
+        $("epochReward").textContent = "—";
+        $("halvingEta").textContent = "—";
+        setMsg("chainMsg", (e.message || "Tokenomics unavailable"), "err");
       }
     }
 
-    async function refreshPools() {
-      const table = document.querySelector('#poolTable tbody');
-      const msg = document.getElementById('poolMsg');
-      table.innerHTML = '<tr><td colspan="3">Loading...</td></tr>';
-      try {
-        const res = await fetch('/rewards/pools');
-        const data = await res.json();
-        if (!res.ok) throw new Error(data.detail || 'Error fetching pools');
-        table.innerHTML = Object.entries(data).map(([pool, pct]) => `
-          <tr>
-            <td>${pool}</td>
-            <td>${(pct * 100).toFixed(2)}%</td>
-            <td>${(pct * 100).toFixed(2)} WEC</td>
-          </tr>
-        `).join('');
-      } catch (err) {
-        table.innerHTML = '<tr><td colspan="3">⚠️ Error</td></tr>';
-        msg.textContent = err.message;
-      }
-    }
+    async function refreshMetaAndPools(sess) {
+      $("tokenSymbol").textContent = "Loading…";
+      $("blockInterval").textContent = "Loading…";
+      $("blocksPerEpoch").textContent = "Loading…";
+      $("epochLength").textContent = "Loading…";
+      $("rewardsNotes").textContent = "—";
+      $("poolSplitList").textContent = "Loading…";
+      setMsg("metaMsg", "", "");
+      setMsg("poolMsg", "", "");
 
-    async function refreshHistory() {
-      const table = document.querySelector('#historyTable tbody');
-      const msg = document.getElementById('histMsg');
-      table.innerHTML = '<tr><td colspan="7">Loading...</td></tr>';
+      let meta = null;
       try {
-        const res = await fetch('/rewards/history');
-        const data = await res.json();
-        if (!res.ok) throw new Error(data.detail || 'Error fetching history');
-        if (!data.length) {
-          table.innerHTML = '<tr><td colspan="7">No reward history yet.</td></tr>';
+        meta = await apiJson("/rewards/meta", { method: "GET" });
+        $("tokenSymbol").textContent = String(meta.token_symbol ?? "WEC");
+        $("blockInterval").textContent = String(meta.block_interval_seconds ?? "—") + "s";
+        $("blocksPerEpoch").textContent = String(meta.blocks_per_epoch ?? "—");
+        $("epochLength").textContent = String(meta.epoch_length_seconds ?? "—") + "s";
+        $("rewardsNotes").textContent = meta.notes ? String(meta.notes) : "—";
+      } catch (e) {
+        $("tokenSymbol").textContent = "—";
+        $("blockInterval").textContent = "—";
+        $("blocksPerEpoch").textContent = "—";
+        $("epochLength").textContent = "—";
+        setMsg("metaMsg", e.message || "Failed to load /rewards/meta", "err");
+      }
+
+      // Membership (best-effort) from /ledger/pools
+      let membership = {};
+      try {
+        const pools = await apiJson("/ledger/pools", { method: "GET" });
+        const byPool = pools && pools.pools ? pools.pools : {};
+        const me = sess && sess.user_id ? sess.user_id : "";
+        for (const [poolName, info] of Object.entries(byPool)) {
+          const members = (info && info.members) || [];
+          membership[poolName] = members.includes(me);
+        }
+      } catch {}
+
+      // Render split list
+      try {
+        const split = (meta && meta.pool_split_bps) ? meta.pool_split_bps : {};
+        const pools = (meta && meta.pools) ? meta.pools : Object.keys(split);
+
+        if (!pools || pools.length === 0) {
+          $("poolSplitList").innerHTML = '<div class="muted">No pool split reported.</div>';
+          setMsg("poolMsg", "No pools", "");
           return;
         }
-        table.innerHTML = data.map(e => `
-          <tr>
-            <td>${e.epoch}</td>
-            <td>${e.validators}</td>
-            <td>${e.jurors}</td>
-            <td>${e.operators}</td>
-            <td>${e.creators}</td>
-            <td>${e.treasury}</td>
-            <td>${new Date(e.timestamp*1000).toLocaleString()}</td>
-          </tr>
-        `).join('');
-      } catch (err) {
-        table.innerHTML = '<tr><td colspan="7">⚠️ Error</td></tr>';
-        msg.textContent = err.message;
+
+        const rows = pools.map((name) => {
+          const bps = Number(split[name] ?? 0);
+          const pct = (bps / 100).toFixed(2) + "%";
+          const active = membership[name] ? " • you’re a member" : "";
+          return `<div>• <span style="color:var(--accent)">${name}</span> — ${pct}<span class="muted">${active}</span></div>`;
+        }).join("");
+
+        $("poolSplitList").innerHTML = rows;
+        setMsg("poolMsg", `${pools.length} pool(s)`, "ok");
+      } catch (e) {
+        $("poolSplitList").innerHTML = '<div class="muted">Unable to render pool split.</div>';
+        setMsg("poolMsg", e.message || "Pool split unavailable", "err");
       }
     }
 
-    // Auto-init on load
-    refreshEpoch();
-    refreshPools();
-    refreshHistory();
+    async function loadPendingFor(userId) {
+      $("pendingUser").textContent = userId || "—";
+      $("pendingTotal").textContent = "Loading…";
+      $("pendingLastUpdate").textContent = "Loading…";
+      $("pendingList").textContent = "Loading…";
+      setMsg("pendingMsg", "", "");
+
+      if (!userId) {
+        $("pendingTotal").textContent = "—";
+        $("pendingLastUpdate").textContent = "—";
+        $("pendingList").innerHTML = '<div class="muted">No user selected.</div>';
+        setMsg("pendingMsg", "Missing user_id", "err");
+        return;
+      }
+
+      try {
+        const data = await apiJson(`/rewards/pending/${encodeURIComponent(userId)}`, { method: "GET" });
+        const total = Number(data.total_pending ?? 0);
+        const last = data.last_update;
+
+        $("pendingTotal").textContent = String(total);
+        $("pendingLastUpdate").textContent = (last == null) ? "—" : String(last);
+
+        const list = Array.isArray(data.pending) ? data.pending : [];
+        if (list.length === 0) {
+          $("pendingList").innerHTML = '<div class="muted">No pending entries for this user.</div>';
+          setMsg("pendingMsg", "0 entries", "");
+          return;
+        }
+
+        $("pendingList").innerHTML = list.map((r) => {
+          const pool = r.pool || "(pool?)";
+          const amt = (r.amount != null) ? String(r.amount) : "0";
+          const src = r.source ? String(r.source) : "";
+          const ts = (r.created_at != null) ? String(r.created_at) : "";
+          return `<div>• <span style="color:var(--accent)">${pool}</span> — ${amt} <span class="muted">${src}${ts ? (" · " + ts) : ""}</span></div>`;
+        }).join("");
+
+        setMsg("pendingMsg", `${list.length} entry(s)`, "ok");
+      } catch (e) {
+        $("pendingTotal").textContent = "—";
+        $("pendingLastUpdate").textContent = "—";
+        $("pendingList").innerHTML = '<div class="muted">Failed to load pending rewards.</div>';
+        setMsg("pendingMsg", e.message || "Failed to query pending rewards", "err");
+      }
+    }
+
+    async function refreshAll(sess) {
+      await refreshChain();
+      await refreshMetaAndPools(sess);
+      // default pending user: session user unless override is set
+      const override = ($("userOverride").value || "").trim();
+      await loadPendingFor(override || sess.user_id);
+    }
+
+    document.addEventListener("DOMContentLoaded", async () => {
+      const sess = await loadSessionOrRedirect();
+      if (!sess) return;
+
+      $("btnRefreshAll").addEventListener("click", () => refreshAll(sess));
+      $("btnLoadPending").addEventListener("click", () => {
+        const override = ($("userOverride").value || "").trim();
+        loadPendingFor(override || sess.user_id);
+      });
+
+      await refreshAll(sess);
+    });
   </script>
-  <script src="/static/footer.js"></script>
-<!-- CLIENT-ERROR-LISTENER -->
-<script>
-window.addEventListener('error', e => {
-  try { fetch('/content/client-log', {method:'POST', headers:{'content-type':'application/json'}, body: JSON.stringify({ msg:String(e.message||''), file:e.filename, line:e.lineno, col:e.colno })}); } catch(_) {}
-});
-window.addEventListener('unhandledrejection', e => {
-  try { fetch('/content/client-log', {method:'POST', headers:{'content-type':'application/json'}, body: JSON.stringify({ promise:true, reason:String(e.reason||'') })}); } catch(_) {}
-});
-</script>
-
-
-<footer class="weall-footer">
-  <span>© WeAll</span>
-  &nbsp;•&nbsp;<a href="/frontend/privacy.html">Privacy</a>
-  &nbsp;•&nbsp;<a href="/frontend/terms.html">Terms</a>
-</footer>
-
 </body>
 </html>

@@ -1,575 +1,554 @@
-// weall_node/frontend/tiktok.js
-// Vertical home feed + composer + basic nav
+/* weall_node/frontend/tiktok.js
+ *
+ * Spec-aligned PoH gates:
+ * - Tier 1: view only
+ * - Tier 2: like + comment
+ * - Tier 3: post content + media uploads
+ *
+ * Backend endpoints (content.py):
+ * - GET    /content/feed?scope=global|group&group_id=...&limit=...
+ * - POST   /content/posts
+ * - POST   /content/upload   (multipart)
+ * - POST   /content/posts/{id}/like
+ * - DELETE /content/posts/{id}/like
+ * - GET    /content/posts/{id}/comments
+ * - POST   /content/posts/{id}/comments
+ */
 
-(function () {
+(() => {
   "use strict";
 
-  // ---------- Helpers ----------
+  const $ = (sel) => document.querySelector(sel);
+  const $$ = (sel) => Array.from(document.querySelectorAll(sel));
 
-  function $(id) {
-    return document.getElementById(id);
+  // ---------- DOM mapping (defensive) ----------
+  function dom() {
+    const feed =
+      $("#feedList") || $("#feed") || $("#posts") || $(".feed") || $(".tiktok-feed");
+
+    const postText =
+      $("#postText") || $("#text") || $("#newPostText") || $("textarea[name='text']") || $("textarea");
+
+    const postBtn =
+      $("#btnPost") || $("#postBtn") || $("#submitPost") || $("button[data-action='post']");
+
+    const postStatus =
+      $("#postStatus") || $("#status") || $(".post-status") || null;
+
+    const feedStatus =
+      $("#feedStatus") || $("#feedMsg") || $(".feed-status") || null;
+
+    const feedMeta =
+      $("#feedMeta") || $(".feed-meta") || null;
+
+    const scope =
+      $("#postScope") || $("#scope") || $("select[name='scope']") || null;
+
+    const groupId =
+      $("#postGroupId") || $("#groupId") || $("input[name='group_id']") || null;
+
+    const file =
+      $("#postFile") || $("#file") || $("input[type='file']") || null;
+
+    const refresh =
+      $("#btnRefresh") || $("#refreshBtn") || $("button[data-action='refresh']") || null;
+
+    return { feed, postText, postBtn, postStatus, feedStatus, feedMeta, scope, groupId, file, refresh };
   }
 
-  function apiFetch(path, opts) {
-    opts = opts || {};
-    if (!opts.headers) opts.headers = {};
-    // default JSON for non-FormData POSTs
-    if (opts.body && !(opts.body instanceof FormData)) {
-      opts.headers["Content-Type"] =
-        opts.headers["Content-Type"] || "application/json";
-    }
-    opts.credentials = opts.credentials || "include";
-    var url = path;
-    if (path[0] === "/") {
-      url = path;
-    }
-    return fetch(url, opts);
+  function setElText(el, text) {
+    if (!el) return;
+    el.textContent = text || "";
   }
 
-  function getCurrentUser() {
-    // 1) Prefer Session helper from session.js
+  function setStatus(el, msg, kind = "") {
+    if (!el) return;
+    el.textContent = msg || "";
+    el.classList.remove("ok", "err", "warn");
+    if (kind) el.classList.add(kind);
+  }
+
+  function apiBase() {
+    return (window.ENV && (window.ENV.VITE_API_BASE || window.ENV.API_BASE)) || "";
+  }
+
+  // ---------- session / tier ----------
+  async function getSessionSafe() {
     try {
-      if (window.Session && typeof Session.get === "function") {
-        var sess = Session.get();
-        if (sess && sess.account) {
-          return { id: sess.account, email: sess.account };
-        }
+      if (window.weallAuth && typeof window.weallAuth.getSession === "function") {
+        return await window.weallAuth.getSession();
       }
-    } catch (e) {
-      console.warn("Session.get failed in getCurrentUser:", e);
-    }
-
-    // 2) Fallback to various localStorage keys from older builds
+    } catch {}
     try {
-      var acct =
-        (window.localStorage &&
-          (localStorage.getItem("wa.account") ||
-            localStorage.getItem("weall.account") ||
-            localStorage.getItem("weall_user") ||
-            localStorage.getItem("weall_acct"))) ||
-        null;
-
-      if (acct) {
-        acct = String(acct).trim();
-        if (acct) return { id: acct, email: acct };
+      if (typeof window.weallGetSession === "function") {
+        return await window.weallGetSession();
       }
-    } catch (e2) {
-      console.warn("localStorage fallback failed in getCurrentUser:", e2);
-    }
-
-    // 3) No session detected
+    } catch {}
     return null;
   }
 
-  function timeAgo(ts) {
-    if (!ts) return "";
-    var now = Math.floor(Date.now() / 1000);
-    if (ts > 1e12) {
-      // ms → s
-      ts = Math.floor(ts / 1000);
+  async function getTierSafe() {
+    // Prefer weallAuth.getPohMe() if present
+    try {
+      if (window.weallAuth && typeof window.weallAuth.getPohMe === "function") {
+        const me = await window.weallAuth.getPohMe();
+        return Number(me && me.tier) || 0;
+      }
+    } catch {}
+
+    // Fallback: request /poh/me if your backend exposes it
+    try {
+      const sess = await getSessionSafe();
+      if (!sess || !sess.user_id) return 0;
+      const res = await fetch(apiBase() + "/poh/me", {
+        method: "GET",
+        credentials: "include",
+        headers: { "Accept": "application/json", "X-WeAll-User": sess.user_id },
+      });
+      if (!res.ok) return 0;
+      const data = await res.json();
+      return Number(data && data.tier) || 0;
+    } catch {}
+
+    return 0;
+  }
+
+  async function jsonFetch(path, opts = {}) {
+    const sess = await getSessionSafe();
+    const headers = Object.assign({ Accept: "application/json" }, opts.headers || {});
+    if (sess && sess.user_id) headers["X-WeAll-User"] = sess.user_id;
+
+    const init = Object.assign({ credentials: "include" }, opts, { headers });
+    if (init.body && typeof init.body !== "string") {
+      init.headers["Content-Type"] = init.headers["Content-Type"] || "application/json";
+      init.body = JSON.stringify(init.body);
     }
-    var diff = now - ts;
-    if (diff < 5) return "now";
-    if (diff < 60) return diff + "s";
-    var m = Math.floor(diff / 60);
-    if (m < 60) return m + "m";
-    var h = Math.floor(m / 60);
-    if (h < 48) return h + "h";
-    var d = Math.floor(h / 24);
-    if (d < 365) return d + "d";
-    var y = Math.floor(d / 365);
-    return y + "y";
-  }
 
-  function ipfsToHttp(url) {
-    if (!url) return null;
-    if (url.indexOf("ipfs://") === 0) {
-      var cid = url.slice("ipfs://".length);
-      return "/ipfs/" + cid;
+    const res = await fetch(apiBase() + path, init);
+    let data = null;
+    try { data = await res.json(); } catch { data = null; }
+
+    if (!res.ok) {
+      const msg = (data && (data.detail || data.error || data.message)) || `HTTP ${res.status}`;
+      throw new Error(msg);
     }
-    return url;
+    return data;
   }
 
-  function showToast(msg, kind) {
-    kind = kind || "info";
-    var toast = $("toast");
-    if (!toast) {
-      toast = document.createElement("div");
-      toast.id = "toast";
-      document.body.appendChild(toast);
+  async function uploadFile(file) {
+    const sess = await getSessionSafe();
+    const headers = {};
+    if (sess && sess.user_id) headers["X-WeAll-User"] = sess.user_id;
+
+    const form = new FormData();
+    form.append("file", file);
+
+    const res = await fetch(apiBase() + "/content/upload", {
+      method: "POST",
+      credentials: "include",
+      headers,
+      body: form,
+    });
+
+    let data = null;
+    try { data = await res.json(); } catch { data = null; }
+    if (!res.ok) {
+      const msg = (data && (data.detail || data.error || data.message)) || `HTTP ${res.status}`;
+      throw new Error(msg);
     }
-    toast.textContent = msg || "";
-    toast.className = "toast " + kind;
-    toast.style.opacity = "1";
-    setTimeout(function () {
-      toast.style.opacity = "0";
-    }, 2600);
+    return data;
   }
 
-  function closeSheet() {
-    var sheet = $("waSheet");
-    if (sheet) sheet.style.display = "none";
-    var overlay = $("waOverlay");
-    if (overlay) overlay.style.display = "none";
+  // ---------- scope helpers ----------
+  function normalizeScope(v) {
+    const s = String(v || "").trim().toLowerCase();
+    if (s === "public") return "global";
+    if (s === "global") return "global";
+    if (s === "group") return "group";
+    return "global";
   }
 
-  function openSheet() {
-    var sheet = $("waSheet");
-    if (sheet) sheet.style.display = "block";
-    var overlay = $("waOverlay");
-    if (overlay) overlay.style.display = "block";
+  function currentScopeAndGroup() {
+    const d = dom();
+    const scope = normalizeScope(d.scope ? d.scope.value : "global");
+    const group_id = d.groupId ? String(d.groupId.value || "").trim() : "";
+    return { scope, group_id: group_id || null };
   }
 
-  function setSheetMode(mode) {
-    var textMode = $("waSheetTextMode");
-    var videoMode = $("waSheetVideoMode");
-    if (textMode) textMode.style.display = mode === "text" ? "block" : "none";
-    if (videoMode) videoMode.style.display = mode === "video" ? "block" : "none";
+  // ---------- rendering ----------
+  function esc(s) {
+    return String(s ?? "")
+      .replaceAll("&", "&amp;").replaceAll("<", "&lt;").replaceAll(">", "&gt;")
+      .replaceAll('"', "&quot;").replaceAll("'", "&#039;");
   }
 
-  // ---------- DOM builders ----------
+  function ensureCommentUI(postEl) {
+    let box = postEl.querySelector(".weall-comments");
+    if (box) return box;
 
-  function renderEmptyState() {
-    var root = $("waFeed");
-    if (!root) return;
-    root.innerHTML = "";
-    var div = document.createElement("div");
-    div.className = "wa-empty";
-    div.textContent = "No posts yet. Be the first to share something.";
-    root.appendChild(div);
+    box = document.createElement("div");
+    box.className = "weall-comments";
+    box.style.marginTop = "10px";
+    box.style.paddingTop = "10px";
+    box.style.borderTop = "1px solid rgba(34,40,54,.7)";
+
+    box.innerHTML = `
+      <div class="muted" style="font-size:12px;margin-bottom:6px;">Comments</div>
+      <div class="weall-comment-list" style="font-size:13px;"></div>
+      <div class="weall-comment-compose" style="display:flex;gap:8px;margin-top:8px;">
+        <input class="weall-comment-input" type="text" placeholder="Write a comment…" style="flex:1;min-width:0;">
+        <button class="weall-comment-send">Send</button>
+      </div>
+      <div class="weall-comment-status muted" style="font-size:12px;margin-top:6px;"></div>
+    `;
+
+    postEl.appendChild(box);
+    return box;
   }
 
-  function renderFeed(items) {
-    var root = $("waFeed");
-    if (!root) return;
-    root.innerHTML = "";
-    if (!items || items.length === 0) {
-      renderEmptyState();
+  function renderMedia(media) {
+    if (!Array.isArray(media) || media.length === 0) return "";
+    const parts = [];
+
+    for (const m of media) {
+      const cid = m && m.cid;
+      if (!cid) continue;
+      const mime = String(m.mime || "");
+      const url = `${apiBase()}/content/media/${encodeURIComponent(cid)}`;
+
+      if (mime.startsWith("image/")) {
+        parts.push(`<img src="${url}" alt="media" style="max-width:100%;border-radius:12px;margin-top:8px;border:1px solid rgba(34,40,54,.7);" />`);
+      } else if (mime.startsWith("video/")) {
+        parts.push(`<video controls src="${url}" style="max-width:100%;border-radius:12px;margin-top:8px;border:1px solid rgba(34,40,54,.7);"></video>`);
+      } else {
+        parts.push(`<a href="${url}" class="muted" style="display:inline-block;margin-top:8px;">Download attachment (${esc(mime || "file")})</a>`);
+      }
+    }
+
+    return parts.join("");
+  }
+
+  function renderPostCard(post, tier) {
+    const id = post.id;
+    const author = post.author || "@unknown";
+    const text = post.text || "";
+    const scope = post.scope || "global";
+    const gid = post.group_id || null;
+
+    const likeCount = Number(post.like_count || 0);
+    const commentCount = Number(post.comment_count || 0);
+    const meLiked = !!post.me_liked;
+
+    const canLikeComment = tier >= 2;
+    const likeLabel = meLiked ? "♥ Liked" : "♡ Like";
+
+    const card = document.createElement("article");
+    card.className = "card";
+    card.style.marginBottom = "10px";
+    card.dataset.postId = id;
+
+    card.innerHTML = `
+      <div style="display:flex;justify-content:space-between;gap:10px;align-items:flex-start;">
+        <div style="font-size:13px;">
+          <span style="color:var(--accent);font-weight:700;">${esc(author)}</span>
+          <span class="muted"> · ${esc(scope)}${gid ? " · group:" + esc(String(gid).slice(0, 8)) : ""}</span>
+        </div>
+        <div class="muted" style="font-size:12px;">id:${esc(String(id).slice(0, 8))}</div>
+      </div>
+
+      <div style="white-space:pre-wrap;font-size:14px;margin-top:8px;">${esc(text)}</div>
+      ${renderMedia(post.media)}
+
+      <div style="display:flex;gap:10px;flex-wrap:wrap;align-items:center;margin-top:10px;">
+        <button class="weall-like-btn" ${canLikeComment ? "" : "disabled"}>${likeLabel} (${likeCount})</button>
+        <button class="weall-comment-btn" ${canLikeComment ? "" : "disabled"}>💬 Comments (${commentCount})</button>
+        <span class="muted" style="font-size:12px;">${canLikeComment ? "" : "Tier 2 required to like/comment."}</span>
+      </div>
+    `;
+
+    return card;
+  }
+
+  // ---------- feed ----------
+  async function loadFeed() {
+    const d = dom();
+    if (!d.feed) {
+      setStatus(d.feedStatus, "tiktok.js: feed container not found.", "warn");
       return;
     }
 
-    items.forEach(function (post) {
-      var slide = renderPost(post);
-      root.appendChild(slide);
+    const sess = await getSessionSafe();
+    const tier = await getTierSafe();
+
+    const { scope, group_id } = currentScopeAndGroup();
+
+    // Tier 1 is view-only, but global viewing can be anonymous; group viewing requires auth tier>=1.
+    if (scope === "group") {
+      if (!sess || !sess.user_id) {
+        d.feed.innerHTML = `<div class="muted">Sign in to view group feeds.</div>`;
+        setStatus(d.feedStatus, "Group feed requires sign-in (Tier 1+).", "warn");
+        setElText(d.feedMeta, "");
+        return;
+      }
+      if (tier < 1) {
+        d.feed.innerHTML = `<div class="muted">Tier 1 required to view group feeds.</div>`;
+        setStatus(d.feedStatus, "Tier 1 required for group feeds.", "warn");
+        setElText(d.feedMeta, "");
+        return;
+      }
+      if (!group_id) {
+        d.feed.innerHTML = `<div class="muted">Enter a group_id to view group feed.</div>`;
+        setStatus(d.feedStatus, "group_id required when scope=group.", "warn");
+        setElText(d.feedMeta, "");
+        return;
+      }
+    }
+
+    setStatus(d.feedStatus, "Loading feed…");
+    d.feed.innerHTML = `<div class="muted">Loading…</div>`;
+
+    let url = `/content/feed?scope=${encodeURIComponent(scope)}&limit=50`;
+    if (scope === "group") url += `&group_id=${encodeURIComponent(group_id)}`;
+
+    try {
+      const data = await jsonFetch(url, { method: "GET" });
+      const posts = (data && data.posts) || [];
+
+      d.feed.innerHTML = "";
+      if (!posts.length) {
+        d.feed.innerHTML = `<div class="muted">No posts yet.</div>`;
+        setElText(d.feedMeta, "0 posts");
+        setStatus(d.feedStatus, "Feed loaded.", "ok");
+        return;
+      }
+
+      for (const p of posts) d.feed.appendChild(renderPostCard(p, tier));
+
+      wirePostActions(tier);
+
+      setElText(d.feedMeta, `${posts.length} posts`);
+      setStatus(d.feedStatus, "Feed loaded.", "ok");
+    } catch (e) {
+      console.error("loadFeed error:", e);
+      d.feed.innerHTML = `<div class="muted">Failed to load feed.</div>`;
+      setStatus(d.feedStatus, e.message || "Failed to load feed.", "err");
+      setElText(d.feedMeta, "");
+    }
+  }
+
+  // ---------- like/comment actions ----------
+  function wirePostActions(tier) {
+    const canLikeComment = tier >= 2;
+
+    $$(".weall-like-btn").forEach((btn) => {
+      btn.onclick = async () => {
+        if (!canLikeComment) return;
+        const card = btn.closest("article[data-post-id]");
+        const postId = card && card.dataset.postId;
+        if (!postId) return;
+
+        try {
+          const likedNow = btn.textContent.startsWith("♥");
+          // Toggle
+          let res;
+          if (likedNow) {
+            res = await jsonFetch(`/content/posts/${encodeURIComponent(postId)}/like`, { method: "DELETE" });
+          } else {
+            res = await jsonFetch(`/content/posts/${encodeURIComponent(postId)}/like`, { method: "POST" });
+          }
+
+          // Update label in-place
+          const count = Number(res.like_count || 0);
+          const meLiked = !!res.me_liked;
+          btn.textContent = `${meLiked ? "♥ Liked" : "♡ Like"} (${count})`;
+        } catch (e) {
+          console.error("like toggle error:", e);
+          alert(`Like failed: ${e.message}`);
+        }
+      };
+    });
+
+    $$(".weall-comment-btn").forEach((btn) => {
+      btn.onclick = async () => {
+        if (!canLikeComment) return;
+        const card = btn.closest("article[data-post-id]");
+        const postId = card && card.dataset.postId;
+        if (!postId) return;
+
+        const ui = ensureCommentUI(card);
+        const list = ui.querySelector(".weall-comment-list");
+        const input = ui.querySelector(".weall-comment-input");
+        const send = ui.querySelector(".weall-comment-send");
+        const status = ui.querySelector(".weall-comment-status");
+
+        // Toggle show/hide
+        const isHidden = ui.style.display === "none";
+        ui.style.display = isHidden ? "" : "none";
+        if (!isHidden) return;
+
+        // Load comments
+        try {
+          status.textContent = "Loading comments…";
+          const data = await jsonFetch(`/content/posts/${encodeURIComponent(postId)}/comments`, { method: "GET" });
+          const comments = (data && data.comments) || [];
+          list.innerHTML = comments.length
+            ? comments.map(c => `<div style="margin:6px 0;"><span style="color:var(--accent)">${esc(c.author || "@unknown")}</span>: ${esc(c.text || "")}</div>`).join("")
+            : `<div class="muted">No comments yet.</div>`;
+          status.textContent = "";
+        } catch (e) {
+          console.error("load comments error:", e);
+          status.textContent = `Failed: ${e.message}`;
+        }
+
+        // Send comment
+        send.onclick = async () => {
+          const text = String(input.value || "").trim();
+          if (!text) return;
+
+          try {
+            send.disabled = true;
+            status.textContent = "Sending…";
+            const res = await jsonFetch(`/content/posts/${encodeURIComponent(postId)}/comments`, {
+              method: "POST",
+              body: { text },
+            });
+            const c = res.comment;
+            input.value = "";
+
+            // Append to list
+            if (list.innerHTML.includes("No comments yet")) list.innerHTML = "";
+            const line = document.createElement("div");
+            line.style.margin = "6px 0";
+            line.innerHTML = `<span style="color:var(--accent)">${esc(c.author || "@unknown")}</span>: ${esc(c.text || "")}`;
+            list.appendChild(line);
+
+            status.textContent = "";
+          } catch (e) {
+            console.error("send comment error:", e);
+            status.textContent = `Failed: ${e.message}`;
+          } finally {
+            send.disabled = false;
+          }
+        };
+      };
     });
   }
 
-  function renderPost(post) {
-    var el = document.createElement("article");
-    el.className = "wa-slide";
+  // ---------- composer gating + post ----------
+  async function applyComposerGates() {
+    const d = dom();
+    const tier = await getTierSafe();
 
-    var body = document.createElement("div");
-    body.className = "wa-slide-body";
+    // Post: Tier 3+
+    if (d.postBtn) d.postBtn.disabled = tier < 3;
+    if (d.postText) d.postText.disabled = tier < 3;
+    if (d.file) d.file.disabled = tier < 3;
+    if (d.scope) d.scope.disabled = tier < 1; // scope change ok; but group view still requires auth
+    if (d.groupId) d.groupId.disabled = tier < 1;
 
-    var header = document.createElement("header");
-    header.className = "wa-slide-header";
-
-    var left = document.createElement("div");
-    left.className = "wa-slide-author";
-    var avatar = document.createElement("div");
-    avatar.className = "wa-avatar";
-    left.appendChild(avatar);
-
-    var at = document.createElement("div");
-    at.className = "wa-author-text";
-
-    var name = document.createElement("div");
-    name.className = "wa-author-name";
-    var handle = post.author || post.user_id || "anon";
-    if (handle && handle.indexOf("@") !== 0) handle = "@" + handle;
-    name.textContent = handle;
-
-    var meta = document.createElement("div");
-    meta.className = "wa-author-meta";
-
-    var tspan = document.createElement("span");
-    tspan.className = "wa-time";
-    tspan.textContent = timeAgo(post.created_at || post.timestamp || post.ts);
-    meta.appendChild(tspan);
-
-    var pohTier = post.poh_tier || post.tier || null;
-    if (pohTier) {
-      var badge = document.createElement("span");
-      badge.className = "wa-poh tier" + pohTier;
-      badge.textContent = "PoH " + pohTier;
-      meta.appendChild(badge);
-    }
-
-    at.appendChild(meta);
-    left.appendChild(at);
-
-    var right = document.createElement("div");
-    right.className = "wa-slide-menu";
-    var dotBadge = document.createElement("div");
-    dotBadge.className = "wa-badge-small";
-    dotBadge.textContent = (post.group || "Public").slice(0, 6);
-    right.appendChild(dotBadge);
-
-    header.appendChild(left);
-    header.appendChild(right);
-
-    var content = document.createElement("div");
-    content.className = "wa-slide-content";
-
-    var text = (post.text || post.caption || "").trim();
-    if (text) {
-      var p = document.createElement("p");
-      p.className = "wa-slide-text";
-      p.textContent = text;
-      content.appendChild(p);
-    }
-
-    var mediaUrl = post.media_url || post.image_url || post.video_url || null;
-    var contentType = post.content_type || post.type || "";
-
-    if (mediaUrl) {
-      var resolved = ipfsToHttp(mediaUrl);
-      if (contentType === "video" || /\.mp4($|\?)/.test(resolved || "")) {
-        var videoWrap = document.createElement("div");
-        videoWrap.className = "wa-slide-video-wrap";
-        var video = document.createElement("video");
-        video.className = "wa-slide-video";
-        video.src = resolved;
-        video.controls = true;
-        video.playsInline = true;
-        videoWrap.appendChild(video);
-        content.appendChild(videoWrap);
+    if (d.postStatus) {
+      if (tier < 3) {
+        setStatus(d.postStatus, "Tier 3 required to post.", "warn");
       } else {
-        var imgWrap = document.createElement("div");
-        imgWrap.className = "wa-slide-media-wrap";
-        var img = document.createElement("img");
-        img.className = "wa-slide-image";
-        img.src = resolved;
-        img.alt = "Post media";
-        imgWrap.appendChild(img);
-        content.appendChild(imgWrap);
+        setStatus(d.postStatus, "", "");
       }
     }
-
-    body.appendChild(header);
-    body.appendChild(content);
-
-    var footer = document.createElement("footer");
-    footer.className = "wa-slide-footer";
-
-    var stats = document.createElement("div");
-    stats.className = "wa-stats";
-    var likes = document.createElement("span");
-    likes.textContent = (post.likes || 0) + " likes";
-    var comments = document.createElement("span");
-    comments.textContent = (post.comments || 0) + " comments";
-    stats.appendChild(likes);
-    stats.appendChild(comments);
-
-    var actions = document.createElement("div");
-    actions.className = "wa-actions";
-    var likeBtn = document.createElement("button");
-    likeBtn.className = "wa-action";
-    likeBtn.textContent = "♡";
-    likeBtn.onclick = function () {
-      showToast("Likes are coming soon.", "info");
-    };
-    var commentBtn = document.createElement("button");
-    commentBtn.className = "wa-action";
-    commentBtn.textContent = "💬";
-    commentBtn.onclick = function () {
-      showToast("Comments are coming soon.", "info");
-    };
-    actions.appendChild(likeBtn);
-    actions.appendChild(commentBtn);
-
-    footer.appendChild(stats);
-    footer.appendChild(actions);
-
-    el.appendChild(body);
-    el.appendChild(footer);
-
-    return el;
   }
 
-  function loadFeed() {
-    apiFetch("/content/feed", {
-      method: "GET",
-    })
-      .then(function (res) {
-        if (!res.ok) throw new Error("feed " + res.status);
-        return res.json();
-      })
-      .then(function (data) {
-        var items = data.items || data.posts || data.feed || [];
-        renderFeed(items);
-      })
-      .catch(function (err) {
-        console.warn("failed to load feed:", err);
-        showToast("Couldn't load feed.", "err");
-      });
-  }
+  async function createPost() {
+    const d = dom();
+    const tier = await getTierSafe();
+    if (tier < 3) {
+      setStatus(d.postStatus, "Tier 3 required to post.", "warn");
+      return;
+    }
 
+    // Use your existing auth helper if present (keeps UX consistent)
+    if (window.weallAuth && typeof window.weallAuth.require === "function") {
+      const ok = await window.weallAuth.require({ minTier: 3, redirectToLogin: "/frontend/login.html" });
+      if (!ok) return;
+    }
 
-  // ---------- Top bar (user + PoH) ----------
+    const sess = await getSessionSafe();
+    if (!sess || !sess.user_id) {
+      window.location.href = "/frontend/login.html";
+      return;
+    }
 
-  function hydrateTopBar() {
-    var topUserEl = $("waTopUser");
-    var topPohEl = $("waTopPoh");
+    const text = String(d.postText && d.postText.value || "").trim();
+    if (!text) {
+      alert("Write something first.");
+      return;
+    }
 
-    var user = getCurrentUser();
-    if (topUserEl) {
-      if (user && (user.id || user.email)) {
-        topUserEl.textContent = user.id || user.email;
-      } else {
-        topUserEl.textContent = "Guest";
+    const { scope, group_id } = currentScopeAndGroup();
+    if (scope === "group" && !group_id) {
+      alert("group_id required when scope=group.");
+      return;
+    }
+
+    try {
+      if (d.postBtn) d.postBtn.disabled = true;
+      setStatus(d.postStatus, "Posting…");
+
+      const media = [];
+
+      // Optional media upload (Tier 3)
+      if (d.file && d.file.files && d.file.files[0]) {
+        setStatus(d.postStatus, "Uploading media…");
+        const up = await uploadFile(d.file.files[0]);
+        media.push({ cid: up.cid, mime: up.mime || null });
       }
-    }
 
-    if (!topPohEl) return;
-
-    apiFetch("/poh/me", { method: "GET" })
-      .then(function (res) {
-        if (!res.ok) throw new Error("poh " + res.status);
-        return res.json();
-      })
-      .then(function (poh) {
-        var tier = typeof poh.tier === "number" ? poh.tier : 0;
-        var status = (poh.status || "ok").toLowerCase();
-        var txt = "PoH: " + tier;
-        if (status !== "ok") {
-          txt += " · " + status;
-        }
-        topPohEl.textContent = txt;
-        topPohEl.dataset.status = status;
-      })
-      .catch(function () {
-        topPohEl.textContent = "PoH: –";
+      await jsonFetch("/content/posts", {
+        method: "POST",
+        body: {
+          author: sess.user_id,
+          text,
+          scope,
+          group_id: scope === "group" ? group_id : null,
+          media: media.length ? media : null,
+        },
       });
+
+      if (d.postText) d.postText.value = "";
+      if (d.file) d.file.value = "";
+
+      setStatus(d.postStatus, "Posted!", "ok");
+      await loadFeed();
+    } catch (e) {
+      console.error("createPost error:", e);
+      setStatus(d.postStatus, `Failed: ${e.message}`, "err");
+    } finally {
+      if (d.postBtn) d.postBtn.disabled = false;
+    }
   }
 
-  // ---------- Post composer ----------
+  // ---------- wire + boot ----------
+  function wire() {
+    const d = dom();
 
-  function promptTextPost() {
-    var text = window.prompt("Share something with WeAll:");
-    if (!text) return;
+    if (d.refresh) d.refresh.addEventListener("click", loadFeed);
+    if (d.postBtn) d.postBtn.addEventListener("click", (ev) => { ev.preventDefault(); createPost(); });
 
-    var user = getCurrentUser();
-    if (!user || (!user.id && !user.email)) {
-      alert("Please sign in before posting.");
-      return;
-    }
-    var author = user.id || user.email;
-
-    apiFetch("/content/post", {
-      method: "POST",
-      body: JSON.stringify({
-        author: author,
-        text: text,
-        tags: [],
-      }),
-    })
-      .then(function (res) {
-        if (!res.ok) throw new Error("post " + res.status);
-        return res.json().catch(function () {
-          return {};
-        });
-      })
-      .then(function () {
-        closeSheet();
-        return loadFeed();
-      })
-      .catch(function (err) {
-        console.warn("text post failed:", err);
-        showSheetError(
-          "We couldn't publish your post. This is a beta node; please try again."
-        );
-      });
-  }
-
-  function showSheetError(msg) {
-    var err = $("waSheetError");
-    if (!err) return;
-    err.textContent = msg || "";
-    err.style.display = msg ? "block" : "none";
-  }
-
-  function handleVideoFile(file) {
-    if (!file) return;
-    if (!file.type || file.type.indexOf("video/") !== 0) {
-      showSheetError("Please choose a video file.");
-      return;
-    }
-
-    var maxSizeBytes = 50 * 1024 * 1024; // 50 MB-ish for now
-    if (file.size > maxSizeBytes) {
-      showToast("Video is too large for this device. Try a shorter clip.", "warn");
-      return;
-    }
-
-    var user = getCurrentUser();
-    if (!user || (!user.id && !user.email)) {
-      showSheetError("Please sign in before uploading.");
-      return;
-    }
-    var author = user.id || user.email;
-
-    var fd = new FormData();
-    fd.append("file", file);
-    fd.append("visibility", "private");
-
-    apiFetch("/content/upload", {
-      method: "POST",
-      body: fd,
-    })
-      .then(function (res) {
-        if (!res.ok) throw new Error("upload " + res.status);
-        return res.json();
-      })
-      .then(function (body) {
-        var cid = body.cid || body.Hash || null;
-        var url = body.url || (cid ? "ipfs://" + cid : null);
-        if (!url) {
-          throw new Error("No media URL returned from upload.");
+    if (d.postText) {
+      d.postText.addEventListener("keydown", (ev) => {
+        if ((ev.ctrlKey || ev.metaKey) && ev.key === "Enter") {
+          ev.preventDefault();
+          createPost();
         }
-
-        return apiFetch("/content/post", {
-          method: "POST",
-          body: JSON.stringify({
-            author: author,
-            text: "Shared a short video",
-            tags: ["video"],
-            media_url: url,
-            content_type: "video",
-          }),
-        });
-      })
-      .then(function (res) {
-        if (!res.ok) throw new Error("post-with-video " + res.status);
-        return res.json().catch(function () {
-          return {};
-        });
-      })
-      .then(function () {
-        closeSheet();
-        return loadFeed();
-      })
-      .catch(function (err) {
-        console.warn("video upload/post failed:", err);
-        showSheetError(
-          "We couldn't upload your video yet. This is a beta node; please try again."
-        );
       });
+    }
+
+    if (d.scope) d.scope.addEventListener("change", loadFeed);
+    if (d.groupId) d.groupId.addEventListener("change", loadFeed);
   }
 
-  function wireComposer() {
-    var fab = $("waFab");
-    var overlay = $("waOverlay");
-    var closeBtn = $("waSheetClose");
-    var textBtn = $("waSheetText");
-    var videoBtn = $("waSheetVideo");
-    var textSubmit = $("waSheetTextSubmit");
-    var videoSubmit = $("waSheetVideoSubmit");
-    var videoInput = $("waVideoInput");
-
-    if (fab) {
-      fab.onclick = function () {
-        setSheetMode("text");
-        openSheet();
-      };
-    }
-    if (overlay) {
-      overlay.onclick = closeSheet;
-    }
-    if (closeBtn) {
-      closeBtn.onclick = closeSheet;
-    }
-    if (textBtn) {
-      textBtn.onclick = function () {
-        setSheetMode("text");
-      };
-    }
-    if (videoBtn) {
-      videoBtn.onclick = function () {
-        setSheetMode("video");
-      };
-    }
-    if (textSubmit) {
-      textSubmit.onclick = function () {
-        promptTextPost();
-      };
-    }
-    if (videoSubmit) {
-      videoSubmit.onclick = function () {
-        if (videoInput) {
-          videoInput.click();
-        }
-      };
-    }
-    if (videoInput) {
-      videoInput.onchange = function (ev) {
-        var file = ev.target && ev.target.files && ev.target.files[0];
-        handleVideoFile(file);
-        // reset so selecting the same file again still fires change
-        ev.target.value = "";
-      };
-    }
+  async function boot() {
+    wire();
+    await applyComposerGates();
+    await loadFeed();
   }
 
-  function wireNav() {
-    var profileBtn = $("waProfileBtn");
-    var homeBtn = $("waHomeBtn");
-    var tabGov = $("waTabGov");
-    var btnGov = $("waBtnGov");
-    var tabInbox = $("waTabInbox");
-    var btnInbox = $("waBtnInbox");
-    var tabProfile = $("waTabProfile");
-
-    if (profileBtn) {
-      profileBtn.onclick = function () {
-        window.location.href = "/frontend/profile.html";
-      };
-    }
-    if (homeBtn) {
-      homeBtn.onclick = function () {
-        window.location.href = "/frontend/tiktok.html";
-      };
-    }
-
-    function goGov() {
-      window.location.href = "/frontend/governance.html";
-    }
-    if (tabGov) tabGov.onclick = goGov;
-    if (btnGov) btnGov.onclick = goGov;
-
-    function goInbox() {
-      window.location.href = "/frontend/messaging.html";
-    }
-    if (tabInbox) tabInbox.onclick = goInbox;
-    if (btnInbox) btnInbox.onclick = goInbox;
-
-    if (tabProfile) {
-      tabProfile.onclick = function () {
-        window.location.href = "/frontend/profile.html";
-      };
-    }
-
-    wireComposer();
-
-    var shareBtn = $("waShareBtn");
-    if (shareBtn) {
-      shareBtn.onclick = function () {
-        showToast("Sharing is coming soon.", "warn");
-      };
-    }
-  }
-
-  // ---------- Init ----------
-
-  function init() {
-    wireNav();
-    hydrateTopBar();
-    loadFeed();
-  }
-
-  if (document.readyState === "loading") {
-    document.addEventListener("DOMContentLoaded", init);
-  } else {
-    init();
-  }
+  document.addEventListener("DOMContentLoaded", boot);
 })();

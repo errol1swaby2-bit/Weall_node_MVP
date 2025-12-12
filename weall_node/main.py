@@ -10,7 +10,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import RedirectResponse, Response
 from fastapi.staticfiles import StaticFiles
 
-from weall_node.routers.auth_session import router as auth_session_router
+from weall_node.routers.auth_session_apply import router as auth_session_router
 from weall_node.routers.auth_static import router as auth_router
 
 # ---------------------------------------------------------------------------
@@ -103,7 +103,7 @@ app = FastAPI(
 # Auth routers (session + dev email code)
 # ---------------------------------------------------------------------------
 
-app.include_router(auth_session_router)  # /auth/apply, /auth/check
+app.include_router(auth_session_router, prefix="/auth")   # /auth/apply, /auth/check
 app.include_router(auth_router)         # /auth/send-code, /auth/verify (dev / non-prod)
 
 

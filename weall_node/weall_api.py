@@ -29,6 +29,7 @@ from pydantic import BaseModel, Field
 from .settings import Settings
 from .redirect_legacy_frontend import router as legacy_frontend_router
 from .routers import auth_session_apply
+from .security import auth_db
 from .api.wallet import wallet_router, faucet_router
 
 from weall_node.weall_executor import executor
@@ -79,6 +80,14 @@ app = FastAPI(
 )
 
 # ------------------------------------------------------------
+@app.on_event("startup")
+async def _init_auth_db() -> None:
+    # Stable session storage: SQLite in DATA_DIR
+    from pathlib import Path as _Path
+    db_path = str(_Path(settings.DATA_DIR) / "weall_auth.db")
+    auth_db.init(db_path)
+    auth_db.purge_expired_sessions()
+
 # CORS
 # ------------------------------------------------------------
 
@@ -113,6 +122,16 @@ async def add_request_id(request: Request, call_next):
     response.headers["X-Request-ID"] = req_id
     return response
 
+
+@app.middleware("http")
+async def no_store_frontend(request: Request, call_next):
+    response = await call_next(request)
+    path = request.url.path or ""
+    if path.startswith("/frontend/") or path == "/env.js":
+        response.headers["Cache-Control"] = "no-store, max-age=0"
+        response.headers["Pragma"] = "no-cache"
+        response.headers["Expires"] = "0"
+    return response
 
 @app.middleware("http")
 async def add_security_headers(request: Request, call_next):
@@ -207,10 +226,6 @@ class EmailAuthStart(BaseModel):
 class EmailAuthVerify(BaseModel):
     email: str = Field(..., max_length=320)
     code: str = Field(..., min_length=4, max_length=12)
-
-
-class LoggingConf(BaseModel):
-    json: bool = False
 
 
 _AUTH_CODES: Dict[str, str] = {}

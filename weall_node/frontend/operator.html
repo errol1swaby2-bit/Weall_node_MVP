@@ -1,225 +1,386 @@
 <!DOCTYPE html>
 <html lang="en">
 <head>
-  <meta charset="UTF-8">
+  <meta charset="UTF-8" />
   <title>WeAll — Operator Dashboard</title>
-  <meta name="viewport" content="width=device-width, initial-scale=1">
-  <link rel="stylesheet" href="/frontend/style.css?v=1762461479">
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <meta http-equiv="Cache-Control" content="no-store" />
+  <link rel="stylesheet" href="/frontend/style.css" />
   <style>
-    body {
-      background:#000;
-      color:#fff;
-      font-family:Arial, sans-serif;
-      margin:0;
-      padding:0;
+    .op-shell { max-width: 980px; margin: 0 auto; padding: 18px 14px 40px; }
+    .op-head { display:flex; align-items:flex-end; justify-content:space-between; gap: 12px; margin: 10px 0 14px; }
+    .op-title { margin: 0; font-size: 18px; letter-spacing: .2px; }
+    .op-sub { margin: 4px 0 0; color: var(--muted); font-size: 13px; }
+    .op-actions { display:flex; gap: 8px; flex-wrap: wrap; justify-content:flex-end; }
+    .op-btn {
+      border: 1px solid var(--border);
+      background: rgba(17,21,27,.7);
+      color: var(--fg);
+      border-radius: 10px;
+      padding: 8px 10px;
+      cursor: pointer;
+      font-weight: 600;
+      font-size: 13px;
     }
-    header {
-      background:#111;
-      padding:12px 16px;
-      display:flex;
-      align-items:center;
-      justify-content:space-between;
+    .op-btn:hover { border-color: rgba(110,231,183,.6); }
+    .op-grid { display:grid; grid-template-columns: 1fr; gap: 12px; }
+    @media (min-width: 880px) { .op-grid { grid-template-columns: 1fr 1fr; } }
+    .op-card { background: var(--card); border: 1px solid var(--border); border-radius: 14px; padding: 12px; }
+    .op-card h3 { margin: 0 0 6px; font-size: 14px; color: var(--fg); }
+    .op-row { display:flex; align-items:center; justify-content:space-between; gap: 10px; padding: 6px 0; border-bottom: 1px solid rgba(34,40,54,.7); }
+    .op-row:last-child { border-bottom: 0; }
+    .op-k { color: var(--muted); font-size: 12px; }
+    .op-v { color: var(--fg); font-size: 12px; text-align:right; }
+    .op-pill {
+      display:inline-flex; align-items:center; gap: 8px;
+      border: 1px solid var(--border);
+      background: rgba(17,21,27,.55);
+      border-radius: 999px;
+      padding: 6px 10px;
+      font-size: 12px;
+      color: var(--muted);
+      max-width: 100%;
+      overflow: hidden;
+      text-overflow: ellipsis;
+      white-space: nowrap;
     }
-    header h2 { margin:0; font-size:1.2em; }
-    header a {
-      color:#2ecc71;
-      text-decoration:none;
-      font-weight:bold;
-      font-size:0.9em;
+    .op-dot { width: 10px; height: 10px; border-radius: 999px; background: var(--danger); flex: 0 0 auto; }
+    .op-dot.ok { background: var(--accent); }
+    .op-dot.warn { background: #fbbf24; }
+    .op-dot.fail { background: var(--danger); }
+    .op-list {
+      max-height: 240px;
+      overflow: auto;
+      background: rgba(0,0,0,.25);
+      border: 1px solid rgba(34,40,54,.7);
+      border-radius: 12px;
+      padding: 10px;
+      font-size: 12px;
+      color: var(--fg);
     }
-    .container {
-      max-width:800px;
-      margin:auto;
-      padding:20px;
+    .op-list .muted { color: var(--muted); }
+    .op-msg { margin-top: 10px; font-size: 12px; color: var(--muted); }
+    .op-msg.ok { color: var(--accent); }
+    .op-msg.err { color: var(--danger); }
+    footer.weall-footer {
+      margin-top: 18px;
+      border-top: 1px solid rgba(34,40,54,.8);
+      padding: 14px 2px 0;
+      font-size: 12px;
+      color: var(--muted);
+      text-align: center;
     }
-    .card {
-      background:#111;
-      border-radius:12px;
-      padding:16px;
-      margin-bottom:16px;
-      box-shadow:0 0 5px #222;
-    }
-    h3 { color:#2ecc71; margin-top:0; }
-    .stat { display:flex; justify-content:space-between; margin-bottom:6px; }
-    .btn {
-      display:inline-block;
-      background:#2ecc71;
-      color:#000;
-      border:none;
-      border-radius:8px;
-      padding:8px 14px;
-      font-weight:bold;
-      cursor:pointer;
-    }
-    .btn.small { padding:6px 10px; font-size:0.9em; }
-    .btn:hover { background:#27ae60; }
-    .status-dot {
-      width:10px;
-      height:10px;
-      border-radius:50%;
-      display:inline-block;
-      margin-right:6px;
-    }
-    .ok { background:#2ecc71; }
-    .fail { background:#e74c3c; }
-    .neutral { background:#999; }
-    .scroll-list {
-      max-height:200px;
-      overflow-y:auto;
-      font-size:0.9em;
-      background:#000;
-      border-radius:8px;
-      padding:10px;
-      border:1px solid #222;
-    }
+    footer.weall-footer a { color: var(--muted); text-decoration: none; }
+    footer.weall-footer a:hover { text-decoration: underline; color: var(--fg); }
   </style>
-  <script src="env.js"></script>
-  <script src="api_shim.js"></script>
 </head>
+
 <body>
-<div id="toast" role="status" aria-live="polite"></div>
-<script>
-(async () => {
-  const acct = localStorage.getItem('weall.account');
-  if (!acct) return location.href = '/frontend/login.html';
-  const r = await fetch(`/poh/status?user_id=${encodeURIComponent(acct)}`);
-  const s = await r.json();
-  const tier = (s.tier ?? s.poh_level ?? 0);
-  if (tier < 3) location.href = '/frontend/verify.html?reason=tier3_required';
-})();
-</script>
+  <div id="weall_nav"></div>
 
-  <header>
-    <h2>Operator Dashboard</h2>
-    <a href="index.html">← Back to Feed</a>
-  </header>
+  <div class="op-shell">
+    <div class="op-head">
+      <div>
+        <h1 class="op-title">Operator Dashboard</h1>
+        <p class="op-sub">Diagnostics for IPFS, P2P overlay, pins, and chain state.</p>
+        <div class="op-pill" id="opIdentityPill" title="Session">
+          <span class="op-dot warn" id="opIdentityDot"></span>
+          <span id="opIdentityText">Checking session…</span>
+        </div>
+      </div>
 
-  <div class="container">
-    <!-- IPFS Health -->
-    <div class="card" id="ipfsCard">
-      <h3>IPFS Status</h3>
-      <div id="ipfsStatus" class="stat"><span>Checking connection...</span></div>
-      <button class="btn small" onclick="checkIPFS()">Refresh</button>
+      <div class="op-actions">
+        <button class="op-btn" id="btnRefreshAll">Refresh all</button>
+        <a class="op-btn" href="/frontend/index.html" style="text-decoration:none;display:inline-block;">← Back to feed</a>
+      </div>
     </div>
 
-    <!-- P2P / Node Health -->
-    <div class="card" id="p2pCard">
-      <h3>P2P Network</h3>
-      <div id="p2pPeers" class="scroll-list">Loading peers...</div>
-      <button class="btn small" onclick="checkP2P()">Refresh Peers</button>
+    <div class="op-grid">
+      <!-- IPFS + readiness -->
+      <section class="op-card">
+        <h3>Node readiness</h3>
+
+        <div class="op-row">
+          <div class="op-k">IPFS</div>
+          <div class="op-v" id="ipfsStatus">Loading…</div>
+        </div>
+
+        <div class="op-row">
+          <div class="op-k">P2P</div>
+          <div class="op-v" id="p2pStatus">Loading…</div>
+        </div>
+
+        <div class="op-row">
+          <div class="op-k">Ledger</div>
+          <div class="op-v" id="ledgerStatus">Loading…</div>
+        </div>
+
+        <div class="op-msg" id="readyMsg"></div>
+      </section>
+
+      <!-- Chain -->
+      <section class="op-card">
+        <h3>Chain / consensus</h3>
+
+        <div class="op-row">
+          <div class="op-k">Height</div>
+          <div class="op-v" id="chainHeight">Loading…</div>
+        </div>
+
+        <div class="op-row">
+          <div class="op-k">Epoch</div>
+          <div class="op-v" id="chainEpoch">Loading…</div>
+        </div>
+
+        <div class="op-row">
+          <div class="op-k">Bootstrap mode</div>
+          <div class="op-v" id="chainBootstrap">Loading…</div>
+        </div>
+
+        <div class="op-row">
+          <div class="op-k">Next halving ETA</div>
+          <div class="op-v" id="halvingEta">Loading…</div>
+        </div>
+
+        <div class="op-msg" id="chainMsg"></div>
+      </section>
+
+      <!-- Peers -->
+      <section class="op-card">
+        <h3>P2P peers</h3>
+        <div class="op-list" id="peerList">Loading…</div>
+        <div class="op-msg" id="peerMsg"></div>
+      </section>
+
+      <!-- Pins -->
+      <section class="op-card">
+        <h3>Pinned CIDs</h3>
+        <div class="op-list" id="pinList">Loading…</div>
+        <div class="op-msg" id="pinMsg"></div>
+      </section>
     </div>
 
-    <!-- Pinning Queue -->
-    <div class="card" id="pinCard">
-      <h3>Pinning Queue</h3>
-      <div id="pinList" class="scroll-list">Loading queue...</div>
-      <button class="btn small" onclick="refreshQueue()">Refresh Queue</button>
-    </div>
-
-    <!-- Chain Info -->
-    <div class="card" id="chainCard">
-      <h3>Chain Info</h3>
-      <div class="stat"><strong>Current Height:</strong><span id="chainHeight">Loading...</span></div>
-      <div class="stat"><strong>Genesis Safeguard:</strong><span id="gsmStatus">Loading...</span></div>
-      <button class="btn small" onclick="refreshChain()">Refresh Chain</button>
-    </div>
+    <footer class="weall-footer">
+      <span>© <span id="footer-year">2024</span> WeAll</span>
+      &nbsp;•&nbsp;<a href="/frontend/privacy.html">Privacy</a>
+      &nbsp;•&nbsp;<a href="/frontend/terms.html">Terms</a>
+    </footer>
   </div>
 
+  <script src="/frontend/session.js"></script>
+  <script src="/frontend/nav.js"></script>
+  <script src="/frontend/footer.js"></script>
+
   <script>
-    async function checkIPFS() {
-      const el = document.getElementById('ipfsStatus');
-      el.innerHTML = '<span>Checking connection...</span>';
-      try {
-        const res = await fetch('/health/ipfs');
-        const data = await res.json();
-        if (!res.ok) throw new Error(data.detail || 'Error');
-        const color = data.online ? 'ok' : 'fail';
-        el.innerHTML = \`<span class="status-dot \${color}"></span> IPFS \${data.online ? 'Online' : 'Offline'} — Peers: \${data.peers || 0}\`;
-      } catch (err) {
-        el.innerHTML = '<span class="status-dot fail"></span> IPFS Error';
-      }
+    const $ = (id) => document.getElementById(id);
+
+    function setMsg(id, text, kind) {
+      const el = $(id);
+      if (!el) return;
+      el.className = "op-msg" + (kind ? " " + kind : "");
+      el.textContent = text || "";
     }
 
-    async function checkP2P() {
-      const el = document.getElementById('p2pPeers');
-      el.textContent = 'Refreshing...';
-      try {
-        const res = await fetch('/health/p2p');
-        const data = await res.json();
-        if (!res.ok) throw new Error(data.detail || 'Error');
-        if (!data.peers || !data.peers.length) {
-          el.textContent = 'No active peers.';
-        } else {
-          el.innerHTML = data.peers.map(p => \`<div>• \${p.id} — \${p.addr}</div>\`).join('');
-        }
-      } catch (err) {
-        el.textContent = '⚠️ ' + err.message;
-      }
+    function setIdentity(text, dotKind) {
+      const dot = $("opIdentityDot");
+      const el = $("opIdentityText");
+      if (el) el.textContent = text || "";
+      if (dot) dot.className = "op-dot " + (dotKind || "warn");
     }
 
-    async function refreshQueue() {
-      const el = document.getElementById('pinList');
-      el.textContent = 'Refreshing...';
+    function secondsToHuman(sec) {
+      const s = Math.max(0, Math.floor(sec || 0));
+      if (s < 60) return s + "s";
+      const m = Math.floor(s / 60);
+      if (m < 60) return m + "m";
+      const h = Math.floor(m / 60);
+      if (h < 48) return h + "h";
+      const d = Math.floor(h / 24);
+      return d + "d";
+    }
+
+    async function authedJson(path, opts) {
+      // IMPORTANT: PoH endpoints require X-WeAll-User in this snapshot.
+      const sess = await weallGetSession();
+      const headers = Object.assign(
+        { "Accept": "application/json" },
+        (opts && opts.headers) || {},
+        sess && sess.user_id ? { "X-WeAll-User": sess.user_id } : {}
+      );
+
+      const res = await fetch(path, Object.assign({ credentials: "include", headers }, opts || {}));
+      let data = null;
+      try { data = await res.json(); } catch { data = null; }
+
+      if (!res.ok) {
+        const msg = (data && (data.detail || data.error || data.message)) || ("HTTP " + res.status);
+        const err = new Error(msg);
+        err.status = res.status;
+        err.data = data;
+        throw err;
+      }
+      return data;
+    }
+
+    async function requireTier3OrRedirect() {
+      const sess = await weallGetSession();
+      if (!sess || !sess.user_id) {
+        setIdentity("Not signed in.", "fail");
+        window.location.href = "/frontend/login.html";
+        return null;
+      }
+
+      // Try PoH (Tier) from /poh/me (requires X-WeAll-User).
+      let tier = 0;
       try {
-        const res = await fetch('/pinning/queue');
-        const data = await res.json();
-        if (!res.ok) throw new Error(data.detail || 'Error');
-        if (!data.length) {
-          el.textContent = 'Pin queue empty.';
-        } else {
-          el.innerHTML = data.map(p => \`<div>\${p.cid} — Status: \${p.status}</div>\`).join('');
-        }
-      } catch (err) {
-        el.textContent = '⚠️ ' + err.message;
+        const me = await authedJson("/poh/me", { method: "GET" });
+        tier = Number(me && me.tier) || 0;
+      } catch (e) {
+        // If PoH is not reachable yet, stay conservative.
+        tier = 0;
+      }
+
+      setIdentity(`Signed in as ${sess.user_id} · PoH Tier ${tier}`, tier >= 3 ? "ok" : "warn");
+
+      if (tier < 3) {
+        window.location.href = "/frontend/verify.html?reason=tier3_required";
+        return null;
+      }
+      return { sess, tier };
+    }
+
+    async function refreshReady() {
+      $("ipfsStatus").textContent = "Loading…";
+      $("p2pStatus").textContent = "Loading…";
+      $("ledgerStatus").textContent = "Loading…";
+      setMsg("readyMsg", "", "");
+
+      try {
+        const ready = await authedJson("/ops/ready", { method: "GET" });
+
+        const ipfsOk = !!(ready && ready.ipfs && ready.ipfs.ok);
+        const p2pOk = !!(ready && ready.p2p && ready.p2p.ok);
+        const ledgerOk = !!(ready && ready.ledger && ready.ledger.ok);
+
+        $("ipfsStatus").textContent = ipfsOk ? (ready.ipfs.detail || "OK") : (ready.ipfs.detail || "Not ready");
+        $("p2pStatus").textContent = p2pOk ? (ready.p2p.detail || "OK") : (ready.p2p.detail || "Not ready");
+        $("ledgerStatus").textContent = ledgerOk ? (ready.ledger.detail || "OK") : (ready.ledger.detail || "Not ready");
+
+        if (ready.ok) setMsg("readyMsg", "Node looks ready.", "ok");
+        else setMsg("readyMsg", "Node is not fully ready yet. See statuses above.", "err");
+      } catch (e) {
+        setMsg("readyMsg", e.message || "Failed to query /ops/ready", "err");
+        $("ipfsStatus").textContent = "—";
+        $("p2pStatus").textContent = "—";
+        $("ledgerStatus").textContent = "—";
       }
     }
 
     async function refreshChain() {
-      const h = document.getElementById('chainHeight');
-      const g = document.getElementById('gsmStatus');
-      h.textContent = '...';
-      g.textContent = '...';
+      $("chainHeight").textContent = "Loading…";
+      $("chainEpoch").textContent = "Loading…";
+      $("chainBootstrap").textContent = "Loading…";
+      $("halvingEta").textContent = "Loading…";
+      setMsg("chainMsg", "", "");
+
       try {
-        const res = await fetch('/chain/height');
-        const data = await res.json();
-        if (!res.ok) throw new Error(data.detail || 'Error');
-        h.textContent = data.height;
-      } catch (err) {
-        h.textContent = '⚠️';
+        const meta = await authedJson("/consensus/meta", { method: "GET" });
+        $("chainHeight").textContent = String(meta.height ?? "0");
+        $("chainEpoch").textContent = String(meta.epoch ?? "0");
+        $("chainBootstrap").textContent = meta.bootstrap_mode ? "true" : "false";
+      } catch (e) {
+        setMsg("chainMsg", "Consensus meta unavailable: " + (e.message || ""), "err");
+        $("chainHeight").textContent = "—";
+        $("chainEpoch").textContent = "—";
+        $("chainBootstrap").textContent = "—";
       }
+
       try {
-        const res = await fetch('/chain/status');
-        const data = await res.json();
-        if (!res.ok) throw new Error(data.detail || 'Error');
-        g.textContent = data.gsm_active ? 'Active' : 'Inactive';
-      } catch (err) {
-        g.textContent = '⚠️';
+        const tok = await authedJson("/chain/tokenomics", { method: "GET" });
+        $("halvingEta").textContent = secondsToHuman(tok.next_halving_in_seconds);
+      } catch (e) {
+        $("halvingEta").textContent = "—";
       }
     }
 
-    // Auto-init when page loads
-    checkIPFS();
-    checkP2P();
-    refreshQueue();
-    refreshChain();
+    async function refreshPeers() {
+      const list = $("peerList");
+      list.textContent = "Loading…";
+      setMsg("peerMsg", "", "");
+
+      try {
+        const data = await authedJson("/p2p/peers", { method: "GET" });
+        const peers = (data && data.peers) || [];
+        if (!peers.length) {
+          list.innerHTML = '<div class="muted">No peers yet. If you have bootstrap nodes configured, try /p2p/bootstrap from the API.</div>';
+          setMsg("peerMsg", "0 peers", "");
+          return;
+        }
+        list.innerHTML = peers.map(p => {
+          const id = (p && p.node_id) || "(unknown)";
+          const addr = (p && p.addr) || "";
+          const last = (p && p.last_seen) ? (" · last_seen=" + p.last_seen) : "";
+          return `<div>• <span style="color:var(--accent)">${id}</span> <span class="muted">${addr}${last}</span></div>`;
+        }).join("");
+        setMsg("peerMsg", `${peers.length} peer(s)`, "ok");
+      } catch (e) {
+        list.innerHTML = '<div class="muted">Unable to load peers.</div>';
+        setMsg("peerMsg", e.message || "Failed to query /p2p/peers", "err");
+      }
+    }
+
+    async function refreshPins() {
+      const list = $("pinList");
+      list.textContent = "Loading…";
+      setMsg("pinMsg", "", "");
+
+      try {
+        const data = await authedJson("/pin/list", { method: "GET" });
+        const pins = (data && (data.pins || data.items || data.cids)) || [];
+        const count = Number(data && (data.count ?? pins.length)) || pins.length || 0;
+
+        if (!pins.length) {
+          list.innerHTML = '<div class="muted">No pinned CIDs reported.</div>';
+          setMsg("pinMsg", `${count} pins`, "");
+          return;
+        }
+
+        // pins might be dict-like depending on backend client
+        if (!Array.isArray(pins) && typeof pins === "object") {
+          const keys = Object.keys(pins);
+          list.innerHTML = keys.map(cid => `<div>• <span style="color:var(--accent)">${cid}</span></div>`).join("");
+          setMsg("pinMsg", `${keys.length} pins`, "ok");
+          return;
+        }
+
+        list.innerHTML = pins.map(item => {
+          const cid = (typeof item === "string") ? item : (item && (item.cid || item.Cid || item.Key)) || JSON.stringify(item);
+          return `<div>• <span style="color:var(--accent)">${cid}</span></div>`;
+        }).join("");
+        setMsg("pinMsg", `${count} pins`, "ok");
+      } catch (e) {
+        list.innerHTML = '<div class="muted">Pin listing failed. (Backend may not have IPFS pin listing wired yet.)</div>';
+        setMsg("pinMsg", e.message || "Failed to query /pin/list", "err");
+      }
+    }
+
+    async function refreshAll() {
+      await refreshReady();
+      await refreshChain();
+      await refreshPeers();
+      await refreshPins();
+    }
+
+    document.addEventListener("DOMContentLoaded", async () => {
+      // Gate access
+      const ok = await requireTier3OrRedirect();
+      if (!ok) return;
+
+      $("btnRefreshAll").addEventListener("click", refreshAll);
+
+      // Initial load
+      await refreshAll();
+    });
   </script>
-  <script src="/static/footer.js"></script>
-<!-- CLIENT-ERROR-LISTENER -->
-<script>
-window.addEventListener('error', e => {
-  try { fetch('/content/client-log', {method:'POST', headers:{'content-type':'application/json'}, body: JSON.stringify({ msg:String(e.message||''), file:e.filename, line:e.lineno, col:e.colno })}); } catch(_) {}
-});
-window.addEventListener('unhandledrejection', e => {
-  try { fetch('/content/client-log', {method:'POST', headers:{'content-type':'application/json'}, body: JSON.stringify({ promise:true, reason:String(e.reason||'') })}); } catch(_) {}
-});
-</script>
-
-
-<footer class="weall-footer">
-  <span>© WeAll</span>
-  &nbsp;•&nbsp;<a href="/frontend/privacy.html">Privacy</a>
-  &nbsp;•&nbsp;<a href="/frontend/terms.html">Terms</a>
-</footer>
-
 </body>
 </html>

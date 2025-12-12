@@ -1,3 +1,54 @@
+---
+
+## Dev Snapshot Update — 2025-12-12 00:26:35 -0800
+
+**Scope of this push:** “Current working state” snapshot (still not production-ready).  
+**Compared to last push (upstream):** local `main` is **ahead by 3 commits**.
+
+### Upstream comparison
+- Upstream branch: `origin/main` @ `27e6400` (last pushed baseline)
+- Current local HEAD: `94ca372`
+- Ahead/behind: **ahead 3, behind 0**
+
+### Commits since last push (in order)
+1) `6cd5158` — **test:** lock WeCoin emission invariants  
+2) `dd756ee` — **test:** add WeCoin emission and governance invariants  
+3) `94ca372` — **feat:** align runtime, APIs, and frontend with juror reputation + PoH spec  
+
+### Verified test status (this snapshot)
+- `pytest`: **29 passed**
+- Warnings observed:
+  - pytest-asyncio default fixture loop scope deprecation warning
+  - pydantic field name shadow warning (`LoggingConf.json`)
+  - pydantic v2 deprecation warning (`dict()` → `model_dump()`)
+
+### Current state (what’s working / present)
+- Ledger + WeCoin monetary policy (21M cap, halving, multi-pool rewards)
+- PoH tiers & registry + role gating (Tier 1 view, Tier 2 like/comment, Tier 3 post/uploads)
+- Jurors/disputes + reputation-juror wiring
+- Content system includes **likes, comments, and media upload endpoint** + TikTok-style feed MVP
+- Groups/emissaries and governance runtime scaffolding present
+- Termux-ready scripts and local single-node dev flow
+
+### Still in progress / not fully v2-aligned yet
+- Full PoH upgrade journeys (Tier 1→2→3 verification flows end-to-end)
+- Strict PoH-gated governance enforcing 1-human-1-vote across all vote surfaces
+- Unified content/feed model across juror/governance/content surfaces
+- Validator selection (PoH + reputation aware), slashing, and hardening
+- STV elections for emissaries + group wallets
+
+### Known issues / sharp edges (current)
+- Frontend login/onboarding can still block depending on session/env state
+- Some wiring is still being normalized across frontend pages + API shim expectations
+- Rewards/pool logic is under iteration: validate distribution math before “production assumptions”
+
+### Safety / repo hygiene (important before public push)
+- **Secrets were tracked in git in this snapshot:** `.env`, `.env.mail`, `cert.pem`  
+  These should be removed from tracking and ignored going forward (keep only `*.example` templates).
+
+---
+
+
 ## Status — December 2025
 
 This branch is aligned with the **WeAll Protocol Full Scope v2 (partial)**.

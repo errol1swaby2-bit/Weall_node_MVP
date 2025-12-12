@@ -36,3 +36,11 @@ data/
 uploads/
 cert.pem
 key.pem
+
+# --- local secrets / local-only runtime ---
+.env
+.env.*
+!*.example
+cert.pem
+*.pem
+weall.cookies

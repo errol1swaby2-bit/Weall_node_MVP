@@ -2,374 +2,253 @@
 <html lang="en">
 <head>
   <meta charset="utf-8" />
-  <title>WeAll — Home Feed</title>
+  <title>WeAll — Global Feed</title>
   <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <meta http-equiv="Cache-Control" content="no-store" />
   <link rel="icon" href="/frontend/favicon.svg" />
   <link rel="stylesheet" href="/frontend/style.css" />
   <style>
+    :root {
+      --bg: #0b1020;
+      --fg: #e6edf3;
+      --muted: rgba(230,237,243,0.72);
+      --card: rgba(16,18,24,0.72);
+      --border: rgba(58,65,80,0.55);
+      --accent: #6ee7b7;
+      --danger: #fb7185;
+    }
+
     body {
       margin: 0;
-      padding: 1.2rem 1.1rem 1.6rem;
-      font-family: system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+      color: var(--fg);
       background:
-        radial-gradient(circle at top, #22c55e22 0, #020617 55%, #020617 100%);
-      color: #e5e7eb;
+        radial-gradient(circle at 30% 20%, #22c55e 0, #0ea5e9 45%, #6366f1 85%),
+        radial-gradient(circle at 80% 80%, rgba(99,102,241,0.25), transparent 55%),
+        rgba(15,23,42,0.96);
+      min-height: 100vh;
+      font-family: system-ui, -apple-system, Segoe UI, Roboto, Ubuntu, Cantarell, Noto Sans, Helvetica, Arial, "Apple Color Emoji", "Segoe UI Emoji";
     }
 
-    .wrap {
-      max-width: 1040px;
+    .shell {
+      max-width: 1080px;
       margin: 0 auto;
+      padding: 18px 14px 40px;
     }
 
-    .page-header {
-      display: flex;
-      flex-wrap: wrap;
-      align-items: flex-start;
-      justify-content: space-between;
-      gap: 0.9rem;
-      margin-bottom: 1.1rem;
-    }
-
-    .page-header-main {
-      display: flex;
-      flex-direction: column;
-      gap: 0.25rem;
-    }
-
-    .brand-row {
+    header.topbar {
       display: flex;
       align-items: center;
-      gap: 0.6rem;
+      justify-content: space-between;
+      gap: 0.9rem;
+      margin: 10px 0 14px;
+    }
+
+    .brand {
+      display: flex;
+      align-items: center;
+      gap: 0.7rem;
     }
 
     .brand-mark {
-      width: 30px;
-      height: 30px;
-      border-radius: 0.9rem;
+      width: 36px;
+      height: 36px;
+      border-radius: 12px;
       background:
-        radial-gradient(circle at 30% 20%, #22c55e 0, #0ea5e9 45%, #6366f1 85%);
+        radial-gradient(circle at 20% 20%, rgba(110,231,183,0.85), transparent 60%),
+        radial-gradient(circle at 80% 70%, rgba(56,189,248,0.75), transparent 55%),
+        rgba(15,23,42,0.92);
       border: 1px solid rgba(15,23,42,0.9);
-      box-shadow:
-        0 10px 25px rgba(15,23,42,0.85),
-        0 0 0 1px rgba(15,23,42,0.95);
+      box-shadow: 0 10px 25px rgba(0,0,0,0.35);
     }
 
-    .brand-title {
-      display: flex;
-      flex-direction: column;
-      gap: 0.1rem;
-    }
-
-    .brand-title span:first-child {
-      font-size: 1.25rem;
-      font-weight: 600;
-      letter-spacing: 0.06em;
-      text-transform: uppercase;
-    }
-
-    .brand-title span:last-child {
-      font-size: 0.8rem;
-      color: #9ca3af;
-    }
-
-    .page-kicker {
-      font-size: 0.76rem;
-      text-transform: uppercase;
-      letter-spacing: 0.14em;
-      color: #9ca3af;
-    }
-
-    .page-blurb {
+    .brand h1 {
       margin: 0;
-      font-size: 0.86rem;
-      color: #cbd5f5;
-      max-width: 440px;
+      font-size: 18px;
+      letter-spacing: 0.2px;
+      line-height: 1.1;
     }
 
-    .signed-in-banner {
-      font-size: 0.78rem;
-      letter-spacing: 0.03em;
-      text-transform: uppercase;
-      color: #9ca3af;
-      text-align: right;
-      min-width: 220px;
-    }
-
-    main {
-      display: grid;
-      grid-template-columns: minmax(0, 1.1fr) minmax(0, 1.4fr);
-      gap: 1.1rem;
-    }
-
-    @media (max-width: 880px) {
-      main {
-        grid-template-columns: minmax(0, 1fr);
-      }
+    .brand p {
+      margin: 3px 0 0;
+      font-size: 12px;
+      color: var(--muted);
+      max-width: 680px;
     }
 
     .card {
-      background:
-        radial-gradient(circle at top left, rgba(56,189,248,0.16), transparent 55%),
-        radial-gradient(circle at bottom right, rgba(34,197,94,0.18), transparent 50%),
-        rgba(15,23,42,0.96);
-      border-radius: 0.9rem;
-      border: 1px solid rgba(148,163,184,0.35);
-      padding: 0.95rem 1.0rem 1.15rem;
-      box-shadow:
-        0 18px 40px rgba(15,23,42,0.9),
-        0 0 0 1px rgba(15,23,42,0.92);
+      background: var(--card);
+      border: 1px solid var(--border);
+      border-radius: 14px;
+      padding: 14px;
+      box-shadow: 0 10px 25px rgba(0,0,0,0.25);
+      backdrop-filter: blur(8px);
     }
 
     .card h2 {
-      margin: 0 0 0.25rem;
-      font-size: 0.96rem;
-      letter-spacing: 0.08em;
-      text-transform: uppercase;
-      color: #e5e7eb;
+      margin: 0 0 6px;
+      font-size: 14px;
     }
 
     .card p {
-      margin: 0.15rem 0;
-      font-size: 0.86rem;
-      color: #cbd5f5;
-    }
-
-    .hint {
-      font-size: 0.78rem;
-      color: #9ca3af;
-      margin-top: 0.4rem;
+      margin: 0 0 12px;
+      font-size: 13px;
+      color: var(--muted);
     }
 
     label {
       display: block;
-      margin: 0.6rem 0 0.15rem;
-      font-size: 0.78rem;
-      text-transform: uppercase;
-      letter-spacing: 0.08em;
-      color: #9ca3af;
+      font-size: 12px;
+      color: var(--muted);
+      margin: 10px 0 6px;
     }
 
     textarea {
       width: 100%;
-      border-radius: 0.7rem;
-      border: 1px solid rgba(30,41,59,0.9);
-      padding: 0.5rem 0.65rem;
-      background: rgba(15,23,42,0.98);
-      color: #e5e7eb;
-      font-size: 0.9rem;
+      min-height: 96px;
       resize: vertical;
-      min-height: 80px;
+      padding: 10px 12px;
+      border-radius: 12px;
+      border: 1px solid rgba(34,40,54,.9);
+      background: rgba(0,0,0,0.25);
+      color: var(--fg);
       outline: none;
+      font-size: 14px;
+      box-sizing: border-box;
     }
 
-    textarea:focus {
-      border-color: #38bdf8;
-      box-shadow: 0 0 0 1px rgba(56,189,248,0.6);
+    input[type="file"]{
+      width: 100%;
+      padding: 10px 12px;
+      border-radius: 12px;
+      border: 1px solid rgba(34,40,54,.9);
+      background: rgba(0,0,0,0.25);
+      color: var(--muted);
+      box-sizing: border-box;
     }
 
     .composer-footer {
-      margin-top: 0.55rem;
       display: flex;
       align-items: center;
       justify-content: space-between;
-      gap: 0.7rem;
+      gap: 10px;
+      margin-top: 10px;
       flex-wrap: wrap;
     }
 
     .composer-note {
-      font-size: 0.76rem;
-      color: #9ca3af;
+      font-size: 12px;
+      color: var(--muted);
     }
 
     .btn {
-      border-radius: 999px;
-      border: 1px solid rgba(148,163,184,0.85);
-      padding: 0.42rem 0.95rem;
-      font-size: 0.8rem;
-      font-weight: 500;
-      text-transform: uppercase;
-      letter-spacing: 0.12em;
-      background: rgba(15,23,42,0.96);
-      color: #e5e7eb;
+      border: 1px solid rgba(34,40,54,.9);
+      background: rgba(17,21,27,.7);
+      color: var(--fg);
+      border-radius: 12px;
+      padding: 10px 12px;
       cursor: pointer;
+      font-weight: 800;
+      font-size: 13px;
+      text-decoration: none;
+      display: inline-flex;
+      align-items: center;
+      gap: 8px;
     }
 
     .btn.primary {
-      border-color: rgba(34,197,94,0.9);
-      background: radial-gradient(circle at 30% 0%,
-                  rgba(34,197,94,0.65), rgba(15,23,42,0.98));
-      color: #ecfeff;
+      border-color: rgba(110,231,183,.65);
     }
 
     .btn:disabled {
-      opacity: 0.55;
+      opacity: .55;
       cursor: default;
     }
+
+    .status {
+      margin-top: 10px;
+      font-size: 12px;
+      color: var(--muted);
+    }
+    .status.ok { color: var(--accent); }
+    .status.err { color: var(--danger); }
+    .status.warn { color: #fbbf24; }
 
     .feed-header-row {
       display: flex;
       align-items: baseline;
       justify-content: space-between;
-      gap: 0.6rem;
-      margin-bottom: 0.25rem;
+      gap: 10px;
+      margin-bottom: 10px;
     }
 
     .feed-header-row span {
-      font-size: 0.78rem;
-      color: #9ca3af;
+      font-size: 12px;
+      color: var(--muted);
     }
 
-    .feed-list {
-      margin-top: 0.3rem;
-      display: flex;
-      flex-direction: column;
-      gap: 0.65rem;
-      max-height: calc(100vh - 220px);
-      overflow-y: auto;
-      padding-right: 0.2rem;
+    .feed-list .empty {
+      font-size: 13px;
+      color: var(--muted);
+      padding: 10px 0;
     }
-
-    .post-card {
-      border-radius: 0.75rem;
-      border: 1px solid rgba(31,41,55,0.95);
-      background: rgba(15,23,42,0.98);
-      padding: 0.6rem 0.7rem 0.6rem;
-      font-size: 0.86rem;
-    }
-
-    .post-header {
-      display: flex;
-      justify-content: space-between;
-      align-items: baseline;
-      gap: 0.4rem;
-      margin-bottom: 0.2rem;
-    }
-
-    .post-author {
-      font-weight: 500;
-      color: #e5e7eb;
-    }
-
-    .post-meta {
-      font-size: 0.76rem;
-      color: #9ca3af;
-    }
-
-    .post-body {
-      font-size: 0.87rem;
-      color: #e5e7eb;
-      white-space: pre-wrap;
-      word-wrap: break-word;
-      margin-bottom: 0.25rem;
-    }
-
-    .post-footer {
-      display: flex;
-      align-items: center;
-      justify-content: space-between;
-      gap: 0.4rem;
-      margin-top: 0.1rem;
-      font-size: 0.78rem;
-      color: #9ca3af;
-    }
-
-    .post-tags {
-      display: flex;
-      flex-wrap: wrap;
-      gap: 0.25rem;
-    }
-
-    .tag-pill {
-      border-radius: 999px;
-      border: 1px solid rgba(51,65,85,0.9);
-      padding: 0.04rem 0.45rem;
-      font-size: 0.72rem;
-      color: #9ca3af;
-    }
-
-    .empty {
-      font-size: 0.84rem;
-      color: #9ca3af;
-      padding: 0.4rem 0.1rem;
-    }
-
-    .status {
-      margin-top: 0.35rem;
-      font-size: 0.78rem;
-      color: #9ca3af;
-    }
-
-    .status.ok { color: #4ade80; }
-    .status.err { color: #fb7185; }
 
     footer.weall-footer {
-      border-top: 1px solid rgba(31,41,55,0.9);
-      padding: 0.75rem 0.1rem 1.1rem;
-      margin-top: 1.5rem;
-      font-size: 0.78rem;
-      color: #6b7280;
+      margin-top: 18px;
+      border-top: 1px solid rgba(34,40,54,.8);
+      padding: 14px 2px 0;
+      font-size: 12px;
+      color: var(--muted);
       text-align: center;
     }
-
-    footer.weall-footer a {
-      color: #9ca3af;
-      text-decoration: none;
-    }
-
-    footer.weall-footer a:hover {
-      text-decoration: underline;
-    }
+    footer.weall-footer a { color: var(--muted); text-decoration: none; }
+    footer.weall-footer a:hover { text-decoration: underline; color: var(--fg); }
   </style>
+
+  <script src="/frontend/env.js"></script>
 </head>
+
 <body>
-  <div class="wrap">
-    <header class="page-header">
-      <div class="page-header-main">
-        <div class="brand-row">
-          <div class="brand-mark"></div>
-          <div class="brand-title">
-            <span>WeAll</span>
-            <span>Shared governance, human-first network</span>
-          </div>
+  <div id="weall_nav"></div>
+
+  <div class="shell">
+    <header class="topbar">
+      <div class="brand">
+        <div class="brand-mark"></div>
+        <div>
+          <h1>WeAll — Global Feed</h1>
+          <p>
+            Tier 1 can view. Tier 2 can like/comment. Tier 3 can post content (and attach media).
+            Moderation is handled by the network via dispute flow.
+          </p>
         </div>
-        <div class="page-kicker">Home feed · genesis mode</div>
-        <p class="page-blurb">
-          A simple global feed wired to your local node. Posts here are stored
-          in your node’s ledger and rolled into the shared WeAll state as the
-          network grows.
-        </p>
       </div>
-      <p id="signedIn" class="signed-in-banner">
-        Checking session…
-      </p>
     </header>
 
     <main>
       <!-- Composer -->
       <section class="card">
         <h2>Share something</h2>
-        <p>
-          Short text notes are enough for Genesis. Files and rich media can be
-          layered in on top once IPFS flows are fully wired.
-        </p>
+        <p>Short text notes are enough for Genesis. Tier 3 can also attach media (stored on IPFS).</p>
 
         <label for="postText">Your message</label>
         <textarea id="postText" placeholder="What are you working on for the commons?"></textarea>
 
+        <label for="postFile">Attach media (Tier 3)</label>
+        <input id="postFile" type="file" accept="image/*,video/*" />
+
         <div class="composer-footer">
           <div class="composer-note" id="composerNote">
-            You’ll need to sign in (Tier 1+) to post.
+            Tip: Ctrl+Enter posts. Group feed UI lives in Groups.
           </div>
-          <button class="btn primary" id="btnPost">
-            Post to global feed
-          </button>
+
+          <button class="btn primary" id="btnPost">Post</button>
         </div>
 
         <div class="status" id="postStatus"></div>
       </section>
 
       <!-- Feed -->
-      <section class="card">
+      <section class="card" style="margin-top:12px;">
         <div class="feed-header-row">
           <h2>Global feed</h2>
           <span id="feedMeta">Loading…</span>
@@ -386,384 +265,10 @@
     </footer>
   </div>
 
-  <!-- Shared helpers -->
-  <script src="/frontend/env.js"></script>
   <script src="/frontend/auth.js"></script>
   <script src="/frontend/session.js"></script>
   <script src="/frontend/nav.js"></script>
   <script src="/frontend/footer.js"></script>
-
-  <script>
-    (function () {
-      const $ = (id) => document.getElementById(id);
-
-      function apiBase() {
-        return (window.ENV && window.ENV.VITE_API_BASE) || "";
-      }
-
-      async function jsonFetch(path, opts) {
-        const url = apiBase() + path;
-        const options = Object.assign(
-          {
-            method: "GET",
-            headers: { Accept: "application/json" },
-            credentials: "include",
-          },
-          opts || {}
-        );
-        if (options.body && typeof options.body !== "string") {
-          options.headers["Content-Type"] =
-            options.headers["Content-Type"] || "application/json";
-          options.body = JSON.stringify(options.body);
-        }
-        const res = await fetch(url, options);
-        let data = null;
-        try {
-          data = await res.json();
-        } catch {
-          data = null;
-        }
-        if (!res.ok) {
-          const msg =
-            (data && (data.detail || data.error || data.message)) ||
-            "Request failed with " + res.status;
-          throw new Error(msg);
-        }
-        return data;
-      }
-
-      function timeAgo(ts) {
-        if (!ts) return "";
-        // backend uses seconds; tolerate ms
-        if (ts > 1e12) ts = Math.floor(ts / 1000);
-        const now = Math.floor(Date.now() / 1000);
-        const diff = now - ts;
-        if (diff < 5) return "now";
-        if (diff < 60) return diff + "s";
-        const m = Math.floor(diff / 60);
-        if (m < 60) return m + "m";
-        const h = Math.floor(m / 60);
-        if (h < 48) return h + "h";
-        const d = Math.floor(h / 24);
-        if (d < 365) return d + "d";
-        const y = Math.floor(d / 365);
-        return y + "y";
-      }
-
-      function J(obj) {
-        try {
-          return JSON.stringify(obj, null, 2);
-        } catch {
-          return String(obj);
-        }
-      }
-
-      function buildRoleBanner(userId, roles, nodeMeta, poh) {
-        const parts = [];
-
-        const tier =
-          (roles && (roles.poh_tier ?? roles.pohTier)) ||
-          (poh && typeof poh.tier === "number" ? poh.tier : 0) ||
-          0;
-        const status = (poh && poh.status) || "ok";
-
-        parts.push("PoH Tier " + tier + " (" + status + ")");
-
-        const flags = (roles && roles.flags) || {};
-        const caps = (roles && roles.capabilities) || [];
-        const tags = [];
-
-        if (flags.wants_creator || caps.includes("earn_creator_rewards")) {
-          tags.push("Creator");
-        }
-        if (flags.wants_juror || caps.includes("serve_juror_panel")) {
-          tags.push("Juror");
-        }
-        if (flags.wants_validator || caps.includes("validator_duties")) {
-          tags.push("Validator");
-        }
-        if (flags.wants_operator || caps.includes("operator_duties")) {
-          tags.push("Operator");
-        }
-        if (flags.wants_emissary || caps.includes("act_as_emissary")) {
-          tags.push("Emissary");
-        }
-
-        if (tags.length) {
-          parts.push(tags.join(" · "));
-        }
-
-        const nodeKind = (nodeMeta && nodeMeta.node_kind) || "public_gateway";
-        if (nodeKind === "validator_node") {
-          parts.push("Validator node");
-        } else if (nodeKind === "private_node") {
-          parts.push("Private node");
-        } else {
-          parts.push("Gateway node");
-        }
-
-        return "Signed in as " + userId + " · " + parts.join(" · ");
-      }
-
-      async function hydrateHeader() {
-        const bannerEl = $("signedIn");
-        const composerNote = $("composerNote");
-
-        try {
-          const sess = await weallAuth.getSession().catch(() => null);
-
-          if (!sess || !sess.user_id) {
-            if (bannerEl) bannerEl.textContent = "Not signed in.";
-            if (composerNote) {
-              composerNote.textContent =
-                "You’ll need to sign in (Tier 1+) before posting.";
-            }
-            return null;
-          }
-
-          const [poh, roles, nodeMeta] = await Promise.all([
-            weallAuth.getPohMe().catch(() => null),
-            jsonFetch("/roles/effective/me", {
-              headers: { "X-WeAll-User": sess.user_id },
-            }).catch(() => null),
-            jsonFetch("/node/meta").catch(() => null),
-          ]);
-
-          if (bannerEl) {
-            bannerEl.textContent = buildRoleBanner(
-              sess.user_id,
-              roles,
-              nodeMeta,
-              poh
-            );
-          }
-
-          if (composerNote) {
-            const tier = (poh && typeof poh.tier === "number" ? poh.tier : 0) || 0;
-            if (tier >= 1 && (!poh || (poh.status || "ok") === "ok")) {
-              composerNote.textContent = "Posting as " + sess.user_id + ".";
-            } else {
-              composerNote.textContent =
-                "Posting will unlock once your PoH Tier is valid.";
-            }
-          }
-
-          return { sess, poh, roles, nodeMeta };
-        } catch (err) {
-          console.error("hydrateHeader error:", err);
-          if (bannerEl) bannerEl.textContent = "Unable to load session.";
-          if (composerNote) {
-            composerNote.textContent = "Posting may be limited until auth is stable.";
-          }
-          return null;
-        }
-      }
-
-      function renderPost(post) {
-        const el = document.createElement("article");
-        el.className = "post-card";
-
-        const header = document.createElement("div");
-        header.className = "post-header";
-
-        const author = document.createElement("div");
-        author.className = "post-author";
-        author.textContent = post.author || "@unknown";
-
-        const meta = document.createElement("div");
-        meta.className = "post-meta";
-        const created = post.created_at || post.timestamp || null;
-        const scope = post.scope || "global";
-        const bits = [];
-        if (created) bits.push(timeAgo(created));
-        if (scope === "group" && post.group_id) {
-          bits.push("group:" + post.group_id.slice(0, 8));
-        } else {
-          bits.push("global");
-        }
-        meta.textContent = bits.join(" · ");
-
-        header.appendChild(author);
-        header.appendChild(meta);
-
-        const body = document.createElement("div");
-        body.className = "post-body";
-        body.textContent = post.text || "";
-
-        const footer = document.createElement("div");
-        footer.className = "post-footer";
-
-        const tagsRoot = document.createElement("div");
-        tagsRoot.className = "post-tags";
-        const tags = post.tags || [];
-        tags.forEach((t) => {
-          const pill = document.createElement("span");
-          pill.className = "tag-pill";
-          pill.textContent = "#" + t;
-          tagsRoot.appendChild(pill);
-        });
-
-        const idMeta = document.createElement("div");
-        idMeta.textContent = post.id ? "id:" + String(post.id).slice(0, 8) : "";
-
-        footer.appendChild(tagsRoot);
-        footer.appendChild(idMeta);
-
-        el.appendChild(header);
-        el.appendChild(body);
-        el.appendChild(footer);
-
-        return el;
-      }
-
-      function renderFeed(posts) {
-        const listEl = $("feedList");
-        const metaEl = $("feedMeta");
-        const statusEl = $("feedStatus");
-        if (!listEl) return;
-
-        listEl.innerHTML = "";
-        if (!posts || !posts.length) {
-          const empty = document.createElement("div");
-          empty.className = "empty";
-          empty.textContent =
-            "No posts yet. Be the first to share something on this node.";
-          listEl.appendChild(empty);
-          if (metaEl) metaEl.textContent = "0 posts";
-          if (statusEl) {
-            statusEl.textContent =
-              "Genesis mode: posts are stored locally in your node’s ledger.";
-            statusEl.className = "status ok";
-          }
-          return;
-        }
-
-        posts.forEach((p) => {
-          listEl.appendChild(renderPost(p));
-        });
-
-        if (metaEl) metaEl.textContent = posts.length + " posts";
-        if (statusEl) {
-          statusEl.textContent =
-            "Posts are fetched from /content/feed (scope=global).";
-          statusEl.className = "status ok";
-        }
-      }
-
-      async function loadFeed() {
-        const listEl = $("feedList");
-        const metaEl = $("feedMeta");
-        const statusEl = $("feedStatus");
-
-        if (metaEl) metaEl.textContent = "Loading…";
-        if (statusEl) {
-          statusEl.textContent = "";
-          statusEl.className = "status";
-        }
-        if (listEl) listEl.innerHTML = "";
-
-        try {
-          const data = await jsonFetch("/content/feed?scope=global&limit=50");
-          const posts = data.posts || data.items || data.feed || [];
-          renderFeed(posts);
-        } catch (err) {
-          console.error("loadFeed error:", err);
-          if (statusEl) {
-            statusEl.textContent = "Failed to load feed: " + err.message;
-            statusEl.className = "status err";
-          }
-        }
-      }
-
-      async function handlePost() {
-        const textEl = $("postText");
-        const statusEl = $("postStatus");
-        const btn = $("btnPost");
-
-        if (!textEl) return;
-
-        const text = (textEl.value || "").trim();
-        if (!text) {
-          alert("Please enter something to share.");
-          return;
-        }
-
-        try {
-          if (btn) btn.disabled = true;
-          if (statusEl) {
-            statusEl.textContent = "Posting…";
-            statusEl.className = "status";
-          }
-
-          // Require at least Tier 1 before posting
-          const ok = await weallAuth.require({
-            minTier: 1,
-            redirectToLogin: "/frontend/login.html",
-          });
-          if (!ok) {
-            if (btn) btn.disabled = false;
-            if (statusEl) {
-              statusEl.textContent = "Please sign in to post.";
-              statusEl.className = "status err";
-            }
-            return;
-          }
-
-          const sess = await weallAuth.getSession();
-          const author = sess && sess.user_id;
-          if (!author) {
-            throw new Error("No session user_id found.");
-          }
-
-          await jsonFetch("/content/posts", {
-            method: "POST",
-            body: {
-              author,
-              text,
-              scope: "global",
-              group_id: null,
-            },
-          });
-
-          textEl.value = "";
-          if (statusEl) {
-            statusEl.textContent = "Posted. Refreshing feed…";
-            statusEl.className = "status ok";
-          }
-          await loadFeed();
-        } catch (err) {
-          console.error("handlePost error:", err);
-          if (statusEl) {
-            statusEl.textContent = "Failed to post: " + err.message;
-            statusEl.className = "status err";
-          }
-        } finally {
-          if (btn) btn.disabled = false;
-        }
-      }
-
-      function wireEvents() {
-        const btn = $("btnPost");
-        if (btn) {
-          btn.addEventListener("click", function (ev) {
-            ev.preventDefault();
-            handlePost();
-          });
-        }
-      }
-
-      async function init() {
-        wireEvents();
-        await hydrateHeader();
-        await loadFeed();
-      }
-
-      if (document.readyState === "loading") {
-        document.addEventListener("DOMContentLoaded", init);
-      } else {
-        init();
-      }
-    })();
-  </script>
+  <script src="/frontend/tiktok.js"></script>
 </body>
 </html>

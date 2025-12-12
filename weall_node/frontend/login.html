@@ -2,414 +2,85 @@
 <html lang="en">
 <head>
   <meta charset="utf-8" />
-  <title>WeAll — Login</title>
-  <meta name="viewport" content="width=device-width, initial-scale=1" />
-  <link rel="icon" href="/frontend/favicon.svg" />
+  <meta name="viewport" content="width=device-width,initial-scale=1" />
+  <title>WeAll — Sign In</title>
+  <meta http-equiv="Cache-Control" content="no-store" />
+  <meta http-equiv="Pragma" content="no-cache" />
+  <meta http-equiv="Expires" content="0" />
   <link rel="stylesheet" href="/frontend/style.css" />
-  <style>
-    :root {
-      color-scheme: dark;
-    }
-
-    body {
-      margin: 0;
-      min-height: 100vh;
-      display: flex;
-      flex-direction: column;
-      font-family: system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
-      background:
-        radial-gradient(circle at top, #22c55e22 0, #020617 55%, #020617 100%);
-      color: #e5e7eb;
-    }
-
-    .login-shell {
-      flex: 1;
-      display: flex;
-      align-items: center;
-      justify-content: center;
-      padding: 2.4rem 1.1rem 2rem;
-    }
-
-    .login-wrap {
-      width: 100%;
-      max-width: 420px;
-    }
-
-    .login-card {
-      border-radius: 1rem;
-      border: 1px solid rgba(148,163,184,0.35);
-      padding: 1.15rem 1.15rem 1.2rem;
-      background:
-        radial-gradient(circle at top left, rgba(56,189,248,0.18), transparent 55%),
-        radial-gradient(circle at bottom right, rgba(34,197,94,0.22), transparent 50%),
-        rgba(15,23,42,0.96);
-      box-shadow:
-        0 22px 50px rgba(15,23,42,0.9),
-        0 0 0 1px rgba(15,23,42,0.92);
-    }
-
-    .login-header {
-      display: flex;
-      align-items: center;
-      gap: 0.7rem;
-      margin-bottom: 0.45rem;
-    }
-
-    .login-logo {
-      width: 32px;
-      height: 32px;
-      border-radius: 0.95rem;
-      background:
-        radial-gradient(circle at 30% 20%, #22c55e 0, #0ea5e9 50%, #6366f1 90%);
-      border: 1px solid rgba(15,23,42,0.96);
-      box-shadow:
-        0 10px 25px rgba(15,23,42,0.85),
-        0 0 0 1px rgba(15,23,42,0.96);
-    }
-
-    .login-title-block {
-      display: flex;
-      flex-direction: column;
-      gap: 0.1rem;
-    }
-
-    .login-title {
-      margin: 0;
-      font-size: 1.18rem;
-      font-weight: 600;
-      letter-spacing: 0.08em;
-      text-transform: uppercase;
-      color: #f9fafb;
-    }
-
-    .login-kicker {
-      font-size: 0.78rem;
-      text-transform: uppercase;
-      letter-spacing: 0.16em;
-      color: #9ca3af;
-    }
-
-    .login-subtitle {
-      margin: 0.15rem 0 0.55rem;
-      font-size: 0.86rem;
-      color: #cbd5f5;
-    }
-
-    form {
-      margin-top: 0.35rem;
-    }
-
-    label {
-      display: block;
-      margin: 0.55rem 0 0.12rem;
-      font-size: 0.78rem;
-      text-transform: uppercase;
-      letter-spacing: 0.08em;
-      color: #9ca3af;
-    }
-
-    .input {
-      width: 100%;
-      border-radius: 0.7rem;
-      border: 1px solid rgba(30,41,59,0.9);
-      padding: 0.48rem 0.65rem;
-      background: rgba(15,23,42,0.98);
-      color: #e5e7eb;
-      font-size: 0.9rem;
-      outline: none;
-    }
-
-    .input:focus {
-      border-color: #38bdf8;
-      box-shadow: 0 0 0 1px rgba(56,189,248,0.6);
-    }
-
-    .login-row {
-      margin-top: 0.8rem;
-      display: flex;
-      align-items: center;
-      justify-content: space-between;
-      gap: 0.6rem;
-      flex-wrap: wrap;
-    }
-
-    .btn {
-      border-radius: 999px;
-      border: 1px solid rgba(148,163,184,0.85);
-      padding: 0.42rem 1.05rem;
-      font-size: 0.8rem;
-      font-weight: 500;
-      text-transform: uppercase;
-      letter-spacing: 0.12em;
-      background: rgba(15,23,42,0.96);
-      color: #e5e7eb;
-      cursor: pointer;
-    }
-
-    .btn.primary {
-      border-color: rgba(34,197,94,0.9);
-      background: radial-gradient(circle at 30% 0%,
-                  rgba(34,197,94,0.65), rgba(15,23,42,0.98));
-      color: #ecfeff;
-    }
-
-    .btn:disabled {
-      opacity: 0.55;
-      cursor: default;
-      box-shadow: none;
-    }
-
-    .login-note {
-      font-size: 0.78rem;
-      color: #9ca3af;
-    }
-
-    .login-note strong {
-      color: #e5e7eb;
-      font-weight: 500;
-    }
-
-    .login-links {
-      margin-top: 0.5rem;
-      font-size: 0.8rem;
-      color: #9ca3af;
-    }
-
-    .login-links a {
-      color: #22c55e;
-      text-decoration: none;
-    }
-
-    .login-links a:hover {
-      text-decoration: underline;
-    }
-
-    .status {
-      margin-top: 0.45rem;
-      font-size: 0.82rem;
-      min-height: 1.2em;
-      color: #9ca3af;
-    }
-
-    .status.ok {
-      color: #4ade80;
-    }
-
-    .status.err {
-      color: #fb7185;
-    }
-
-    footer.weall-footer {
-      border-top: 1px solid rgba(31,41,55,0.9);
-      padding: 0.7rem 0.1rem 1rem;
-      font-size: 0.78rem;
-      color: #6b7280;
-      text-align: center;
-    }
-
-    footer.weall-footer a {
-      color: #9ca3af;
-      text-decoration: none;
-    }
-
-    footer.weall-footer a:hover {
-      text-decoration: underline;
-    }
-  </style>
 </head>
 <body>
-  <div class="login-shell">
-    <div class="login-wrap">
-      <div class="login-card">
-        <div class="login-header">
-          <div class="login-logo"></div>
-          <div class="login-title-block">
-            <div class="login-kicker">Welcome back</div>
-            <h1 class="login-title">Sign in to WeAll</h1>
-          </div>
-        </div>
-        <p class="login-subtitle" id="login-subtitle">
-          Use your WeAll handle and password to access your local node.
-        </p>
+  <div id="weall_nav"></div>
 
-        <form id="login-form" autocomplete="on">
-          <label for="userId">Handle or email</label>
-          <input
-            id="userId"
-            class="input"
-            name="userId"
-            autocomplete="username"
-            placeholder="@yourhandle or email"
-          />
-
-          <label for="password">Password</label>
-          <input
-            id="password"
-            class="input"
-            name="password"
-            type="password"
-            autocomplete="current-password"
-            placeholder="********"
-          />
-
-          <div class="login-row">
-            <div class="login-note" id="login-note">
-              You’ll be returned to the home feed after sign in.
-            </div>
-            <button class="btn primary" id="btnLogin" type="submit">
-              <span id="btnLabel">Continue</span>
-            </button>
-          </div>
-        </form>
-
-        <div class="status" id="status"></div>
-
-        <div class="login-links">
-          <div>
-            New here?
-            <a href="/frontend/signup.html">Create a new account</a>
-          </div>
-          <div>
-            Need help?
-            <a href="/frontend/recover.html">Recover or reset access</a>
-          </div>
+  <main class="auth-shell">
+    <div class="auth-card">
+      <div class="auth-head">
+        <div class="auth-badge"></div>
+        <div>
+          <div class="auth-kicker">WELCOME BACK</div>
+          <h1 class="auth-title">SIGN IN TO WEALL</h1>
+          <div class="auth-sub">Use your handle (e.g. <b>@satnak</b>) or email.</div>
         </div>
       </div>
+
+      <form id="loginForm" class="auth-form" autocomplete="on">
+        <label class="auth-label">HANDLE OR EMAIL</label>
+        <input id="identifier" class="auth-input" placeholder="@yourhandle or email" autocomplete="username" />
+
+        <label class="auth-label">PASSWORD</label>
+        <input id="password" class="auth-input" type="password" placeholder="********" autocomplete="current-password" />
+
+        <button class="auth-btn" type="submit">CONTINUE</button>
+
+        <div id="msg" class="auth-msg" style="min-height:1.2em;"></div>
+
+        <div class="auth-links">
+          <a href="/frontend/signup.html">Create a new account</a>
+          <span> · </span>
+          <a href="/frontend/recover.html">Recover or reset access</a>
+        </div>
+      </form>
     </div>
-  </div>
+  </main>
 
-  <footer class="weall-footer">
-    <span>© <span id="footer-year">2024</span> WeAll</span>
-    &nbsp;•&nbsp;<a href="/frontend/privacy.html">Privacy</a>
-    &nbsp;•&nbsp;<a href="/frontend/terms.html">Terms</a>
-  </footer>
-
-  <script src="/frontend/env.js"></script>
-  <script src="/frontend/auth.js"></script>
   <script src="/frontend/session.js"></script>
   <script src="/frontend/nav.js"></script>
-  <script src="/frontend/footer.js"></script>
   <script>
-    (function () {
-      const $ = (id) => document.getElementById(id);
+    // Kill any legacy query-string credential flow immediately
+    const hadSensitiveQS = weallStripQueryIfSensitive();
+    if (hadSensitiveQS) {
+      const m = document.getElementById("msg");
+      m.textContent = "For security, please re-enter your credentials.";
+      m.style.color = "#ff6b6b";
+    }
 
-      const form = $("login-form");
-      const userIdInput = $("userId");
-      const pwdInput = $("password");
-      const statusEl = $("status");
-      const btn = $("btnLogin");
-      const btnLabel = $("btnLabel");
-      const subtitle = $("login-subtitle");
-      const note = $("login-note");
+    function normalizeIdentifier(raw) {
+      let s = (raw || "").trim();
+      // If user accidentally types @email@gmail.com (two @), strip the leading @
+      if (s.startsWith("@") && (s.match(/@/g) || []).length > 1) s = s.slice(1);
+      // If it's a normal handle and they typed @satnak, that's fine.
+      return s;
+    }
 
-      function setStatus(msg, kind) {
-        if (!statusEl) return;
-        statusEl.textContent = msg || "";
-        statusEl.className = "status" + (kind ? " " + kind : "");
-      }
+    document.getElementById("loginForm").addEventListener("submit", async (e) => {
+      e.preventDefault();
+      const msg = document.getElementById("msg");
+      msg.textContent = "";
 
-      function getNextUrl() {
-        try {
-          const sp = new URLSearchParams(window.location.search || "");
-          const n = sp.get("next");
-          if (n && /^\\//.test(n)) {
-            return n;
-          }
-        } catch (e) {
-          // ignore
-        }
-        return "/frontend/index.html";
-      }
+      const identifier = normalizeIdentifier(document.getElementById("identifier").value);
+      const password = document.getElementById("password").value;
 
-      async function maybePrefillAndRedirect() {
-        // Prefill from local cache if present
-        try {
-          if (window.weallAuth && typeof weallAuth.getAccount === "function") {
-            const cached = weallAuth.getAccount();
-            if (cached && userIdInput && !userIdInput.value) {
-              userIdInput.value = cached;
-            }
-          }
-        } catch (e) {
-          console.warn("login: getAccount failed", e);
-        }
-
-        const next = getNextUrl();
-        if (note) {
-          if (next && next !== "/frontend/index.html") {
-            note.textContent = "You’ll be returned to: " + next;
-          } else {
-            note.textContent = "You’ll be returned to the home feed after sign in.";
-          }
-        }
-
-        // If session already active, just bounce to next
-        try {
-          if (window.weallAuth && typeof weallAuth.getSession === "function") {
-            const sess = await weallAuth.getSession();
-            if (sess && sess.user_id) {
-              setStatus("Already signed in. Redirecting…", "ok");
-              setTimeout(() => {
-                window.location.replace(next);
-              }, 400);
-              return;
-            }
-          }
-        } catch (e) {
-          console.warn("login: getSession failed", e);
-        }
-
-        if (subtitle) {
-          subtitle.textContent = "Sign in to your WeAll node account.";
-        }
-      }
-
-      if (form) {
-        form.addEventListener("submit", async (ev) => {
-          ev.preventDefault();
-          const userId = (userIdInput && userIdInput.value || "").trim();
-          const pwd = (pwdInput && pwdInput.value) || "";
-
-          if (!userId || !pwd) {
-            setStatus("Please enter both your handle (or email) and password.", "err");
-            return;
-          }
-
-          if (!window.weallAuth || typeof weallAuth.login !== "function") {
-            setStatus("Auth helper is not available on this page.", "err");
-            return;
-          }
-
-          btn.disabled = true;
-          btnLabel.textContent = "Signing in…";
-          setStatus("Checking your credentials…", "");
-
-          try {
-            const res = await weallAuth.login(userId, pwd);
-            if (!res || !res.user_id) {
-              throw new Error("Login failed. No session returned.");
-            }
-            setStatus("Signed in. Redirecting…", "ok");
-            const next = getNextUrl();
-            setTimeout(() => {
-              window.location.replace(next);
-            }, 400);
-          } catch (e) {
-            console.error("login error", e);
-            setStatus(e.message || "Login failed.", "err");
-          } finally {
-            btn.disabled = false;
-            btnLabel.textContent = "Continue";
-          }
+      try {
+        await weallJsonFetch("/auth/apply", {
+          method: "POST",
+          body: JSON.stringify({ user_id: identifier, password })
         });
+        window.location.href = "/frontend/index.html";
+      } catch (err) {
+        msg.textContent = err.message || "Login failed.";
+        msg.style.color = "#ff6b6b";
       }
-
-      if (document.readyState === "loading") {
-        document.addEventListener("DOMContentLoaded", maybePrefillAndRedirect);
-      } else {
-        maybePrefillAndRedirect();
-      }
-    })();
+    });
   </script>
 </body>
 </html>

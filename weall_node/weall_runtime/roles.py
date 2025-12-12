@@ -8,6 +8,12 @@ Implements Full Scope §2: "Network Roles & Topology".
 This module stays *pure*: no FastAPI, no database, only
 Python data structures and helper functions for other
 modules (API, executor, UI) to depend on.
+
+PoH tier rules (per current project spec):
+- Tier 1: view-only
+- Tier 2: like + comment
+- Tier 3: post content (and media uploads)
+Moderation is handled by the network via the dispute flow.
 """
 
 from __future__ import annotations
@@ -28,10 +34,10 @@ class PoHTier(int, Enum):
     Tier 0 is not explicitly in the spec, but it's useful to
     model "Observer" as a pre-PoH state.
     """
-    OBSERVER = 0   # unverified, verify-only
-    TIER1 = 1      # email+auth, view only
-    TIER2 = 2      # async video verified
-    TIER3 = 3      # live-juror verified
+    OBSERVER = 0   # unverified, can view public content only
+    TIER1 = 1      # email+auth identity, view only
+    TIER2 = 2      # can like/comment
+    TIER3 = 3      # can post content (and media uploads); can opt into juror/operator/etc
 
 
 class Capability(str, Enum):
@@ -43,6 +49,7 @@ class Capability(str, Enum):
     """
     VIEW_PUBLIC_CONTENT = "view_public_content"
     VIEW_GROUP_CONTENT = "view_group_content"
+
     CREATE_POST = "create_post"
     COMMENT = "comment"
     LIKE = "like"
@@ -54,10 +61,12 @@ class Capability(str, Enum):
 
     VOTE_GOVERNANCE = "vote_governance"
     CREATE_GOVERNANCE_PROPOSAL = "create_governance_proposal"
+
     OPEN_DISPUTE = "open_dispute"
     SUBMIT_EVIDENCE = "submit_evidence"
 
     SERVE_AS_JUROR = "serve_as_juror"
+
     RUN_NODE = "run_node"
     RUN_VALIDATOR = "run_validator"
     OPERATE_GATEWAY = "operate_gateway"
@@ -95,7 +104,7 @@ class HumanRoleFlags:
     wants_validator: bool = False
     wants_operator: bool = False
     wants_emissary: bool = False
-    wants_creator: bool = True  # default: everyone can be a creator
+    wants_creator: bool = True  # default: everyone may earn creator rewards if eligible
 
 
 @dataclass(frozen=True)
@@ -126,35 +135,45 @@ _TIER_BASE_CAPS: Dict[PoHTier, Set[Capability]] = {
     PoHTier.TIER1: {
         Capability.VIEW_PUBLIC_CONTENT,
         Capability.VIEW_GROUP_CONTENT,
-        # Explicitly *no* posting/commenting at Tier1 per spec:
-        # "Tier 1 User – email+auth identity, view only."
+        # Tier 1 = view-only (no join/like/comment/post).
     },
     PoHTier.TIER2: {
         Capability.VIEW_PUBLIC_CONTENT,
         Capability.VIEW_GROUP_CONTENT,
-        Capability.CREATE_POST,
-        Capability.COMMENT,
+
+        # Tier 2 = can like + comment
         Capability.LIKE,
+        Capability.COMMENT,
         Capability.FLAG_VIOLATION,
+
+        # Community participation (kept at Tier2+)
         Capability.JOIN_GROUPS,
         Capability.LEAVE_GROUPS,
+
+        # Dispute flow participation (moderation happens here)
         Capability.OPEN_DISPUTE,
         Capability.SUBMIT_EVIDENCE,
-        # Governance:
+
+        # Governance
         Capability.VOTE_GOVERNANCE,
     },
     PoHTier.TIER3: {
         Capability.VIEW_PUBLIC_CONTENT,
         Capability.VIEW_GROUP_CONTENT,
+
+        # Tier 3 = can post content (and uploads, enforced at endpoint level)
         Capability.CREATE_POST,
-        Capability.COMMENT,
         Capability.LIKE,
+        Capability.COMMENT,
         Capability.FLAG_VIOLATION,
+
         Capability.JOIN_GROUPS,
         Capability.LEAVE_GROUPS,
         Capability.CREATE_GROUP,
+
         Capability.OPEN_DISPUTE,
         Capability.SUBMIT_EVIDENCE,
+
         Capability.VOTE_GOVERNANCE,
         Capability.CREATE_GOVERNANCE_PROPOSAL,
     },
@@ -168,12 +187,14 @@ def _apply_flags_to_caps(
 ) -> Set[Capability]:
     """
     Upgrade capabilities using human role flags.
-    Tier3 + flags is where the "Juror / Node Operator / Creator / Emissary"
-    bundle really kicks in, per spec.
+
+    Tier3 + flags is where "Juror / Node Operator / Validator / Emissary"
+    bundle kicks in (and creator rewards eligibility starts, since posting is Tier3).
     """
     caps: Set[Capability] = set(base_caps)
 
-    if tier >= PoHTier.TIER2 and flags.wants_creator:
+    # Creator rewards eligibility begins at Tier3 (because Tier3 is when posting begins).
+    if tier >= PoHTier.TIER3 and flags.wants_creator:
         caps.add(Capability.EARN_CREATOR_REWARDS)
 
     # Juror: only meaningful at Tier3.

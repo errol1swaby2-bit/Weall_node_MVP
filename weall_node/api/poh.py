@@ -211,7 +211,8 @@ class Tier3MarkEndedBody(BaseModel):
 
 
 class JurorVoteBody(BaseModel):
-    vote: str = Field(..., regex="^(approve|reject)$")
+    # Pydantic v2: `regex=` removed; use `pattern=`
+    vote: str = Field(..., pattern=r"^(approve|reject)$")
     reason: Optional[str] = Field(
         default="",
         description="Optional free-text explanation from the juror.",
@@ -335,12 +336,6 @@ def list_juror_assignments(request: Request) -> Dict[str, Any]:
 def upgrade_to_tier2(body: Tier2UpgradeBody, request: Request) -> Dict[str, Any]:
     """
     Initiate or continue the Tier 2 async video flow for the current user.
-
-    Steps:
-    - Ensure PoH record exists and is currently Tier 1.
-    - Create or reuse a Tier 2 upgrade request.
-    - Attach async video evidence (video CIDs, random phrase, device fingerprint).
-    - Move request into STATUS_AWAITING_VOTES for jurors.
     """
     user_id = _get_current_user_id(request)
     ledger = _get_ledger()
@@ -375,10 +370,6 @@ def upgrade_to_tier2(body: Tier2UpgradeBody, request: Request) -> Dict[str, Any]
 def request_tier3_upgrade(request: Request) -> Dict[str, Any]:
     """
     Create (or reuse) a Tier 3 upgrade request for the current user.
-
-    This does NOT schedule a call; it simply establishes the intent
-    and moves the request into the Tier 3 pipeline. Scheduling and
-    call lifecycle are handled by other endpoints.
     """
     user_id = _get_current_user_id(request)
     ledger = _get_ledger()
@@ -403,9 +394,6 @@ def schedule_tier3_call(
 ) -> Dict[str, Any]:
     """
     Attach live-call scheduling metadata for a Tier 3 request.
-
-    Typically called by a backend / operator / scheduler, but we don't
-    enforce a specific role here yet.
     """
     _ = _get_current_user_id(request)  # reserved for auth, currently unused
     ledger = _get_ledger()
@@ -430,8 +418,7 @@ def mark_tier3_call_started(
     request: Request,
 ) -> Dict[str, Any]:
     """
-    Mark a Tier 3 live call as started. Typically invoked when the
-    call session actually begins.
+    Mark a Tier 3 live call as started.
     """
     _ = _get_current_user_id(request)  # reserved for auth, currently unused
     ledger = _get_ledger()
@@ -481,14 +468,10 @@ def juror_vote_on_poh_request(
 ) -> Dict[str, Any]:
     """
     Apply a juror's vote on a Tier 2 or Tier 3 PoH upgrade request.
-
-    Gated by:
-    - User must have SERVE_AS_JUROR capability (Tier 3 in practice).
     """
     user_id = _get_current_user_id(request)
     ledger = _get_ledger()
 
-    # Check juror capability from runtime roles.
     if not _get_effective_juror_capability(ledger, user_id):
         raise HTTPException(status_code=403, detail="User is not authorized to serve as juror")
 
