@@ -1,350 +1,255 @@
-"""
-weall_node/weall_runtime/roles.py
---------------------------------------------------
-Canonical definition of WeAll network roles & topology.
-
-Implements Full Scope §2: "Network Roles & Topology".
-
-This module stays *pure*: no FastAPI, no database, only
-Python data structures and helper functions for other
-modules (API, executor, UI) to depend on.
-
-PoH tier rules (per current project spec):
-- Tier 1: view-only
-- Tier 2: like + comment
-- Tier 3: post content (and media uploads)
-Moderation is handled by the network via the dispute flow.
-"""
-
+# weall_node/weall_runtime/roles.py
 from __future__ import annotations
+
+"""
+WeAll Roles & Capability Gate (Spec-aligned)
+
+Spec v2.1 alignment:
+- Tier 0: view-only
+- Tier 1: like + comment
+- Tier 2: post + vote + join groups (and includes like/comment)
+- Tier 3: steward extensions (create groups/proposals/transfers + opt-in duties)
+
+Also preserves runtime compatibility:
+- NodeKind.PUBLIC_GATEWAY exists (node_config.py expects it)
+- capability_matrix_by_tier and capability_matrix_full_example exist (tests expect them)
+"""
 
 from dataclasses import dataclass
 from enum import Enum
-from typing import Dict, List, Optional, Set
+from typing import Dict, FrozenSet, List, Optional, Set
 
-
-# ============================================================
-# Base PoH tiers & human "role flags"
-# ============================================================
 
 class PoHTier(int, Enum):
-    """
-    One human → one PoH record → one effective tier.
-
-    Tier 0 is not explicitly in the spec, but it's useful to
-    model "Observer" as a pre-PoH state.
-    """
-    OBSERVER = 0   # unverified, can view public content only
-    TIER1 = 1      # email+auth identity, view only
-    TIER2 = 2      # can like/comment
-    TIER3 = 3      # can post content (and media uploads); can opt into juror/operator/etc
+    TIER0 = 0
+    TIER1 = 1
+    TIER2 = 2
+    TIER3 = 3
 
 
 class Capability(str, Enum):
-    """
-    Fine-grained capabilities that endpoints / frontends can check.
-
-    These are *not* tied to specific URLs: they are semantic
-    primitives used across APIs.
-    """
+    # Viewing
     VIEW_PUBLIC_CONTENT = "view_public_content"
     VIEW_GROUP_CONTENT = "view_group_content"
 
+    # Posting & interaction
     CREATE_POST = "create_post"
     COMMENT = "comment"
     LIKE = "like"
     FLAG_VIOLATION = "flag_violation"
+    DELETE_OWN_CONTENT = "delete_own_content"
+    EDIT_OWN_CONTENT = "edit_own_content"
 
+    # Groups
     JOIN_GROUPS = "join_groups"
     LEAVE_GROUPS = "leave_groups"
     CREATE_GROUP = "create_group"
 
-    VOTE_GOVERNANCE = "vote_governance"
-    CREATE_GOVERNANCE_PROPOSAL = "create_governance_proposal"
-
+    # Disputes
+    VIEW_DISPUTES = "view_disputes"
     OPEN_DISPUTE = "open_dispute"
     SUBMIT_EVIDENCE = "submit_evidence"
 
-    SERVE_AS_JUROR = "serve_as_juror"
+    # Governance
+    VIEW_GOVERNANCE = "view_governance"
+    VOTE_GOVERNANCE = "vote_governance"
+    CREATE_GOVERNANCE_PROPOSAL = "create_governance_proposal"
 
-    RUN_NODE = "run_node"
-    RUN_VALIDATOR = "run_validator"
-    OPERATE_GATEWAY = "operate_gateway"
-    OPERATE_COMMUNITY_NODE = "operate_community_node"
-
-    ACT_AS_EMISSARY = "act_as_emissary"
+    # Treasury / rewards
+    VIEW_TREASURY = "view_treasury"
+    CREATE_TREASURY_TRANSFER = "create_treasury_transfer"
+    CLAIM_REWARDS = "claim_rewards"
     EARN_CREATOR_REWARDS = "earn_creator_rewards"
 
+    # Opt-in “work” roles (Tier3)
+    SERVE_AS_JUROR = "serve_as_juror"
+    ACT_AS_EMISSARY = "act_as_emissary"
 
-class NodeKind(str, Enum):
-    """
-    Topology-level node roles (§2.2 Topology).
-
-    A physical node can be more than one kind, but this is the
-    *intended* configuration space.
-    """
-    OBSERVER_CLIENT = "observer_client"     # browser / light client
-    PUBLIC_GATEWAY = "public_gateway"       # exposes HTTP API
-    VALIDATOR_NODE = "validator_node"       # participates in consensus
-    COMMUNITY_NODE = "community_node"       # private / org node
+    # Node / infra
+    RUN_NODE = "run_node"
+    OPERATE_GATEWAY = "operate_gateway"
+    OPERATE_COMMUNITY_NODE = "operate_community_node"
+    RUN_VALIDATOR = "run_validator"
+    FINALITY_VOTE = "finality_vote"
 
 
 @dataclass(frozen=True)
 class HumanRoleFlags:
-    """
-    Per-human preference flags. These are *intent* signals; the
-    actual ability is the intersection of:
-
-        - PoH tier,
-        - Reputation,
-        - Network capacity constraints,
-        - These flags (juror / validator / operator / emissary / creator).
-    """
+    wants_creator: bool = True
     wants_juror: bool = False
-    wants_validator: bool = False
     wants_operator: bool = False
+    wants_validator: bool = False
     wants_emissary: bool = False
-    wants_creator: bool = True  # default: everyone may earn creator rewards if eligible
+
+    def to_dict(self) -> Dict[str, bool]:
+        return {
+            "wants_creator": bool(self.wants_creator),
+            "wants_juror": bool(self.wants_juror),
+            "wants_operator": bool(self.wants_operator),
+            "wants_validator": bool(self.wants_validator),
+            "wants_emissary": bool(self.wants_emissary),
+        }
+
+    @classmethod
+    def from_any(cls, obj: object) -> "HumanRoleFlags":
+        if isinstance(obj, HumanRoleFlags):
+            return obj
+        if isinstance(obj, dict):
+            return cls(
+                wants_creator=bool(obj.get("wants_creator", True)),
+                wants_juror=bool(obj.get("wants_juror", False)),
+                wants_operator=bool(obj.get("wants_operator", False)),
+                wants_validator=bool(obj.get("wants_validator", False)),
+                wants_emissary=bool(obj.get("wants_emissary", False)),
+            )
+        return cls()
+
+
+class NodeKind(str, Enum):
+    # legacy/deployment-ish
+    LIGHT = "light"
+    FULL = "full"
+    VALIDATOR = "validator"
+    OPERATOR = "operator"
+
+    # topology kinds
+    OBSERVER_CLIENT = "observer_client"
+    PUBLIC_GATEWAY = "public_gateway"
+    VALIDATOR_NODE = "validator_node"
+    COMMUNITY_NODE = "community_node"
 
 
 @dataclass(frozen=True)
-class EffectiveRoleProfile:
-    """
-    Effective capabilities for a given human, derived from:
-
-        - PoH tier,
-        - human role flags,
-        - optional extra constraints (e.g., reputation thresholds).
-
-    This is what API endpoints should *actually check*.
-    """
+class RoleProfile:
     poh_tier: PoHTier
     flags: HumanRoleFlags
-    capabilities: Set[Capability]
+    node_kind: NodeKind
+    capabilities: FrozenSet[Capability]
 
 
-# ============================================================
-# Capability matrices
-# ============================================================
+# -----------------------
+# Base capabilities by tier (Spec-aligned)
+# -----------------------
 
-# Base capabilities by PoH tier (no flags, no rep thresholds).
-_TIER_BASE_CAPS: Dict[PoHTier, Set[Capability]] = {
-    PoHTier.OBSERVER: {
+_TIER0_BASE: FrozenSet[Capability] = frozenset(
+    {
         Capability.VIEW_PUBLIC_CONTENT,
-    },
-    PoHTier.TIER1: {
+        Capability.VIEW_GOVERNANCE,
+        Capability.VIEW_DISPUTES,
+        Capability.VIEW_TREASURY,
+    }
+)
+
+# ✅ Spec: Tier1 can like/comment, but NOT post/vote/join groups
+_TIER1_BASE: FrozenSet[Capability] = frozenset(
+    {
         Capability.VIEW_PUBLIC_CONTENT,
         Capability.VIEW_GROUP_CONTENT,
-        # Tier 1 = view-only (no join/like/comment/post).
-    },
-    PoHTier.TIER2: {
-        Capability.VIEW_PUBLIC_CONTENT,
-        Capability.VIEW_GROUP_CONTENT,
-
-        # Tier 2 = can like + comment
         Capability.LIKE,
         Capability.COMMENT,
-        Capability.FLAG_VIOLATION,
+        Capability.VIEW_GOVERNANCE,
+        Capability.VIEW_DISPUTES,
+        Capability.VIEW_TREASURY,
+    }
+)
 
-        # Community participation (kept at Tier2+)
-        Capability.JOIN_GROUPS,
-        Capability.LEAVE_GROUPS,
-
-        # Dispute flow participation (moderation happens here)
-        Capability.OPEN_DISPUTE,
-        Capability.SUBMIT_EVIDENCE,
-
-        # Governance
-        Capability.VOTE_GOVERNANCE,
-    },
-    PoHTier.TIER3: {
+# ✅ Spec: Tier2 can post + vote + join groups (+ like/comment)
+_TIER2_BASE: FrozenSet[Capability] = frozenset(
+    {
         Capability.VIEW_PUBLIC_CONTENT,
         Capability.VIEW_GROUP_CONTENT,
-
-        # Tier 3 = can post content (and uploads, enforced at endpoint level)
         Capability.CREATE_POST,
-        Capability.LIKE,
         Capability.COMMENT,
+        Capability.LIKE,
         Capability.FLAG_VIOLATION,
-
         Capability.JOIN_GROUPS,
         Capability.LEAVE_GROUPS,
-        Capability.CREATE_GROUP,
-
         Capability.OPEN_DISPUTE,
         Capability.SUBMIT_EVIDENCE,
-
         Capability.VOTE_GOVERNANCE,
+        Capability.VIEW_GOVERNANCE,
+        Capability.VIEW_DISPUTES,
+        Capability.CLAIM_REWARDS,
+        Capability.VIEW_TREASURY,
+        Capability.DELETE_OWN_CONTENT,
+        Capability.EDIT_OWN_CONTENT,
+    }
+)
+
+# Tier3 = Tier2 + steward actions
+_TIER3_BASE: FrozenSet[Capability] = frozenset(
+    set(_TIER2_BASE)
+    | {
+        Capability.CREATE_GROUP,
         Capability.CREATE_GOVERNANCE_PROPOSAL,
-    },
+        Capability.CREATE_TREASURY_TRANSFER,
+    }
+)
+
+_BASE_CAPS: Dict[PoHTier, FrozenSet[Capability]] = {
+    PoHTier.TIER0: _TIER0_BASE,
+    PoHTier.TIER1: _TIER1_BASE,
+    PoHTier.TIER2: _TIER2_BASE,
+    PoHTier.TIER3: _TIER3_BASE,
 }
-
-
-def _apply_flags_to_caps(
-    tier: PoHTier,
-    flags: HumanRoleFlags,
-    base_caps: Set[Capability],
-) -> Set[Capability]:
-    """
-    Upgrade capabilities using human role flags.
-
-    Tier3 + flags is where "Juror / Node Operator / Validator / Emissary"
-    bundle kicks in (and creator rewards eligibility starts, since posting is Tier3).
-    """
-    caps: Set[Capability] = set(base_caps)
-
-    # Creator rewards eligibility begins at Tier3 (because Tier3 is when posting begins).
-    if tier >= PoHTier.TIER3 and flags.wants_creator:
-        caps.add(Capability.EARN_CREATOR_REWARDS)
-
-    # Juror: only meaningful at Tier3.
-    if tier >= PoHTier.TIER3 and flags.wants_juror:
-        caps.add(Capability.SERVE_AS_JUROR)
-
-    # Node operator / gateway / validator: Tier3 per spec.
-    if tier >= PoHTier.TIER3 and flags.wants_operator:
-        caps.add(Capability.RUN_NODE)
-        caps.add(Capability.OPERATE_GATEWAY)
-        caps.add(Capability.OPERATE_COMMUNITY_NODE)
-
-    if tier >= PoHTier.TIER3 and flags.wants_validator:
-        caps.add(Capability.RUN_VALIDATOR)
-
-    # Emissary / delegate: Tier3 + explicit opt-in.
-    if tier >= PoHTier.TIER3 and flags.wants_emissary:
-        caps.add(Capability.ACT_AS_EMISSARY)
-
-    return caps
 
 
 def compute_effective_role_profile(
-    poh_tier: int,
+    poh_tier: PoHTier | int,
     flags: Optional[HumanRoleFlags] = None,
-) -> EffectiveRoleProfile:
-    """
-    Main entry point for API/selector code.
+    node_kind: NodeKind = NodeKind.FULL,
+) -> RoleProfile:
+    tier = PoHTier(int(poh_tier))
+    f = flags or HumanRoleFlags()
 
-    Given:
-        - an integer PoH tier from the ledger
-        - optional HumanRoleFlags (from the ledger)
+    caps: Set[Capability] = set(_BASE_CAPS[tier])
 
-    return a fully computed EffectiveRoleProfile.
-    """
-    tier_enum: PoHTier = PoHTier(max(0, min(int(poh_tier), int(PoHTier.TIER3))))
-    if flags is None:
-        flags = HumanRoleFlags()
+    # Creator rewards: Tier2+ by default, removable via wants_creator=False
+    if int(tier) >= int(PoHTier.TIER2) and f.wants_creator:
+        caps.add(Capability.EARN_CREATOR_REWARDS)
+    else:
+        caps.discard(Capability.EARN_CREATOR_REWARDS)
 
-    base_caps = _TIER_BASE_CAPS[tier_enum]
-    caps = _apply_flags_to_caps(tier_enum, flags, base_caps)
+    # Opt-in roles require Tier3 + flag
+    if tier == PoHTier.TIER3 and f.wants_juror:
+        caps.add(Capability.SERVE_AS_JUROR)
 
-    return EffectiveRoleProfile(
-        poh_tier=tier_enum,
-        flags=flags,
-        capabilities=caps,
-    )
+    if tier == PoHTier.TIER3 and f.wants_operator:
+        caps.update({Capability.RUN_NODE, Capability.OPERATE_GATEWAY, Capability.OPERATE_COMMUNITY_NODE})
 
+    if tier == PoHTier.TIER3 and f.wants_validator:
+        caps.add(Capability.RUN_VALIDATOR)
+        caps.add(Capability.FINALITY_VOTE)
 
-# ============================================================
-# Topology helpers
-# ============================================================
+    if tier == PoHTier.TIER3 and f.wants_emissary:
+        caps.add(Capability.ACT_AS_EMISSARY)
 
-@dataclass(frozen=True)
-class NodeTopologyProfile:
-    """
-    What a *node* is allowed / expected to do based on its kind.
+    return RoleProfile(poh_tier=tier, flags=f, node_kind=node_kind, capabilities=frozenset(caps))
 
-    This is independent from human PoH roles. A single person might
-    control multiple nodes; a node might serve many humans.
-    """
-    kind: NodeKind
-    exposes_public_api: bool
-    participates_in_consensus: bool
-    stores_group_data: bool
-    is_private_scope: bool
-
-
-_NODE_KIND_PROFILES: Dict[NodeKind, NodeTopologyProfile] = {
-    NodeKind.OBSERVER_CLIENT: NodeTopologyProfile(
-        kind=NodeKind.OBSERVER_CLIENT,
-        exposes_public_api=False,
-        participates_in_consensus=False,
-        stores_group_data=False,
-        is_private_scope=False,
-    ),
-    NodeKind.PUBLIC_GATEWAY: NodeTopologyProfile(
-        kind=NodeKind.PUBLIC_GATEWAY,
-        exposes_public_api=True,
-        participates_in_consensus=False,
-        stores_group_data=True,
-        is_private_scope=False,
-    ),
-    NodeKind.VALIDATOR_NODE: NodeTopologyProfile(
-        kind=NodeKind.VALIDATOR_NODE,
-        exposes_public_api=True,
-        participates_in_consensus=True,
-        stores_group_data=True,
-        is_private_scope=False,
-    ),
-    NodeKind.COMMUNITY_NODE: NodeTopologyProfile(
-        kind=NodeKind.COMMUNITY_NODE,
-        exposes_public_api=True,
-        participates_in_consensus=False,  # can be toggled via config later
-        stores_group_data=True,
-        is_private_scope=True,
-    ),
-}
-
-
-def node_topology_profile(kind: NodeKind) -> NodeTopologyProfile:
-    """
-    Return a descriptive topology profile for a node kind.
-
-    Useful for:
-        - `/roles/topology` API responses
-        - configuration UIs
-        - internal checks (e.g., "validators must be VALIDATOR_NODE").
-    """
-    return _NODE_KIND_PROFILES[kind]
-
-
-# ============================================================
-# Introspection helpers for UI / docs
-# ============================================================
 
 def capability_matrix_by_tier() -> Dict[str, List[str]]:
-    """
-    Return a JSON-friendly representation of the tier → capabilities
-    mapping that the frontend can render as a table.
-    """
     out: Dict[str, List[str]] = {}
-    for tier, caps in _TIER_BASE_CAPS.items():
-        out[str(int(tier))] = sorted(c.value for c in caps)
+    for t in (PoHTier.TIER0, PoHTier.TIER1, PoHTier.TIER2, PoHTier.TIER3):
+        prof = compute_effective_role_profile(t)
+        out[str(int(t))] = sorted([c.value for c in prof.capabilities])
     return out
 
 
 def capability_matrix_full_example() -> Dict[str, Dict[str, List[str]]]:
-    """
-    Example of how capabilities change with flags, suitable for
-    documentation or a `/roles/meta` endpoint.
-
-    Keys:
-        tier: "0".."3"
-        scenario: "default", "juror", "validator", "emissary", "operator+validator"
-    """
     scenarios = {
         "default": HumanRoleFlags(),
+        "creator_opt_out": HumanRoleFlags(wants_creator=False),
         "juror": HumanRoleFlags(wants_juror=True),
+        "operator": HumanRoleFlags(wants_operator=True),
         "validator": HumanRoleFlags(wants_validator=True),
         "emissary": HumanRoleFlags(wants_emissary=True),
-        "operator+validator": HumanRoleFlags(wants_operator=True, wants_validator=True),
     }
 
-    result: Dict[str, Dict[str, List[str]]] = {}
-    for tier in PoHTier:
-        tier_key = str(int(tier))
-        result[tier_key] = {}
-        for name, flags in scenarios.items():
-            profile = compute_effective_role_profile(tier, flags)
-            result[tier_key][name] = sorted(c.value for c in profile.capabilities)
-
-    return result
+    out: Dict[str, Dict[str, List[str]]] = {}
+    for t in (PoHTier.TIER0, PoHTier.TIER1, PoHTier.TIER2, PoHTier.TIER3):
+        tier_key = str(int(t))
+        out[tier_key] = {}
+        for name, fl in scenarios.items():
+            prof = compute_effective_role_profile(t, fl)
+            out[tier_key][name] = sorted([c.value for c in prof.capabilities])
+    return out

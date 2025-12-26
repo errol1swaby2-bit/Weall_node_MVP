@@ -2,72 +2,76 @@
 from __future__ import annotations
 
 """
-WeAll runtime facade.
+WeAll runtime package (lazy import / Termux-friendly)
 
-This package groups the low-level runtime helpers used by the node:
+Why:
+- In Termux (and in general), import-time side effects cause pain.
+- Proto TX lane should be able to load without pulling in heavy dependencies.
+- Uvicorn / FastAPI import path should not explode because a deep module import
+  triggered crypto/toolchain requirements.
 
-- storage         : content storage helpers (IPFS / in-memory fallback)
-- participation   : juror/participant selection + randomness
-- governance      : runtime governance / policy defaults
-- utils           : misc helpers (timestamps, hashing, etc.)
-- crypto          : Ed25519 + KDF + messaging wrappers
-- crypto_symmetric: AES-GCM symmetric crypto implementation
+This file intentionally does NOT import crypto/storage/etc at import time.
 
-Symmetric crypto backends
--------------------------
-By default, all symmetric crypto should use the AES-GCM implementation
-in `crypto_symmetric.py`.
-
-An older, pycryptodome-based dev module (`crypto_symmetric_dev.py`)
-still exists for experimentation and backwards compatibility on some
-Termux-style environments, but it is *not* imported automatically for
-production.
-
-To explicitly allow the legacy / dev symmetric backend in a local dev
-environment, set:
-
-    WEALL_DEV_INSECURE_CRYPTO=1
-
-before starting the node.
-
-This flag should NEVER be enabled in production.
+It provides:
+- a small helper for "dev insecure crypto" flag
+- lazy module attribute access via __getattr__ (PEP 562)
 """
 
+from importlib import import_module
+from typing import Any
 import os
 
-from . import storage
-from . import participation
-from . import governance
-from . import utils
-from . import crypto_utils as crypto
-from . import crypto_symmetric
-from .reputation import ReputationRuntime
-from . import reputation_jurors
+__all__ = [
+    "is_dev_insecure_mode",
+    # lazily exposed modules:
+    "crypto",
+    "storage",
+    "ledger",
+    "wallet",
+    "roles",
+    "poh",
+    "poh_flow",
+    "poh_sync",
+    "sync",
+    "reputation",
+    "reputation_jurors",
+    "governance",
+    "disputes",
+    "participation",
+]
 
-# ---------------------------------------------------------------------------
-# Optional dev-only symmetric backend
-# ---------------------------------------------------------------------------
-
-
-DEV_INSECURE_CRYPTO: bool = bool(os.getenv("WEALL_DEV_INSECURE_CRYPTO"))
-
-if DEV_INSECURE_CRYPTO:
-    try:
-        # Legacy / dev-only symmetric implementation (pycryptodome / Crypto.Cipher)
-        from . import crypto_symmetric_dev  # type: ignore
-    except Exception:  # pragma: no cover - dev-only import failure
-        crypto_symmetric_dev = None  # type: ignore
-else:
-    # Expose the name but make it clear it's disabled
-    crypto_symmetric_dev = None  # type: ignore
+_DEV_INSECURE = os.getenv("WEALL_DEV_INSECURE_CRYPTO", "0") == "1"
 
 
 def is_dev_insecure_mode() -> bool:
-    """
-    Return True if the process is explicitly configured to allow the
-    legacy / insecure symmetric crypto backend.
+    return _DEV_INSECURE
 
-    This is primarily useful for diagnostics. Runtime code should still
-    prefer `crypto_symmetric` (AES-GCM) for all real encryption.
-    """
-    return DEV_INSECURE_CRYPTO
+
+_LAZY_MAP = {
+    # historically: `from . import crypto_utils as crypto`
+    "crypto": "weall_node.weall_runtime.crypto_utils",
+    "storage": "weall_node.weall_runtime.storage",
+    "ledger": "weall_node.weall_runtime.ledger",
+    "wallet": "weall_node.weall_runtime.wallet",
+    "roles": "weall_node.weall_runtime.roles",
+    "poh": "weall_node.weall_runtime.poh",
+    "poh_flow": "weall_node.weall_runtime.poh_flow",
+    "poh_sync": "weall_node.weall_runtime.poh_sync",
+    "sync": "weall_node.weall_runtime.sync",
+    "reputation": "weall_node.weall_runtime.reputation",
+    "reputation_jurors": "weall_node.weall_runtime.reputation_jurors",
+    "governance": "weall_node.weall_runtime.governance",
+    "disputes": "weall_node.weall_runtime.disputes",
+    "participation": "weall_node.weall_runtime.participation",
+}
+
+
+def __getattr__(name: str) -> Any:
+    mod_path = _LAZY_MAP.get(name)
+    if not mod_path:
+        raise AttributeError(name)
+    return import_module(mod_path)
+
+
+def __dir__() -> list[str]:
+    return sorted(set(globals().keys()) | set(_LAZY_MAP.keys()))

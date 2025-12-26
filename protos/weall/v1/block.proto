@@ -1,0 +1,31 @@
+syntax = "proto3";
+
+package weall.v1;
+
+import "weall/v1/common.proto";
+import "weall/v1/tx.proto";
+import "weall/v1/receipt.proto";
+
+message BlockHeader {
+  uint64 height = 1;
+  bytes prev_hash = 2;
+
+  string chain_id = 3;
+  uint64 epoch = 4;
+
+  bytes proposer = 5;
+  TimestampMs proposed_time = 6;
+
+  bytes tx_root = 10;
+  bytes receipts_root = 11;
+  bytes state_root = 12;
+}
+
+message Block {
+  BlockHeader header = 1;
+  repeated TxEnvelope txs = 2;
+  repeated TxReceipt receipts = 3;
+
+  bytes block_hash = 100;
+  bytes signature = 101;
+}

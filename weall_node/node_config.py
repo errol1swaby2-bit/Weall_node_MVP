@@ -15,8 +15,7 @@ Resolution order (NODE_KIND)
 1) Environment variable WEALL_NODE_KIND
    One of: observer_client, public_gateway, validator_node, community_node
 
-2) JSON file "node_kind.json" in the repo root:
-     { "node_kind": "validator_node" }
+2) JSON file "node_kind.json" in the repo root (PROJECT_ROOT)
 
 3) Fallback: public_gateway
 
@@ -34,11 +33,10 @@ Resolution order (VALIDATORS / QUORUM_FRACTION)
 
 3) Fallback: [local node_id] (single-node dev), quorum_fraction=0.60
 
-NOTE
-----
-Earlier versions of this file incorrectly treated the *package directory*
-as the "project root". The repo places node_kind.json / node_id.json at the
-repo root, so we resolve relative to that.
+Notes
+-----
+- node_id is loaded from WEALL_DATA_DIR/node_id.json first (runtime-local).
+  Legacy repo-root node_id.json is only a fallback for compatibility.
 """
 
 from __future__ import annotations
@@ -54,15 +52,17 @@ from .weall_runtime import roles as runtime_roles
 # Repo root = parent of the package directory (weall_node/)
 PROJECT_ROOT = Path(__file__).resolve().parent.parent
 
+# Default data dir (matches weall_node/settings.py)
+DATA_DIR = Path(os.getenv("WEALL_DATA_DIR", str(PROJECT_ROOT / "data")))
+
 
 def _read_json(path: Path) -> Optional[dict]:
     try:
         if not path.exists():
             return None
-        data = json.loads(path.read_text(encoding="utf-8"))
-        if not isinstance(data, dict):
-            return None
-        return data
+        with path.open("r", encoding="utf-8") as f:
+            data = json.load(f)
+        return data if isinstance(data, dict) else None
     except Exception:
         return None
 
@@ -72,7 +72,7 @@ def _read_json(path: Path) -> Optional[dict]:
 # ---------------------------------------------------------------------------
 
 
-def _from_env_node_kind() -> runtime_roles.NodeKind | None:
+def _from_env_node_kind() -> Optional[runtime_roles.NodeKind]:
     raw = os.getenv("WEALL_NODE_KIND")
     if not raw:
         return None
@@ -83,9 +83,8 @@ def _from_env_node_kind() -> runtime_roles.NodeKind | None:
     return None
 
 
-def _from_file_node_kind() -> runtime_roles.NodeKind | None:
-    cfg_path = PROJECT_ROOT / "node_kind.json"
-    data = _read_json(cfg_path)
+def _from_file_node_kind() -> Optional[runtime_roles.NodeKind]:
+    data = _read_json(PROJECT_ROOT / "node_kind.json")
     if not data:
         return None
     raw = str(data.get("node_kind", "")).strip().lower()
@@ -114,8 +113,16 @@ NODE_KIND: runtime_roles.NodeKind = _resolve_node_kind()
 
 
 def _read_node_id() -> Optional[str]:
-    """Best-effort read of node_id.json at repo root."""
-    data = _read_json(PROJECT_ROOT / "node_id.json")
+    """Best-effort read of node_id.json.
+
+    Preferred location is the runtime data dir (WEALL_DATA_DIR / node_id.json).
+    For backward compatibility, we also try the legacy repo-root node_id.json.
+    """
+    # Preferred (runtime-local) location
+    data = _read_json(DATA_DIR / "node_id.json")
+    if not data:
+        # Legacy fallback (do NOT ship secrets here)
+        data = _read_json(PROJECT_ROOT / "node_id.json")
     if not data:
         return None
     nid = str(data.get("node_id") or "").strip()

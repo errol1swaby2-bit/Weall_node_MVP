@@ -1,0 +1,190 @@
+syntax = "proto3";
+
+package weall.v1;
+
+import "weall/v1/common.proto";
+
+enum TxType {
+  TX_UNSPECIFIED = 0;
+
+  TX_CONTENT_POST = 10;
+  TX_LIKE = 11;
+  TX_COMMENT = 12;
+  TX_REPORT_CONTENT = 13;
+
+  TX_GROUP_CREATE = 20;
+  TX_GROUP_JOIN = 21;
+  TX_GROUP_LEAVE = 22;
+
+  TX_TREASURY_TRANSFER = 30;
+
+  TX_PROPOSAL_CREATE = 40;
+  TX_PROPOSAL_VOTE = 41;
+  TX_PROPOSAL_FINALIZE = 42;
+
+  TX_DISPUTE_OPEN = 50;
+  TX_DISPUTE_SUBMIT_EVIDENCE = 51;
+  TX_DISPUTE_JUROR_VOTE = 52;
+  TX_DISPUTE_FINALIZE = 53;
+
+  TX_POH_SUBMIT = 60;
+  TX_POH_UPDATE_TIER = 61;
+  TX_ROLE_GRANT = 62;
+  TX_ROLE_REVOKE = 63;
+
+  TX_PARAM_UPDATE = 70;
+}
+
+message TxEnvelope {
+  string chain_id = 1;
+  uint32 schema_version = 2;
+
+  TxType tx_type = 3;
+
+  bytes sender = 4;
+  uint64 nonce = 5;
+  uint64 fee = 6;
+
+  TimestampMs client_time = 7;
+
+  oneof payload {
+    ContentPostTx content_post = 20;
+    LikeTx like = 21;
+    CommentTx comment = 22;
+    ReportContentTx report_content = 23;
+
+    GroupCreateTx group_create = 30;
+    GroupJoinTx group_join = 31;
+    GroupLeaveTx group_leave = 32;
+
+    TreasuryTransferTx treasury_transfer = 40;
+
+    ProposalCreateTx proposal_create = 50;
+    ProposalVoteTx proposal_vote = 51;
+    ProposalFinalizeTx proposal_finalize = 52;
+
+    DisputeOpenTx dispute_open = 60;
+    DisputeSubmitEvidenceTx dispute_submit_evidence = 61;
+    DisputeJurorVoteTx dispute_juror_vote = 62;
+    DisputeFinalizeTx dispute_finalize = 63;
+
+    PohSubmitTx poh_submit = 70;
+    PohUpdateTierTx poh_update_tier = 71;
+    RoleGrantTx role_grant = 72;
+    RoleRevokeTx role_revoke = 73;
+
+    ParamUpdateTx param_update = 80;
+  }
+
+  bytes tx_id = 100;
+  bytes signature = 101;
+}
+
+message ContentPostTx {
+  Ref content_ref = 1;
+  string mime = 2;
+  string title = 3;
+  string summary = 4;
+}
+
+message LikeTx {
+  bytes content_id = 1;
+}
+
+message CommentTx {
+  bytes content_id = 1;
+  string text = 2;
+  Ref comment_ref = 3;
+}
+
+message ReportContentTx {
+  bytes content_id = 1;
+  string reason = 2;
+}
+
+message GroupCreateTx {
+  string display_name = 1;
+  string description = 2;
+}
+
+message GroupJoinTx {
+  bytes group_id = 1;
+}
+
+message GroupLeaveTx {
+  bytes group_id = 1;
+}
+
+message TreasuryTransferTx {
+  bytes treasury_id = 1;
+  bytes to = 2;
+  uint64 amount = 3;
+  string memo = 4;
+}
+
+message ProposalCreateTx {
+  bytes scope_id = 1;
+  string title = 2;
+  string body = 3;
+  Ref body_ref = 4;
+}
+
+message ProposalVoteTx {
+  bytes proposal_id = 1;
+  bool support = 2;
+}
+
+message ProposalFinalizeTx {
+  bytes proposal_id = 1;
+}
+
+message DisputeOpenTx {
+  bytes scope_id = 1;
+  bytes target_id = 2;
+  string kind = 3;
+  string claim = 4;
+}
+
+message DisputeSubmitEvidenceTx {
+  bytes dispute_id = 1;
+  Ref evidence_ref = 2;
+  string note = 3;
+}
+
+message DisputeJurorVoteTx {
+  bytes dispute_id = 1;
+  bool support_claim = 2;
+  string note = 3;
+}
+
+message DisputeFinalizeTx {
+  bytes dispute_id = 1;
+}
+
+message PohSubmitTx {
+  Ref proof_ref = 1;
+  string note = 2;
+}
+
+message PohUpdateTierTx {
+  bytes subject = 1;
+  uint32 new_tier = 2;
+  string reason = 3;
+}
+
+message RoleGrantTx {
+  bytes subject = 1;
+  string role = 2;
+  string reason = 3;
+}
+
+message RoleRevokeTx {
+  bytes subject = 1;
+  string role = 2;
+  string reason = 3;
+}
+
+message ParamUpdateTx {
+  string key = 1;
+  string value = 2;
+}

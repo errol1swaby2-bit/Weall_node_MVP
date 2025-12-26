@@ -487,3 +487,165 @@ def juror_vote_on_poh_request(
         raise HTTPException(status_code=400, detail=str(exc)) from exc
 
     return {"ok": True, "request": _serialize_request(req)}
+
+
+
+# --- FLIP CONTROL: PoH ceremony orchestration + genesis params ---
+# Goal:
+# - Let the network run the "real world" Tier-3 PoH ceremony from the web UI.
+# - In genesis, allow a single-verifier mode by setting PoH params:
+#     required_jurors=1, min_approvals=1
+# - Later, flip to k-of-n by governance param change.
+
+from fastapi import Header
+from pydantic import BaseModel
+from weall_node.weall_executor import executor
+from weall_node.weall_runtime import poh_flow
+
+def _genesis_enabled() -> bool:
+    v = (os.getenv("WEALL_GENESIS_MODE") or "").strip().lower()
+    return v in ("1","true","yes","on")
+
+def _genesis_admin_user() -> str:
+    return (os.getenv("WEALL_GENESIS_ADMIN_USER") or "@genesis").strip()
+
+def _require_genesis_admin(request: Request) -> str:
+    uid = _current_user(request)
+    if not _genesis_enabled():
+        raise HTTPException(status_code=403, detail="Genesis mode disabled")
+    if uid != _genesis_admin_user():
+        raise HTTPException(status_code=403, detail="Genesis admin only")
+    return uid
+
+class PoHParamsSetRequest(BaseModel):
+    tier: int = 3
+    required_jurors: int = 1
+    min_approvals: int = 1
+    request_ttl_sec: int | None = None
+
+@router.post("/genesis/set_poh_params", response_model=dict)
+def genesis_set_poh_params(body: PoHParamsSetRequest, request: Request):
+    """
+    Genesis-only: set PoH tier params in-ledger.
+    This is the "single verifier" bootstrap lever.
+    """
+    _require_genesis_admin(request)
+    tier = int(body.tier)
+    if tier not in (2,3):
+        raise HTTPException(status_code=400, detail="tier must be 2 or 3")
+    if body.required_jurors < 1 or body.min_approvals < 1:
+        raise HTTPException(status_code=400, detail="required_jurors/min_approvals must be >= 1")
+    if body.min_approvals > body.required_jurors:
+        raise HTTPException(status_code=400, detail="min_approvals cannot exceed required_jurors")
+
+    poh_root = executor.ledger.setdefault("poh", {})
+    params = poh_root.setdefault("params", {})
+    cur = params.setdefault(tier, {})
+    cur["required_jurors"] = int(body.required_jurors)
+    cur["min_approvals"] = int(body.min_approvals)
+    if body.request_ttl_sec is not None:
+        cur["request_ttl_sec"] = int(body.request_ttl_sec)
+
+    return {"ok": True, "tier": tier, "params": cur}
+
+# -----------------------------
+# Ceremony orchestration endpoints
+# -----------------------------
+
+class AssignJurorsBody(BaseModel):
+    juror_ids: list[str]
+    overwrite_existing: bool = False
+
+@router.post("/requests/{request_id}/assign_jurors", response_model=dict)
+def assign_jurors_api(request_id: str, body: AssignJurorsBody, request: Request):
+    """
+    Assign jurors to a PoH upgrade request.
+    In early days you can assign yourself as the only juror when required_jurors=1.
+    """
+    user = _current_user(request)
+    # Keep policy simple: Tier-3 users can operate PoH flow in early network.
+    # (Later we can restrict this to emissaries/operators.)
+    rec = get_poh_record(user) or {"tier": 0}
+    if int(rec.get("tier", 0) or 0) < 3:
+        raise HTTPException(status_code=403, detail="Tier-3 required to assign jurors")
+
+    try:
+        out = poh_flow.assign_jurors(executor.ledger, request_id, body.juror_ids, overwrite_existing=bool(body.overwrite_existing))
+    except Exception as e:
+        raise HTTPException(status_code=400, detail=str(e))
+    return {"ok": True, "request": out}
+
+class ScheduleCallBody(BaseModel):
+    scheduled_for: int
+    session_id: str
+    scheduled_by: str | None = None
+
+@router.post("/requests/{request_id}/schedule_call", response_model=dict)
+def schedule_call_api(request_id: str, body: ScheduleCallBody, request: Request):
+    user = _current_user(request)
+    rec = get_poh_record(user) or {"tier": 0}
+    if int(rec.get("tier", 0) or 0) < 3:
+        raise HTTPException(status_code=403, detail="Tier-3 required")
+
+    try:
+        out = poh_flow.schedule_tier3_call(
+            executor.ledger,
+            request_id,
+            scheduled_for=int(body.scheduled_for),
+            session_id=str(body.session_id),
+            scheduled_by=body.scheduled_by or user,
+        )
+    except Exception as e:
+        raise HTTPException(status_code=400, detail=str(e))
+    return {"ok": True, "request": out}
+
+@router.post("/requests/{request_id}/call_started", response_model=dict)
+def call_started_api(request_id: str, request: Request):
+    user = _current_user(request)
+    rec = get_poh_record(user) or {"tier": 0}
+    if int(rec.get("tier", 0) or 0) < 3:
+        raise HTTPException(status_code=403, detail="Tier-3 required")
+    try:
+        out = poh_flow.mark_tier3_call_started(executor.ledger, request_id)
+    except Exception as e:
+        raise HTTPException(status_code=400, detail=str(e))
+    return {"ok": True, "request": out}
+
+class CallEndedBody(BaseModel):
+    recording_cids: list[str] | None = None
+
+@router.post("/requests/{request_id}/call_ended", response_model=dict)
+def call_ended_api(request_id: str, body: CallEndedBody, request: Request):
+    user = _current_user(request)
+    rec = get_poh_record(user) or {"tier": 0}
+    if int(rec.get("tier", 0) or 0) < 3:
+        raise HTTPException(status_code=403, detail="Tier-3 required")
+    try:
+        out = poh_flow.mark_tier3_call_ended(executor.ledger, request_id, recording_cids=(body.recording_cids or None))
+    except Exception as e:
+        raise HTTPException(status_code=400, detail=str(e))
+    return {"ok": True, "request": out}
+
+class JurorVoteBody(BaseModel):
+    vote: str  # "approve" | "reject"
+    reason: str | None = ""
+
+@router.post("/requests/{request_id}/juror_vote", response_model=dict)
+def juror_vote_api(request_id: str, body: JurorVoteBody, request: Request):
+    juror = _current_user(request)
+    rec = get_poh_record(juror) or {"tier": 0}
+    if int(rec.get("tier", 0) or 0) < 3:
+        raise HTTPException(status_code=403, detail="Tier-3 required")
+
+    try:
+        out = poh_flow.apply_juror_vote(
+            executor.ledger,
+            request_id,
+            juror_id=juror,
+            vote=str(body.vote),
+            reason=str(body.reason or ""),
+        )
+    except Exception as e:
+        raise HTTPException(status_code=400, detail=str(e))
+    return {"ok": True, "request": out}
+
