@@ -1,5 +1,3 @@
----
-
 ## Dev Snapshot Update — 2025-12-12 00:26:35 -0800
 
 **Scope of this push:** “Current working state” snapshot (still not production-ready).  
