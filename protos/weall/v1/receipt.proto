@@ -1,0 +1,19 @@
+syntax = "proto3";
+
+package weall.v1;
+
+import "weall/v1/events.proto";
+
+enum ReceiptStatus {
+  RECEIPT_UNSPECIFIED = 0;
+  RECEIPT_OK = 1;
+  RECEIPT_FAILED = 2;
+}
+
+message TxReceipt {
+  bytes tx_id = 1;
+  ReceiptStatus status = 2;
+  uint64 fee_charged = 3;
+  string error = 4;
+  repeated Event events = 5;
+}

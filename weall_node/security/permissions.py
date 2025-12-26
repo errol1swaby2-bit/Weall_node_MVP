@@ -1,236 +1,140 @@
-# weall_node/security/permissions.py
 from __future__ import annotations
 
 """
-Permission helpers for WeAll.
+weall_node/security/permissions.py
+---------------------------------
 
-This module centralizes the logic for:
+Shared permission helpers for API routes.
 
-- PoH-based access control
-    * tiers (0/1/2/3)
-    * status flags: "ok" | "downgraded" | "suspended" | "banned"
+This module intentionally avoids "confiscation" patterns.
 
-- Reputation-based access control
-    * minimum reputation thresholds for roles (validator, juror, operator, etc.)
+Implemented policy:
+- reputation score is a sliding scale [-1, 1]
+- at rep <= -1.0, the account is auto-banned from all network actions
+- HOWEVER: wallet transfer / withdrawal endpoints should NOT call the
+  auto-ban check if you want an "exit lane" so users can move funds out.
 
-By routing all checks through here, we keep the rest of the API modules
-simple and ensure consistent semantics across the node.
+This file provides:
+- rep conversion utilities (float <-> int scaled)
+- ensure_not_autobanned_by_reputation()
+- rep threshold helper ensure_min_reputation()
 """
 
-from typing import Optional
-
-from fastapi import HTTPException, status
-
-from ..weall_executor import executor
-from ..weall_runtime import poh as poh_rt
+from dataclasses import dataclass
+from typing import Any, Optional
 
 
-# ---------------------------------------------------------------------------
-# Helpers to access runtime components
-# ---------------------------------------------------------------------------
+REP_SCALE: int = 10_000
+REP_MIN_I: int = -REP_SCALE
+REP_MAX_I: int = REP_SCALE
 
 
-def _get_reputation_runtime():
-    rep = getattr(executor, "reputation", None)
-    if rep is None:
-        return None
-    return rep
-
-
-# ---------------------------------------------------------------------------
-# PoH-based checks
-# ---------------------------------------------------------------------------
-
-
-def get_poh_record(user_id: str) -> Optional[dict]:
+def rep_float_to_int(rep: float) -> int:
     """
-    Convenience helper to fetch a PoH record from the runtime.
+    Deterministic conversion:
+    - store comparisons in integer space to avoid float edge cases.
     """
-    return poh_rt.get_poh_record(user_id)
+    if rep <= -1.0:
+        return REP_MIN_I
+    if rep >= 1.0:
+        return REP_MAX_I
+    return int(round(rep * REP_SCALE))
 
 
-def ensure_not_banned(user_id: str, detail: str = "Account is banned.") -> None:
+def rep_int_to_float(rep_i: int) -> float:
+    if rep_i <= REP_MIN_I:
+        return -1.0
+    if rep_i >= REP_MAX_I:
+        return 1.0
+    return float(rep_i) / float(REP_SCALE)
+
+
+@dataclass(frozen=True)
+class PermissionContext:
     """
-    Raise HTTP 403 if the user is banned.
-
-    This is the lowest-level ban check. Most callers will use
-    ensure_poh_tier which already checks for bans/suspensions.
+    Optional context object for debugging / audit logs.
     """
-    rec = get_poh_record(user_id)
-    if not rec:
-        return
-    status_str = rec.get("status")
-    if status_str == "banned":
-        raise HTTPException(
-            status_code=status.HTTP_403_FORBIDDEN,
-            detail=detail,
-        )
+
+    action: str
+    reason: str
+    detail: Optional[str] = None
 
 
-def ensure_poh_tier(
-    user_id: str,
-    min_tier: int,
-    detail: Optional[str] = None,
+class PermissionError(Exception):
+    """
+    Raised when a permission check fails.
+    """
+
+    def __init__(self, message: str, ctx: Optional[PermissionContext] = None):
+        super().__init__(message)
+        self.ctx = ctx
+
+
+def get_reputation_value(actor: Any) -> float:
+    """
+    Reads reputation from a generic actor structure.
+
+    Supported patterns:
+    - actor.reputation (float)
+    - actor["reputation"] (float)
+    - actor.rep (float)
+    - actor["rep"] (float)
+    """
+    if actor is None:
+        return 0.0
+
+    for key in ("reputation", "rep"):
+        if hasattr(actor, key):
+            try:
+                v = float(getattr(actor, key))
+                return v
+            except Exception:
+                pass
+        if isinstance(actor, dict) and key in actor:
+            try:
+                v = float(actor[key])
+                return v
+            except Exception:
+                pass
+    return 0.0
+
+
+def ensure_not_autobanned_by_reputation(
+    actor: Any,
+    *,
+    action: str = "unknown",
 ) -> None:
     """
-    Ensure a user has at least the given PoH tier and is not banned.
+    Enforces auto-ban rule: rep <= -1.0 -> deny.
 
-    Raises HTTP 403 if:
-
-    - user has no PoH record or tier < min_tier
-    - user is banned
-    - user is suspended (for now we treat suspension as a hard block)
-
-    Parameters
-    ----------
-    user_id : str
-        Identity / handle.
-    min_tier : int
-        Required PoH tier.
-    detail : Optional[str]
-        Optional additional detail to include in error messages.
+    IMPORTANT:
+    Do not call this from wallet-transfer endpoints if you want
+    "ban = no access, but can move funds out".
     """
-    rec = get_poh_record(user_id)
-    if not rec:
-        raise HTTPException(
-            status_code=status.HTTP_403_FORBIDDEN,
-            detail=detail
-            or f"User {user_id!r} has no PoH record and does not meet tier {min_tier}.",
+    rep = get_reputation_value(actor)
+    rep_i = rep_float_to_int(rep)
+    if rep_i <= REP_MIN_I:
+        raise PermissionError(
+            "Account is banned by network (reputation <= -1.0).",
+            PermissionContext(action=action, reason="autoban_reputation", detail=f"rep={rep} rep_i={rep_i}"),
         )
-
-    tier = int(rec.get("tier", 0))
-    status_str = rec.get("status", "ok")
-    revoked = bool(rec.get("revoked", False))
-
-    if status_str == "banned":
-        raise HTTPException(
-            status_code=status.HTTP_403_FORBIDDEN,
-            detail=detail or "Account is banned from participating.",
-        )
-
-    if status_str == "suspended":
-        raise HTTPException(
-            status_code=status.HTTP_403_FORBIDDEN,
-            detail=detail or "Account is temporarily suspended.",
-        )
-
-    if revoked:
-        # Legacy safety net: if revoked is still set, treat as blocked.
-        raise HTTPException(
-            status_code=status.HTTP_403_FORBIDDEN,
-            detail=detail or "Account PoH record is revoked.",
-        )
-
-    if tier < min_tier:
-        raise HTTPException(
-            status_code=status.HTTP_403_FORBIDDEN,
-            detail=detail
-            or f"PoH tier {tier} is below the required minimum {min_tier}.",
-        )
-
-
-# ---------------------------------------------------------------------------
-# Reputation-based checks
-# ---------------------------------------------------------------------------
-
-
-def get_reputation(user_id: str) -> float:
-    """
-    Return the current reputation score for a user.
-
-    If the reputation runtime is not available, returns 0.0 as a safe
-    default, effectively disabling reputation gates (but logging should
-    highlight that situation).
-    """
-    rep_rt = _get_reputation_runtime()
-    if rep_rt is None:
-        # In environments without a reputation runtime, we treat users as
-        # neutral reputation. You may wish to log this situation elsewhere.
-        return 0.0
-    get_score = getattr(rep_rt, "get_score", None)
-    if not callable(get_score):
-        return 0.0
-    try:
-        return float(get_score(user_id))
-    except Exception:
-        return 0.0
 
 
 def ensure_min_reputation(
-    user_id: str,
+    actor: Any,
     min_rep: float,
-    action_name: str = "this action",
+    *,
+    action: str = "unknown",
 ) -> None:
     """
-    Ensure a user has at least the given reputation score.
-
-    Raises HTTP 403 if the user's reputation is below the threshold.
+    Requires rep >= min_rep.
     """
-    score = get_reputation(user_id)
-    if score < min_rep:
-        raise HTTPException(
-            status_code=status.HTTP_403_FORBIDDEN,
-            detail=(
-                f"Reputation {score:.3f} is below the required minimum "
-                f"{min_rep:.3f} for {action_name}."
-            ),
+    rep = get_reputation_value(actor)
+    rep_i = rep_float_to_int(rep)
+    min_rep_i = rep_float_to_int(min_rep)
+
+    if rep_i < min_rep_i:
+        raise PermissionError(
+            f"Reputation too low for action '{action}'. Required >= {min_rep:.2f}",
+            PermissionContext(action=action, reason="min_reputation", detail=f"rep={rep} rep_i={rep_i} min_rep={min_rep}"),
         )
-
-
-# ---------------------------------------------------------------------------
-# Composite helpers for common roles
-# ---------------------------------------------------------------------------
-
-# You can tune these thresholds over time or move them into a YAML config.
-
-
-VALIDATOR_MIN_TIER = 3
-VALIDATOR_MIN_REP = 0.0
-
-JUROR_MIN_TIER = 3
-JUROR_MIN_REP = 0.0
-
-OPERATOR_MIN_TIER = 2
-OPERATOR_MIN_REP = 0.0
-
-
-def ensure_validator_eligibility(user_id: str) -> None:
-    """
-    Ensure a user is eligible to act as a validator.
-
-    Default policy:
-    - PoH tier >= 3
-    - reputation >= VALIDATOR_MIN_REP
-    """
-    ensure_poh_tier(user_id, VALIDATOR_MIN_TIER, detail="Validator requires Tier-3 PoH.")
-    ensure_min_reputation(
-        user_id, VALIDATOR_MIN_REP, action_name="validator participation"
-    )
-
-
-def ensure_juror_eligibility(user_id: str) -> None:
-    """
-    Ensure a user is eligible to act as a juror.
-
-    Default policy:
-    - PoH tier >= 3
-    - reputation >= JUROR_MIN_REP
-    """
-    ensure_poh_tier(user_id, JUROR_MIN_TIER, detail="Juror requires Tier-3 PoH.")
-    ensure_min_reputation(user_id, JUROR_MIN_REP, action_name="juror participation")
-
-
-def ensure_operator_eligibility(user_id: str) -> None:
-    """
-    Ensure a user is eligible to act as a node/operator.
-
-    Default policy:
-    - PoH tier >= 2
-    - reputation >= OPERATOR_MIN_REP
-    """
-    ensure_poh_tier(
-        user_id,
-        OPERATOR_MIN_TIER,
-        detail="Operator requires at least Tier-2 PoH.",
-    )
-    ensure_min_reputation(user_id, OPERATOR_MIN_REP, action_name="operator participation")

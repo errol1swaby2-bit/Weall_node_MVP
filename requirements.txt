@@ -9,3 +9,4 @@ requests>=2.31.0
 python-multipart==0.0.9
 cryptography>=43.0.0
 ipfshttpclient>=0.8.0a2
+protobuf>=4.25.3

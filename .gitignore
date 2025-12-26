@@ -14,22 +14,7 @@ env/
 node_modules/
 dist/
 build/
-
-# Editor/OS
-.DS_Store
-.idea/
-.vscode/
-*.swp
-*.swo
-
-# Local state / temp
-weall_state.json
-*.sqlite3
-.venv/
-
-# Local runtime artifacts (Termux / dev)
-*.log
-weall_state.json
+...
 node_id.json
 weall_node_*.zip
 data/
@@ -44,3 +29,11 @@ key.pem
 cert.pem
 *.pem
 weall.cookies
+
+# Local databases
+*.db
+
+# Local runtime/node state
+node_id.json
+weall_state.json
+07_patch_executor_singleton_safe.sh

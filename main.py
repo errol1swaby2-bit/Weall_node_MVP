@@ -1,112 +1,105 @@
-from fastapi.middleware.cors import CORSMiddleware
+"""main.py (repo root)
+
+WeAll Node Launcher — Android/desktop helper entrypoint
+
+This file is intentionally *standalone* and should not contain FastAPI routes.
+The FastAPI app lives in: weall_node/weall_api.py
+
+Usage:
+  python main.py
+
+It will:
+- start uvicorn for weall_node.weall_api:app
+- optionally open a local WebView (if pywebview is installed)
+
+Config:
+- Reads bind & public URL from weall_config.yaml (if present) via weall_node.config_loader
+- Falls back to localhost defaults
 """
-WeAll Node Launcher — Android Entry Point
------------------------------------------
-Runs the FastAPI backend (uvicorn) in a background thread,
-then loads the local dashboard via a WebView.
 
-Reads bind & public URL from weall_config.yaml:
-  server.host, server.port, server.public_base_url
-"""
+from __future__ import annotations
 
-import threading, subprocess, time, os, sys
-import socket
+import os
+import sys
+import threading
+import time
+import webbrowser
+from pathlib import Path
+from typing import Optional
 
-# Optional: pywebview may not be available in some envs
+import uvicorn
+
 try:
-    import webview
+    import webview  # type: ignore
 except Exception:
-    webview = None
+    webview = None  # optional
 
-# --- Config hooks ---
-from weall_node.config import (
-    load_config,
-    get_bind_host,
-    get_bind_port,
-    get_public_base_url,
-)
+from weall_node.config_loader import load_config
+from weall_node.weall_api import app
 
-BASE_DIR = os.path.dirname(__file__)
-CFG = load_config(repo_root=BASE_DIR)
+DEFAULT_BIND_HOST = os.getenv("WEALL_BIND_HOST", "127.0.0.1")
+DEFAULT_BIND_PORT = int(os.getenv("WEALL_BIND_PORT", "8000"))
+DEFAULT_PUBLIC_URL = os.getenv("WEALL_PUBLIC_URL", f"http://{DEFAULT_BIND_HOST}:{DEFAULT_BIND_PORT}")
 
-BIND_HOST = get_bind_host(CFG)  # e.g., "127.0.0.1" or "0.0.0.0"
-BIND_PORT = get_bind_port(CFG)  # e.g., 8000
-PUBLIC_BASE = get_public_base_url(CFG)  # e.g., "http://127.0.0.1:8000"
-
-# If your frontend is served by FastAPI under a subpath, keep this:
-FRONTEND_PATH = "/frontendtendtend/index.html"
-# If you serve a SPA separately (Vite/NGINX), change to "/" or your SPA entry.
+# For local webview, point at the actual frontend route exposed by weall_node/weall_api.py
+FRONTEND_PATH = "/frontend/index.html"
 
 
-def start_server():
-    """Run the FastAPI backend via uvicorn."""
-    os.chdir(BASE_DIR)
-    cmd = [
-        sys.executable,
-        "-m",
-        "uvicorn",
-        "weall_node.weall_api:app",
-        "--host",
-        str(BIND_HOST),
-        "--port",
-        str(BIND_PORT),
-    ]
-    # In production, consider logging to a file instead of DEVNULL
-    subprocess.Popen(cmd, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+def _run_uvicorn(host: str, port: int) -> None:
+    uvicorn.run(app, host=host, port=port, log_level="info")
 
 
-def wait_for_server(host: str, port: int, timeout: float = 20.0) -> bool:
-    start = time.time()
-    while time.time() - start < timeout:
-        try:
-            with socket.create_connection((host, port), timeout=2.0):
-                return True
-        except OSError:
-            time.sleep(0.5)
-    return False
+def _open_browser(url: str) -> None:
+    # Delay slightly so server is up
+    time.sleep(0.6)
+    try:
+        webbrowser.open(url, new=1)
+    except Exception:
+        pass
 
 
-def main():
-    # Start backend
-    threading.Thread(target=start_server, daemon=True).start()
-    print(f"Starting WeAll Node (uvicorn {BIND_HOST}:{BIND_PORT}) ...")
-
-    # For 0.0.0.0 bind, the local loopback for readiness is 127.0.0.1
-    probe_host = "127.0.0.1" if BIND_HOST in ("0.0.0.0", "localhost") else BIND_HOST
-
-    if wait_for_server(probe_host, BIND_PORT):
-        print(f"Backend ready at {PUBLIC_BASE}")
-    else:
-        print("Warning: backend not reachable yet; continuing to open WebView")
-
-    # Launch WebView pointing to configured public base + frontend path
-    url = f"{PUBLIC_BASE.rstrip('/')}{FRONTEND_PATH}"
-    print(f"Opening UI at {url}")
-
-    if webview:
-        webview.create_window("WeAll Node", url)
+def _open_webview(url: str) -> None:
+    if webview is None:
+        _open_browser(url)
+        return
+    time.sleep(0.6)
+    try:
+        webview.create_window("WeAll", url, width=1200, height=800)
         webview.start()
-    else:
-        # Fallback: open in default browser if pywebview is unavailable
-        try:
-            import webbrowser
+    except Exception:
+        _open_browser(url)
 
-            webbrowser.open(url)
-        except Exception:
-            pass
+
+def main() -> int:
+    # Optional config yaml in repo root
+    cfg_path = Path("weall_config.yaml")
+    cfg = load_config(str(cfg_path)) if cfg_path.exists() else {}
+
+    host = str(cfg.get("bind_host") or DEFAULT_BIND_HOST)
+    port = int(cfg.get("bind_port") or DEFAULT_BIND_PORT)
+
+    public_url = str(cfg.get("public_url") or DEFAULT_PUBLIC_URL).rstrip("/")
+    ui_url = public_url + FRONTEND_PATH
+
+    # Start API server
+    t = threading.Thread(target=_run_uvicorn, args=(host, port), daemon=True)
+    t.start()
+
+    # Open UI
+    use_webview = str(os.getenv("WEALL_USE_WEBVIEW", "0")).lower() in ("1", "true", "yes")
+    if use_webview:
+        _open_webview(ui_url)
+    else:
+        _open_browser(ui_url)
+
+    # Keep alive while uvicorn thread runs
+    try:
+        while t.is_alive():
+            time.sleep(0.5)
+    except KeyboardInterrupt:
+        return 0
+    return 0
 
 
 if __name__ == "__main__":
-    main()
-
-
-from fastapi.responses import FileResponse, Response
-from starlette.requests import Request
-import os
-
-@app.get("/{full_path:path}", include_in_schema=False)
-async def spa_catch_all(full_path: str, request: Request):
-    index_path = os.path.join("dist", "index.html")
-    if os.path.exists(index_path):
-        return FileResponse(index_path, media_type="text/html")
-    return Response(status_code=404)
+    raise SystemExit(main())

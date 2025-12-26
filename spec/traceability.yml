@@ -1,0 +1,37 @@
+version: "2.1"
+spec_document: "WeAll Protocol – Full Scope Specification (v2.1 – Active Build)"
+
+clauses:
+  "2.1":
+    title: "Human Roles (PoH-Gated) Tiers"
+    code:
+      - "weall_node/weall_runtime/roles.py:_TIER0_BASE"
+      - "weall_node/weall_runtime/roles.py:_TIER1_BASE"
+      - "weall_node/weall_runtime/roles.py:_TIER2_BASE"
+      - "weall_node/weall_runtime/roles.py:_TIER3_BASE"
+
+  "7":
+    title: "Governance (MVP)"
+    code:
+      - "weall_node/api/governance.py:create_proposal"
+      - "weall_node/api/governance.py:vote_proposal"
+      - "weall_node/api/governance.py:close_proposal"
+
+  "10":
+    title: "Reputation"
+    code:
+      - "weall_node/weall_runtime/reputation.py"
+      - "weall_node/security/permissions.py"
+
+  "5":
+    title: "WeCoin Economics"
+    code:
+      - "weall_node/weall_runtime/ledger.py"
+
+  "6":
+    title: "Consensus & Finality"
+    status: "pending"
+    code:
+      - "weall_node/api/consensus.py"
+    notes:
+      - "Facade exists; finality loop / slashing / quorum confirmation not yet implemented."

@@ -183,7 +183,7 @@ def broadcast_block(envelope: BlockEnvelope) -> Dict[str, Any]:
     committed the block to its own chain via the executor. We gate
     incoming blocks in `_handle_pubsub_message`, not here.
     """
-    if not sync_mgr.client and not sync_mgr.connect():
+    if not sync_mgr.connect():
         raise HTTPException(status_code=503, detail="Sync manager not connected")
 
     payload = {
@@ -205,7 +205,7 @@ def broadcast_epoch(envelope: Optional[EpochEnvelope] = None) -> Dict[str, Any]:
 
     This is mostly informational and can be ignored by peers.
     """
-    if not sync_mgr.client and not sync_mgr.connect():
+    if not sync_mgr.connect():
         raise HTTPException(status_code=503, detail="Sync manager not connected")
 
     epoch = (

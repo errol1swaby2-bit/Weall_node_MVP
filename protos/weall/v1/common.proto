@@ -1,0 +1,12 @@
+syntax = "proto3";
+
+package weall.v1;
+
+message TimestampMs {
+  int64 unix_ms = 1;
+}
+
+message Ref {
+  string kind = 1;
+  string value = 2;
+}

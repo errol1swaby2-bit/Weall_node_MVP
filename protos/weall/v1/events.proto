@@ -1,0 +1,42 @@
+syntax = "proto3";
+
+package weall.v1;
+
+message KV {
+  string k = 1;
+  string v = 2;
+}
+
+message Event {
+  EventType type = 1;
+  repeated KV attributes = 2;
+}
+
+enum EventType {
+  EVENT_UNSPECIFIED = 0;
+
+  CONTENT_POSTED = 10;
+  CONTENT_LIKED = 11;
+  CONTENT_COMMENTED = 12;
+  CONTENT_REPORTED = 13;
+
+  GROUP_CREATED = 20;
+  GROUP_JOINED = 21;
+  GROUP_LEFT = 22;
+
+  TREASURY_TRANSFERRED = 30;
+
+  PROPOSAL_CREATED = 40;
+  PROPOSAL_VOTED = 41;
+  PROPOSAL_FINALIZED = 42;
+
+  DISPUTE_OPENED = 50;
+  DISPUTE_EVIDENCE_SUBMITTED = 51;
+  DISPUTE_JUROR_VOTED = 52;
+  DISPUTE_FINALIZED = 53;
+
+  POH_SUBMITTED = 60;
+  POH_TIER_UPDATED = 61;
+  ROLE_GRANTED = 62;
+  ROLE_REVOKED = 63;
+}
